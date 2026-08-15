@@ -34,6 +34,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly OdysseusConfig _config;
     private readonly PluginPresence _presence;
     private readonly IQuestStateReader _quests;
+    private readonly QuestCatalog _catalog;
+    private readonly QuestionableOracle _oracle;
     private readonly OdysseusIpc _ipc;
     private readonly ConfigWindow _configWindow;
     private readonly RunWindow _runWindow;
@@ -50,14 +52,17 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         _config = PluginInterface.GetPluginConfig() as OdysseusConfig ?? new OdysseusConfig();
         _presence = new PluginPresence(PluginInterface);
-        _quests = new NullQuestStateReader();
+        _quests = new QuestStateReader(fault => Log.Warning($"Quest state read failed. {fault}"));
+        _catalog = new QuestCatalog(DataManager, message => Log.Warning(message));
+        // Differential test oracle only — see QuestionableOracle. Never on the run path.
+        _oracle = new QuestionableOracle(PluginInterface);
 
         // Published now so Daedalus can find the gate; it reads false until a run exists.
         _ipc = new OdysseusIpc(PluginInterface, () => _config.Enabled && _state.IsDriving());
 
         _configWindow = new ConfigWindow(_config, SaveConfig, _presence);
-        _runWindow = new RunWindow(_config, _presence, _quests, () => _state, OpenConfig);
-        _debugWindow = new DebugWindow(_quests);
+        _runWindow = new RunWindow(_config, _presence, _quests, _catalog, () => _state, OpenConfig);
+        _debugWindow = new DebugWindow(_quests, _catalog, _oracle);
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_runWindow);

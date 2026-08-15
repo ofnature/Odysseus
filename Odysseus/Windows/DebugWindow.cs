@@ -1,51 +1,111 @@
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
+using Odysseus.Services.Ipc;
 using Odysseus.Services.Quest;
 
 namespace Odysseus.Windows;
 
 /// <summary>
-/// Raw dump of what the quest reader sees. This is where P0 gets field-verified: the numbers here
-/// are compared against Questionable's own <c>GetCurrentQuestId</c> / <c>GetCurrentStepData</c>
-/// while both plugins are loaded, and any disagreement is a bug in our reader.
+/// Raw dump of what the quest reader sees, next to what Questionable sees.
+///
+/// <para>
+/// This is where P0 gets field-verified. Both plugins read the same <c>QuestManager</c> memory
+/// through different code; with a quest accepted, every row must agree on accepted / complete,
+/// and Questionable's current quest must be one of ours. A disagreement is a bug in our reader,
+/// found here in seconds instead of mid-run.
+/// </para>
 /// </summary>
 public sealed class DebugWindow : Window
 {
     private readonly IQuestStateReader _quests;
+    private readonly QuestCatalog _catalog;
+    private readonly QuestionableOracle _oracle;
 
-    public DebugWindow(IQuestStateReader quests)
+    public DebugWindow(IQuestStateReader quests, QuestCatalog catalog, QuestionableOracle oracle)
         : base("Odysseus Debug##OdysseusDebug")
     {
         _quests = quests;
-        Size = new Vector2(480, 360);
+        _catalog = catalog;
+        _oracle = oracle;
+        Size = new Vector2(640, 400);
         SizeCondition = ImGuiCond.FirstUseEver;
     }
 
     public override void Draw()
     {
-        OdysseusTheme.SectionHeader("QUEST STATE (LIVE)");
+        DrawOracleLine();
+        OdysseusTheme.SectionHeader("QUEST STATE (LIVE, FROM QUESTMANAGER)");
+        DrawQuestTable();
+    }
+
+    private void DrawOracleLine()
+    {
+        var available = _oracle.Available;
+        OdysseusTheme.DependencyChip("Questionable oracle", available, required: false);
+        if (!available)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.TextDisabled, "— not loaded; differential check off");
+            return;
+        }
+
+        var current = _oracle.CurrentQuestId();
+        ImGui.SameLine(0f, 16f);
+        ImGui.TextColored(OdysseusTheme.TextSecondary,
+            current is { } id ? $"current: {id} ({_catalog.NameOf(id)})" : "current: none");
+        ImGui.SameLine(0f, 16f);
+        ImGui.TextColored(OdysseusTheme.TextSecondary, $"running: {(_oracle.IsRunning() == true ? "yes" : "no")}");
+    }
+
+    private void DrawQuestTable()
+    {
         var accepted = _quests.ReadAccepted();
+        ImGui.TextColored(OdysseusTheme.TextSecondary, $"{accepted.Count} accepted · catalog {_catalog.Count} quests");
         if (accepted.Count == 0)
         {
             ImGui.TextColored(OdysseusTheme.TextDisabled, "Reader returned nothing.");
             return;
         }
 
-        if (ImGui.BeginTable("##quests", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+        var oracleUp = _oracle.Available;
+        var columns = oracleUp ? 7 : 5;
+        if (!ImGui.BeginTable("##quests", columns, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))
+            return;
+
+        ImGui.TableSetupColumn("Id");
+        ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("Seq");
+        ImGui.TableSetupColumn("Vars");
+        ImGui.TableSetupColumn("MSQ");
+        if (oracleUp)
         {
-            ImGui.TableSetupColumn("Quest", ImGuiTableColumnFlags.WidthFixed, 70f);
-            ImGui.TableSetupColumn("Seq", ImGuiTableColumnFlags.WidthFixed, 40f);
-            ImGui.TableSetupColumn("Variables");
-            ImGui.TableHeadersRow();
-            foreach (var q in accepted)
-            {
-                ImGui.TableNextRow();
-                ImGui.TableNextColumn(); ImGui.Text(q.QuestId.ToString());
-                ImGui.TableNextColumn(); ImGui.Text(q.Sequence.ToString());
-                ImGui.TableNextColumn(); ImGui.Text(string.Join(' ', q.Variables.ToArray()));
-            }
-            ImGui.EndTable();
+            ImGui.TableSetupColumn("Q.acc");
+            ImGui.TableSetupColumn("Q.cur");
         }
+        ImGui.TableHeadersRow();
+
+        var oracleCurrent = oracleUp ? _oracle.CurrentQuestId() : null;
+        foreach (var q in accepted)
+        {
+            var listing = _catalog.ById(q.QuestId);
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn(); ImGui.Text(q.QuestId.ToString());
+            ImGui.TableNextColumn(); ImGui.Text(listing?.Name ?? "?");
+            ImGui.TableNextColumn(); ImGui.Text(q.Sequence.ToString());
+            ImGui.TableNextColumn(); ImGui.Text(string.Join(' ', q.Variables.ToArray()));
+            ImGui.TableNextColumn(); ImGui.Text(listing?.IsMainScenario == true ? "●" : "");
+            if (oracleUp)
+            {
+                // Agreement is the whole point: green when Questionable sees the same thing.
+                var acc = _oracle.IsQuestAccepted(q.QuestId);
+                ImGui.TableNextColumn();
+                ImGui.TextColored(acc == true ? OdysseusTheme.StatusGreen : OdysseusTheme.StatusRed,
+                    acc is null ? "?" : acc == true ? "✓" : "✗");
+                ImGui.TableNextColumn();
+                ImGui.TextColored(OdysseusTheme.WakeFoam, oracleCurrent == q.QuestId ? "●" : "");
+            }
+        }
+        ImGui.EndTable();
     }
 }

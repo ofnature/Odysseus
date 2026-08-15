@@ -19,6 +19,7 @@ public sealed class RunWindow : Window
     private readonly OdysseusConfig _config;
     private readonly PluginPresence _presence;
     private readonly IQuestStateReader _quests;
+    private readonly QuestCatalog _catalog;
     private readonly Func<RunState> _state;
     private readonly Action _openConfig;
 
@@ -26,6 +27,7 @@ public sealed class RunWindow : Window
         OdysseusConfig config,
         PluginPresence presence,
         IQuestStateReader quests,
+        QuestCatalog catalog,
         Func<RunState> state,
         Action openConfig)
         : base("Odysseus##OdysseusRun")
@@ -33,6 +35,7 @@ public sealed class RunWindow : Window
         _config = config;
         _presence = presence;
         _quests = quests;
+        _catalog = catalog;
         _state = state;
         _openConfig = openConfig;
 
@@ -86,22 +89,36 @@ public sealed class RunWindow : Window
         var accepted = _quests.ReadAccepted();
         if (accepted.Count == 0)
         {
-            ImGui.TextColored(OdysseusTheme.TextDisabled, "No quest state readable.");
-            ImGui.TextWrapped("The quest reader is not wired up yet (P0). Once it is, the accepted quests, " +
-                              "their sequence and their progress variables show here, live from the game.");
+            ImGui.TextColored(OdysseusTheme.TextDisabled, "No accepted quests.");
             return;
         }
 
+        // MSQ first, then everything else, so the line Odysseus cares about is always at the top.
         foreach (var q in accepted)
         {
-            // Foam is the Wake's colour: this is the game's own record of where you are.
-            ImGui.TextColored(OdysseusTheme.WakeFoam, "○");
-            ImGui.SameLine(0f, 6f);
-            ImGui.TextColored(OdysseusTheme.TextPrimary, $"Quest {q.QuestId}");
-            ImGui.SameLine();
-            ImGui.TextColored(OdysseusTheme.TextSecondary,
-                q.IsReadyToComplete ? "ready to hand in" : $"sequence {q.Sequence}");
+            var listing = _catalog.ById(q.QuestId);
+            if (listing?.IsMainScenario != true)
+                continue;
+            DrawQuestRow(q, listing.Name, msq: true);
         }
+        foreach (var q in accepted)
+        {
+            var listing = _catalog.ById(q.QuestId);
+            if (listing?.IsMainScenario == true)
+                continue;
+            DrawQuestRow(q, listing?.Name ?? $"Quest {q.QuestId}", msq: false);
+        }
+    }
+
+    private static void DrawQuestRow(QuestSnapshot q, string name, bool msq)
+    {
+        // Foam is the Wake's colour: this is the game's own record of where you are.
+        ImGui.TextColored(msq ? OdysseusTheme.WakeFoam : OdysseusTheme.TextDisabled, "○");
+        ImGui.SameLine(0f, 6f);
+        ImGui.TextColored(msq ? OdysseusTheme.TextPrimary : OdysseusTheme.TextSecondary, name);
+        ImGui.SameLine();
+        ImGui.TextColored(OdysseusTheme.TextSecondary,
+            q.IsReadyToComplete ? "· ready to hand in" : $"· sequence {q.Sequence}");
     }
 
     private void DrawControls()
