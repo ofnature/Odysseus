@@ -45,6 +45,9 @@ public sealed class PluginPresence
     /// <summary>Full duties (dungeons, trials) inside a quest.</summary>
     public const string TheseusInternalName = "Theseus";
 
+    /// <summary>Test oracle only (see <see cref="QuestionableOracle"/>). Never required.</summary>
+    public const string QuestionableInternalName = "Questionable";
+
     private readonly IDalamudPluginInterface _pluginInterface;
 
     public PluginPresence(IDalamudPluginInterface pluginInterface)
@@ -61,6 +64,8 @@ public sealed class PluginPresence
     public bool BossMod => IsLoaded(BossModRebornInternalName) || IsLoaded(BossModInternalName);
 
     public bool Theseus => IsLoaded(TheseusInternalName);
+
+    public bool Questionable => IsLoaded(QuestionableInternalName);
 
     /// <summary>Everything required to walk a quest is present.</summary>
     public bool CoreReady => Vnavmesh && Lifestream && TextAdvance;

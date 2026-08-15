@@ -21,13 +21,15 @@ public sealed class DebugWindow : Window
     private readonly IQuestStateReader _quests;
     private readonly QuestCatalog _catalog;
     private readonly QuestionableOracle _oracle;
+    private readonly PluginPresence _presence;
 
-    public DebugWindow(IQuestStateReader quests, QuestCatalog catalog, QuestionableOracle oracle)
+    public DebugWindow(IQuestStateReader quests, QuestCatalog catalog, QuestionableOracle oracle, PluginPresence presence)
         : base("Odysseus Debug##OdysseusDebug")
     {
         _quests = quests;
         _catalog = catalog;
         _oracle = oracle;
+        _presence = presence;
         Size = new Vector2(640, 400);
         SizeCondition = ImGuiCond.FirstUseEver;
     }
@@ -46,7 +48,11 @@ public sealed class DebugWindow : Window
         if (!available)
         {
             ImGui.SameLine();
-            ImGui.TextColored(OdysseusTheme.TextDisabled, "— not loaded; differential check off");
+            // Two different situations, two different fixes: load the plugin, or fix our gate types.
+            ImGui.TextColored(_presence.Questionable ? OdysseusTheme.StatusYellow : OdysseusTheme.TextDisabled,
+                _presence.Questionable
+                    ? "— plugin loaded but IPC not answering (gate signature mismatch on our side)"
+                    : "— plugin not loaded in this client; differential check off");
             return;
         }
 

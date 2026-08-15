@@ -78,7 +78,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _configWindow = new ConfigWindow(_config, SaveConfig, _presence, _pathStore,
             QuestionableImporter.DefaultBundlePath(PluginInterface.ConfigDirectory.Parent?.FullName ?? string.Empty));
         _runWindow = new RunWindow(_config, _presence, _quests, _catalog, _pathStore, _controller, OpenConfig);
-        _debugWindow = new DebugWindow(_quests, _catalog, _oracle);
+        _debugWindow = new DebugWindow(_quests, _catalog, _oracle, _presence);
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_runWindow);
