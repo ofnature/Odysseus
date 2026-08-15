@@ -80,6 +80,21 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
         Calls.Add("Attack");
         return AttackResults.Count > 0 && AttackResults.Dequeue();
     }
+    // ── Instances and handoffs ──
+    public bool InDuty { get; set; }
+    public bool BossModAi { get; private set; }
+    public bool TheseusCanEnterDuty { get; set; }
+    public bool TheseusEnterAccepted { get; set; } = true;
+    public bool TheseusBusy { get; set; }
+    public void SetBossModAi(bool enabled) { BossModAi = enabled; Calls.Add($"BmrAi {enabled}"); }
+    public bool TheseusEnterDuty(uint cfc) { Calls.Add($"TheseusEnter {cfc}"); if (TheseusEnterAccepted) TheseusBusy = true; return TheseusEnterAccepted; }
+
+    // ── Actions ──
+    public bool TryTargetDataId(uint dataId) { Calls.Add($"Target {dataId}"); return Spawned.Contains(dataId); }
+    public void SendChatCommand(string command) => Calls.Add($"Chat {command}");
+    public bool UseItemAccepted { get; set; } = true;
+    public bool UseItem(uint itemId) { Calls.Add($"UseItem {itemId}"); return UseItemAccepted; }
+
     public bool IsAddonVisible(string name) => VisibleAddons.Contains(name);
     public void SelectYesNo(bool yes) => Calls.Add($"YesNo {yes}");
     public void SelectStringIndex(int index) => Calls.Add($"Select {index}");

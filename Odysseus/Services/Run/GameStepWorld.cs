@@ -38,6 +38,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
     private readonly TextAdvanceIpc _textAdvance;
     private readonly LifestreamIpc _lifestream;
     private readonly Travel.AetheryteCatalog _aetherytes;
+    private readonly TheseusIpc _theseus;
+    private readonly ChatCommandSender _chat;
     private readonly IQuestStateReader _quests;
     private readonly Action<string> _log;
 
@@ -45,10 +47,12 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
         IClientState clientState, IObjectTable objectTable, ICondition condition, IGameGui gameGui,
         ITargetManager targets, IDataManager data, VnavIpc vnav, DaedalusIpc daedalus,
         TextAdvanceIpc textAdvance, LifestreamIpc lifestream, Travel.AetheryteCatalog aetherytes,
-        IQuestStateReader quests, Action<string> log)
+        TheseusIpc theseus, ChatCommandSender chat, IQuestStateReader quests, Action<string> log)
     {
         _lifestream = lifestream;
         _aetherytes = aetherytes;
+        _theseus = theseus;
+        _chat = chat;
         _clientState = clientState;
         _objectTable = objectTable;
         _condition = condition;
@@ -203,6 +207,52 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
 
         SetTarget(target);
         return Interact(target); // interacting with a hostile is "engage"; Daedalus takes it from there
+    }
+
+    // ── Instances and handoffs ──
+
+    public bool InDuty => _condition[ConditionFlag.BoundByDuty] || _condition[ConditionFlag.BoundByDuty56] || _condition[ConditionFlag.BoundByDuty95];
+
+    /// <summary>
+    /// BossMod has no IPC for this — the AI's follow/idle switch is reachable only from the
+    /// <c>/bmrai</c> chat command (Theseus finding #3). One call site, so a rename is one fix.
+    /// </summary>
+    public void SetBossModAi(bool enabled) => _chat.Send($"/bmrai {(enabled ? "on" : "off")}");
+
+    public bool TheseusCanEnterDuty => _theseus.CanEnterDuty;
+
+    public bool TheseusEnterDuty(uint contentFinderConditionId) => _theseus.EnterDuty(contentFinderConditionId);
+
+    public bool TheseusBusy => _theseus.IsBusy;
+
+    // ── Actions ──
+
+    public bool TryTargetDataId(uint dataId)
+    {
+        var target = NearestWithDataId(dataId);
+        if (target is null)
+            return false;
+        SetTarget(target);
+        return true;
+    }
+
+    public void SendChatCommand(string command) => _chat.Send(command);
+
+    public bool UseItem(uint itemId)
+    {
+        try
+        {
+            var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentInventoryContext.Instance();
+            if (agent == null)
+                return false;
+            agent->UseItem(itemId, InventoryType.Invalid, 0, 0);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log($"UseItem {itemId} failed: {ex.Message}");
+            return false;
+        }
     }
 
     // ── UI ──

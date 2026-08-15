@@ -8,8 +8,12 @@ namespace Odysseus.Config;
 /// their phases land (see the plan doc's Phases).
 /// </summary>
 [Serializable]
-public sealed class OdysseusConfig : IPluginConfiguration
+public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPolicy
 {
+    // IRunPolicy — the controller reads these live.
+    bool Services.Run.IRunPolicy.HandOffSoloDuties => HandOffSoloDuties;
+    bool Services.Run.IRunPolicy.HandOffDuties => HandOffDutiesToTheseus;
+
     /// <summary>Bumped when a migration is needed; migrations live in <c>OdysseusPlugin</c>.</summary>
     public int Version { get; set; } = 1;
 

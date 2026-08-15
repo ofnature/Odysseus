@@ -28,7 +28,22 @@ public enum StepStatus
 /// </summary>
 public sealed class StepExecutor
 {
-    private enum Phase { None, Delay, Teleport, TeleportWait, Aethernet, AethernetWait, Mount, Move, WaitReady, Interact, Dialogue, CombatWait, Combat, Finish }
+    private enum Phase
+    {
+        None, Delay, Teleport, TeleportWait, Aethernet, AethernetWait, Mount, Move, WaitReady, Interact, Dialogue,
+        CombatWait, Combat,
+        /// <summary>Solo instance: interacted, waiting to be inside.</summary>
+        SoloDutyEnter,
+        /// <summary>Solo instance: inside, BossMod AI has it, waiting to be out.</summary>
+        SoloDutyRun,
+        /// <summary>Full duty: asked Theseus, waiting for it to take over.</summary>
+        DutyEnter,
+        /// <summary>Full duty: Theseus is running it, waiting for it to finish and for us to be outside.</summary>
+        DutyRun,
+        /// <summary>Emote / jump / item: fired, brief settle.</summary>
+        ActionSettle,
+        Finish,
+    }
 
     /// <summary>
     /// Same zone, but this far from the target: the aetheryte is almost certainly closer than the
@@ -61,6 +76,10 @@ public sealed class StepExecutor
     private static readonly TimeSpan CombatMax = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan TravelStart = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan TravelMax = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan DutyEnterMax = TimeSpan.FromSeconds(120);
+    private static readonly TimeSpan SoloDutyMax = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan DutyMax = TimeSpan.FromMinutes(90);
+    private static readonly TimeSpan ActionSettle = TimeSpan.FromSeconds(2);
     private const int MaxMoveRetries = 3;
 
     private readonly IStepWorld _world;
@@ -75,6 +94,8 @@ public sealed class StepExecutor
     private bool _sawCombat;
     private DateTime _lastCombatSeen;
     private bool _skipTeleport;
+    /// <summary>The instance this step hands off has been run; arriving again means finish, not re-enter.</summary>
+    private bool _handoffDone;
     private uint _teleportTarget;
     private uint _teleportTerritory;
     private bool _sawTravelBusy;
@@ -96,6 +117,7 @@ public sealed class StepExecutor
         _sawCombat = false;
         _skipTeleport = skipTeleport;
         _sawTravelBusy = false;
+        _handoffDone = false;
         FailReason = string.Empty;
         Status = StepStatus.Running;
 
@@ -121,7 +143,11 @@ public sealed class StepExecutor
     /// <summary>Kinds the executor can carry out today. Anything else fails at Begin with a clear reason.</summary>
     public static bool IsSupported(StepKind kind) => kind is
         StepKind.WalkTo or StepKind.Interact or StepKind.AcceptQuest or StepKind.CompleteQuest or StepKind.Combat
-        or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent or StepKind.None;
+        or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent or StepKind.None
+        or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem;
+
+    /// <summary>The step hands the character to another plugin for a whole instance.</summary>
+    public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
 
     public StepStatus Tick()
     {
@@ -131,7 +157,8 @@ public sealed class StepExecutor
         var now = _world.UtcNow;
         var step = _step;
 
-        if (_world.IsDead)
+        // Inside a handoff the other plugin owns deaths and retries; outside one, dead means stop.
+        if (_world.IsDead && _phase is not (Phase.SoloDutyRun or Phase.DutyRun))
             return Fail("player is dead");
 
         switch (_phase)
@@ -206,6 +233,61 @@ public sealed class StepExecutor
             case Phase.CombatWait:
             case Phase.Combat:
                 TickCombat(step, now);
+                break;
+
+            case Phase.SoloDutyEnter:
+                // The interact + "commence" prompt has been answered; the instance loads.
+                if (_world.InDuty)
+                {
+                    _world.SetBossModAi(true);
+                    Enter(Phase.SoloDutyRun);
+                }
+                else if (now - _phaseStart > DutyEnterMax)
+                    Fail("solo duty did not start after the interaction");
+                break;
+
+            case Phase.SoloDutyRun:
+                if (!_world.InDuty && !_world.IsTravelBusy)
+                {
+                    _world.SetBossModAi(false);
+                    _handoffDone = true;
+                    Enter(Phase.WaitReady); // back outside; the wrap-up cutscene may still be playing
+                }
+                else if (now - _phaseStart > SoloDutyMax)
+                {
+                    _world.SetBossModAi(false);
+                    Fail($"solo duty did not finish in {SoloDutyMax.TotalMinutes:F0} min");
+                }
+                break;
+
+            case Phase.DutyEnter:
+                if (_world.TheseusBusy || _world.InDuty)
+                    Enter(Phase.DutyRun);
+                else if (now - _phaseStart > DutyEnterMax)
+                    Fail("Theseus accepted the duty but never started it");
+                break;
+
+            case Phase.DutyRun:
+                if (!_world.TheseusBusy && !_world.InDuty && !_world.IsTravelBusy)
+                {
+                    _handoffDone = true;
+                    Enter(Phase.WaitReady);
+                }
+                else if (now - _phaseStart > DutyMax)
+                    Fail($"duty did not finish in {DutyMax.TotalMinutes:F0} min");
+                break;
+
+            case Phase.ActionSettle:
+                if (step.Kind == StepKind.UseItem && _world.IsOccupied)
+                {
+                    // An item that opens a dialogue behaves like an interact from here.
+                    _sawOccupied = true;
+                    Enter(Phase.Dialogue);
+                }
+                else if (now - _phaseStart > ActionSettle)
+                    Enter(step.Kind == StepKind.UseItem && step.EnemySpawnType == EnemySpawnType.AfterItemUse
+                        ? Phase.CombatWait
+                        : Phase.Finish);
                 break;
 
             case Phase.Finish:
@@ -304,14 +386,84 @@ public sealed class StepExecutor
             Fail($"{what} did not finish in {TravelMax.TotalSeconds:F0}s");
     }
 
-    private static Phase NextAfterArrival(QuestStep step) => step.Kind switch
+    private Phase NextAfterArrival(QuestStep step)
     {
-        StepKind.WalkTo or StepKind.None => Phase.Finish,
-        StepKind.Combat => step.EnemySpawnType == EnemySpawnType.AfterInteraction && step.DataId is not null
-            ? Phase.Interact
-            : Phase.CombatWait,
-        _ => Phase.Interact,
-    };
+        switch (step.Kind)
+        {
+            case StepKind.WalkTo or StepKind.None:
+                return Phase.Finish;
+
+            case StepKind.Combat:
+                return step.EnemySpawnType == EnemySpawnType.AfterInteraction && step.DataId is not null
+                    ? Phase.Interact
+                    : Phase.CombatWait;
+
+            case StepKind.SinglePlayerDuty:
+                if (_handoffDone)
+                    return Phase.Finish;
+                // Talk to the NPC; TextAdvance answers "commence"; the instance loads.
+                if (_world.InDuty)
+                {
+                    _world.SetBossModAi(true);
+                    return Phase.SoloDutyRun; // already inside (resumed mid-instance)
+                }
+                return step.DataId is not null ? Phase.Interact : Phase.SoloDutyEnter;
+
+            case StepKind.Duty:
+                if (_handoffDone)
+                    return Phase.Finish;
+                if (_world.InDuty || _world.TheseusBusy)
+                    return Phase.DutyRun; // resumed while Theseus is mid-run
+                if (step.ContentFinderConditionId is not { } cfc)
+                {
+                    Fail("duty step names no ContentFinderCondition");
+                    return Phase.None;
+                }
+                if (!_world.TheseusCanEnterDuty)
+                {
+                    Fail("Theseus is not loaded, is disabled, or is busy — run the duty yourself, then Retry");
+                    return Phase.None;
+                }
+                if (!_world.TheseusEnterDuty(cfc))
+                {
+                    Fail($"Theseus refused duty {cfc} — it may have no route for it. Run it yourself, then Retry");
+                    return Phase.None;
+                }
+                return Phase.DutyEnter;
+
+            case StepKind.Emote:
+                if (step.DataId is { } emoteTarget)
+                    _world.TryTargetDataId(emoteTarget);
+                _world.SendChatCommand($"/{step.Emote}");
+                return Phase.ActionSettle;
+
+            case StepKind.Jump:
+                _world.SendChatCommand("/generalaction Jump");
+                return Phase.ActionSettle;
+
+            case StepKind.UseItem:
+                if (step.ItemId is not { } itemId)
+                {
+                    Fail("UseItem step names no item");
+                    return Phase.None;
+                }
+                if (step.DataId is { } itemTarget && !_world.TryTargetDataId(itemTarget))
+                {
+                    Fail($"item target {itemTarget} is not here");
+                    return Phase.None;
+                }
+                _world.HoldDialogue();
+                if (!_world.UseItem(itemId))
+                {
+                    Fail($"could not use item {itemId}");
+                    return Phase.None;
+                }
+                return Phase.ActionSettle;
+
+            default:
+                return Phase.Interact;
+        }
+    }
 
     private void TickMove(QuestStep step, DateTime now)
     {
@@ -434,10 +586,19 @@ public sealed class StepExecutor
         if (!settled)
             return;
 
-        if (step.Kind == StepKind.Combat)
+        switch (step.Kind)
         {
-            Enter(Phase.CombatWait);
-            return;
+            case StepKind.Combat:
+                Enter(Phase.CombatWait);
+                return;
+            case StepKind.SinglePlayerDuty:
+                // The dialogue that "ends" here is the commence prompt; the instance is loading.
+                Enter(_world.InDuty ? Phase.SoloDutyRun : Phase.SoloDutyEnter);
+                if (_world.InDuty) _world.SetBossModAi(true);
+                return;
+            case StepKind.UseItem when step.EnemySpawnType == EnemySpawnType.AfterItemUse:
+                Enter(Phase.CombatWait);
+                return;
         }
         Enter(Phase.Finish);
     }

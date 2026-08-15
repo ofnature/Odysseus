@@ -23,6 +23,13 @@ namespace Odysseus.Services.Run;
 /// Both waits are bounded and end in <see cref="RunState.Faulted"/> with a reason.
 /// </para>
 /// </summary>
+/// <summary>What the user allows the run to hand off. Read live so a settings change applies mid-run.</summary>
+public interface IRunPolicy
+{
+    bool HandOffSoloDuties { get; }
+    bool HandOffDuties { get; }
+}
+
 public sealed class QuestController
 {
     private static readonly TimeSpan AdvanceGrace = TimeSpan.FromSeconds(20);
@@ -34,6 +41,7 @@ public sealed class QuestController
     private readonly StepExecutor _executor;
     private readonly IStepWorld _world;
     private readonly IConditionWorld _conditions;
+    private readonly IRunPolicy _policy;
     private readonly Action<string> _log;
 
     private ushort _questId;
@@ -49,13 +57,14 @@ public sealed class QuestController
 
     public QuestController(
         IQuestStateReader quests, PathStore paths, StepExecutor executor,
-        IStepWorld world, IConditionWorld conditions, Action<string> log)
+        IStepWorld world, IConditionWorld conditions, IRunPolicy policy, Action<string> log)
     {
         _quests = quests;
         _paths = paths;
         _executor = executor;
         _world = world;
         _conditions = conditions;
+        _policy = policy;
         _log = log;
     }
 
@@ -191,14 +200,26 @@ public sealed class QuestController
                 _stepIndex++;
                 return;
             }
+            if (step.Kind == StepKind.SinglePlayerDuty && !_policy.HandOffSoloDuties)
+            {
+                Fault("solo duty ahead and the BossMod handoff is off — run it yourself, then Retry");
+                return;
+            }
+            if (step.Kind == StepKind.Duty && !_policy.HandOffDuties)
+            {
+                Fault("dungeon or trial ahead and the Theseus handoff is off — run it yourself, then Retry");
+                return;
+            }
             var skipTeleport = StepConditions.ShouldSkipAetheryte(step, _conditions, snap);
             _executor.Begin(step, skipTeleport);
             _log($"Step {_stepIndex + 1}/{_block.Steps.Count} in seq {sequence}: {step}" +
                  (step.AetheryteShortcut is { } a ? $" via {a}{(skipTeleport ? " (skipped)" : "")}" : ""));
         }
 
-        State = _world.InCombat ? RunState.Combat
-            : _executor.PhaseName.StartsWith("Teleport") || _executor.PhaseName.StartsWith("Aethernet") ? RunState.Travel
+        var phase = _executor.PhaseName;
+        State = phase.Contains("Duty") ? RunState.Handoff
+            : _world.InCombat ? RunState.Combat
+            : phase.StartsWith("Teleport") || phase.StartsWith("Aethernet") ? RunState.Travel
             : RunState.Step;
         StatusLine = $"Seq {sequence} · step {_stepIndex + 1}/{_block.Steps.Count} · {step.Kind} · {_executor.PhaseName}";
 

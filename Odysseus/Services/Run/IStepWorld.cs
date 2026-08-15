@@ -91,6 +91,34 @@ public interface IStepWorld
     /// <summary>Targets and engages the nearest attackable object whose data id is in <paramref name="dataIds"/> (any, if empty). False when none within radius.</summary>
     bool AttackNearestEnemy(System.Collections.Generic.IReadOnlyCollection<uint> dataIds, float radius);
 
+    // ── Instances and handoffs ──
+
+    /// <summary>Inside any instanced duty (solo or otherwise).</summary>
+    bool InDuty { get; }
+
+    /// <summary>Hands the fight to, or takes it back from, BossMod's AI (<c>/bmrai on|off</c>).</summary>
+    void SetBossModAi(bool enabled);
+
+    /// <summary>Theseus is loaded and can begin a duty right now.</summary>
+    bool TheseusCanEnterDuty { get; }
+
+    /// <summary>Ask Theseus to enter and run a duty. False when refused.</summary>
+    bool TheseusEnterDuty(uint contentFinderConditionId);
+
+    /// <summary>Theseus is driving the character.</summary>
+    bool TheseusBusy { get; }
+
+    // ── Actions ──
+
+    /// <summary>Targets the nearest object with this data id without interacting. False when absent.</summary>
+    bool TryTargetDataId(uint dataId);
+
+    /// <summary>Sends a slash command as the player (emotes, jump).</summary>
+    void SendChatCommand(string command);
+
+    /// <summary>Uses an inventory item by id, on the current target if it needs one.</summary>
+    bool UseItem(uint itemId);
+
     // ── UI ──
 
     bool IsAddonVisible(string name);

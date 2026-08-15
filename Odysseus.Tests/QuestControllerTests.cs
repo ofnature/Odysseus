@@ -29,10 +29,18 @@ public class QuestControllerTests : IDisposable
     private readonly List<string> _log = [];
     private readonly QuestController _controller;
 
+    private sealed class Policy : IRunPolicy
+    {
+        public bool HandOffSoloDuties { get; set; } = true;
+        public bool HandOffDuties { get; set; } = true;
+    }
+
+    private readonly Policy _policy = new();
+
     public QuestControllerTests()
     {
         _store = new PathStore(_dir);
-        _controller = new QuestController(_quests, _store, new StepExecutor(_world), _world, _world, _log.Add);
+        _controller = new QuestController(_quests, _store, new StepExecutor(_world), _world, _world, _policy, _log.Add);
     }
 
     public void Dispose()
@@ -190,6 +198,33 @@ public class QuestControllerTests : IDisposable
         Ticks(100, seconds: 1);
         Assert.Equal(RunState.Faulted, _controller.State);
         Assert.Contains("404 never appeared", _controller.StatusLine);
+    }
+
+    [Fact]
+    public void Handoff_steps_are_refused_when_the_policy_turns_them_off()
+    {
+        _policy.HandOffDuties = false;
+        _world.TheseusCanEnterDuty = true;
+        var duty = new QuestStep { Kind = StepKind.Duty, KindName = "Duty", TerritoryId = 400, ContentFinderConditionId = 247 };
+        StorePath(new QuestSequence { Sequence = 1, Steps = [duty] });
+        _quests.Set(1622, 1);
+        _controller.Start(1622);
+        Ticks(3);
+        Assert.Equal(RunState.Faulted, _controller.State);
+        Assert.Contains("Theseus handoff is off", _controller.StatusLine);
+        Assert.DoesNotContain(_world.Calls, c => c.StartsWith("TheseusEnter"));
+    }
+
+    [Fact]
+    public void Handoff_state_is_reported_while_another_plugin_drives()
+    {
+        _world.TheseusCanEnterDuty = true;
+        var duty = new QuestStep { Kind = StepKind.Duty, KindName = "Duty", TerritoryId = 400, ContentFinderConditionId = 247 };
+        StorePath(new QuestSequence { Sequence = 1, Steps = [duty] });
+        _quests.Set(1622, 1);
+        _controller.Start(1622);
+        Ticks(4);
+        Assert.Equal(RunState.Handoff, _controller.State);
     }
 
     [Fact]
