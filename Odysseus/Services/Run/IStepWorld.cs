@@ -99,6 +99,9 @@ public interface IStepWorld
     /// <summary>Hands the fight to, or takes it back from, BossMod's AI (<c>/bmrai on|off</c>).</summary>
     void SetBossModAi(bool enabled);
 
+    /// <summary>What a ContentFinderCondition is, or null when the sheet does not know it.</summary>
+    Quest.DutyDescription? DescribeDuty(uint contentFinderConditionId);
+
     /// <summary>Theseus is loaded and can begin a duty right now.</summary>
     bool TheseusCanEnterDuty { get; }
 

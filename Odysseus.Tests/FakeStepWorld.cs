@@ -83,6 +83,8 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     // ── Instances and handoffs ──
     public bool InDuty { get; set; }
     public bool BossModAi { get; private set; }
+    public Dictionary<uint, Odysseus.Services.Quest.DutyDescription> Duties { get; } = new();
+    public Odysseus.Services.Quest.DutyDescription? DescribeDuty(uint cfc) => Duties.TryGetValue(cfc, out var d) ? d : null;
     public bool TheseusCanEnterDuty { get; set; }
     public bool TheseusEnterAccepted { get; set; } = true;
     public bool TheseusBusy { get; set; }

@@ -419,6 +419,14 @@ public sealed class StepExecutor
                     Fail("duty step names no ContentFinderCondition");
                     return Phase.None;
                 }
+                // Theseus runs 4-player dungeons. Anything else — the nine 8-player trials in the
+                // HW+SB MSQ, for instance — is a stop, named, before anyone is asked to try.
+                if (_world.DescribeDuty(cfc) is { IsDungeon: false } notDungeon)
+                {
+                    Fail($"{notDungeon.Name} is an {notDungeon.Kind} — Odysseus does not automate those. " +
+                         "Clear it with Duty Support or a party, then Retry");
+                    return Phase.None;
+                }
                 if (!_world.TheseusCanEnterDuty)
                 {
                     Fail("Theseus is not loaded, is disabled, or is busy — run the duty yourself, then Retry");

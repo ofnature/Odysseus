@@ -95,6 +95,31 @@ public class HandoffTests
     }
 
     [Fact]
+    public void An_eight_player_trial_stops_by_name_before_theseus_is_asked()
+    {
+        var w = new FakeStepWorld { TheseusCanEnterDuty = true };
+        w.Duties[239] = new Odysseus.Services.Quest.DutyDescription(239, "the Royal Menagerie", IsDungeon: false, PartySize: 8);
+        var ex = new StepExecutor(w);
+        ex.Begin(Step(StepKind.Duty, cfc: 239));
+        Ticks(ex, w, 2);
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.Contains("the Royal Menagerie", ex.FailReason);
+        Assert.Contains("8-player trial", ex.FailReason);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("TheseusEnter"));
+    }
+
+    [Fact]
+    public void A_dungeon_still_goes_to_theseus()
+    {
+        var w = new FakeStepWorld { TheseusCanEnterDuty = true };
+        w.Duties[247] = new Odysseus.Services.Quest.DutyDescription(247, "Ala Mhigo", IsDungeon: true, PartySize: 4);
+        var ex = new StepExecutor(w);
+        ex.Begin(Step(StepKind.Duty, cfc: 247));
+        Ticks(ex, w, 2);
+        Assert.Contains("TheseusEnter 247", w.Calls);
+    }
+
+    [Fact]
     public void Duty_without_theseus_stops_and_says_so()
     {
         var w = new FakeStepWorld { TheseusCanEnterDuty = false };

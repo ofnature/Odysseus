@@ -72,6 +72,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             new Services.Travel.AetheryteCatalog(DataManager, message => Log.Warning(message)),
             new TheseusIpc(PluginInterface, message => Log.Warning(message)),
             new ChatCommandSender(message => Log.Warning(message)),
+            new DutyCatalog(DataManager, message => Log.Warning(message)),
             _quests, message => Log.Information(message));
         _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world), _world, _world, _config,
             message => Log.Information(message));

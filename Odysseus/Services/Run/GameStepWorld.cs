@@ -40,6 +40,7 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
     private readonly Travel.AetheryteCatalog _aetherytes;
     private readonly TheseusIpc _theseus;
     private readonly ChatCommandSender _chat;
+    private readonly DutyCatalog _duties;
     private readonly IQuestStateReader _quests;
     private readonly Action<string> _log;
 
@@ -47,12 +48,13 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
         IClientState clientState, IObjectTable objectTable, ICondition condition, IGameGui gameGui,
         ITargetManager targets, IDataManager data, VnavIpc vnav, DaedalusIpc daedalus,
         TextAdvanceIpc textAdvance, LifestreamIpc lifestream, Travel.AetheryteCatalog aetherytes,
-        TheseusIpc theseus, ChatCommandSender chat, IQuestStateReader quests, Action<string> log)
+        TheseusIpc theseus, ChatCommandSender chat, DutyCatalog duties, IQuestStateReader quests, Action<string> log)
     {
         _lifestream = lifestream;
         _aetherytes = aetherytes;
         _theseus = theseus;
         _chat = chat;
+        _duties = duties;
         _clientState = clientState;
         _objectTable = objectTable;
         _condition = condition;
@@ -218,6 +220,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
     /// <c>/bmrai</c> chat command (Theseus finding #3). One call site, so a rename is one fix.
     /// </summary>
     public void SetBossModAi(bool enabled) => _chat.Send($"/bmrai {(enabled ? "on" : "off")}");
+
+    public DutyDescription? DescribeDuty(uint contentFinderConditionId) => _duties.Describe(contentFinderConditionId);
 
     public bool TheseusCanEnterDuty => _theseus.CanEnterDuty;
 
