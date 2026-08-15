@@ -83,8 +83,11 @@ public sealed class StepExecutor
     private const int MaxMoveRetries = 3;
 
     private readonly IStepWorld _world;
+    private readonly Quest.IDialogueTexts? _texts;
 
     private QuestStep? _step;
+    private ushort _questId;
+    private bool _listAnswered;
     private Phase _phase = Phase.None;
     private DateTime _phaseStart;
     private DateTime _stepStart;
@@ -100,7 +103,12 @@ public sealed class StepExecutor
     private uint _teleportTerritory;
     private bool _sawTravelBusy;
 
-    public StepExecutor(IStepWorld world) => _world = world;
+    /// <param name="texts">Resolves dialogue text keys for the current quest; null means List choices and Say cannot be answered.</param>
+    public StepExecutor(IStepWorld world, Quest.IDialogueTexts? texts = null)
+    {
+        _world = world;
+        _texts = texts;
+    }
 
     public StepStatus Status { get; private set; } = StepStatus.Idle;
     public string FailReason { get; private set; } = string.Empty;
@@ -108,9 +116,12 @@ public sealed class StepExecutor
     public string PhaseName => _phase.ToString();
 
     /// <param name="skipTeleport">The step's <c>AetheryteShortcutIf</c> holds — walk instead of teleporting.</param>
-    public void Begin(QuestStep step, bool skipTeleport = false)
+    /// <param name="questId">The quest this step belongs to — needed to resolve dialogue text keys. 0 for a bare step.</param>
+    public void Begin(QuestStep step, bool skipTeleport = false, ushort questId = 0)
     {
         _step = step;
+        _questId = questId;
+        _listAnswered = false;
         _stepStart = _world.UtcNow;
         _moveRetries = 0;
         _sawOccupied = false;
@@ -144,7 +155,7 @@ public sealed class StepExecutor
     public static bool IsSupported(StepKind kind) => kind is
         StepKind.WalkTo or StepKind.Interact or StepKind.AcceptQuest or StepKind.CompleteQuest or StepKind.Combat
         or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent or StepKind.None
-        or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem;
+        or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem or StepKind.Say;
 
     /// <summary>The step hands the character to another plugin for a whole instance.</summary>
     public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
@@ -449,6 +460,20 @@ public sealed class StepExecutor
                 _world.SendChatCommand("/generalaction Jump");
                 return Phase.ActionSettle;
 
+            case StepKind.Say:
+            {
+                var text = step.ChatMessageKey is { } key ? _texts?.Resolve(_questId, key) : null;
+                if (text is null)
+                {
+                    Fail($"Say step: text key {step.ChatMessageKey ?? "?"} could not be resolved for quest {_questId}");
+                    return Phase.None;
+                }
+                if (step.DataId is { } sayTarget)
+                    _world.TryTargetDataId(sayTarget);
+                _world.SendChatCommand($"/say {text}");
+                return Phase.ActionSettle;
+            }
+
             case StepKind.UseItem:
                 if (step.ItemId is not { } itemId)
                 {
@@ -615,13 +640,57 @@ public sealed class StepExecutor
     {
         if (step.DialogueChoices is null)
             return;
+
+        var listVisible = _world.IsAddonVisible("SelectString");
+        if (!listVisible)
+            _listAnswered = false; // a new list later in the same interaction gets its own answer
+
         foreach (var choice in step.DialogueChoices)
         {
             if (choice.Type.Equals("YesNo", StringComparison.OrdinalIgnoreCase) && _world.IsAddonVisible("SelectYesno"))
+            {
                 _world.SelectYesNo(choice.Yes ?? true);
-            // List choices need the prompt/answer text keys resolved against the quest's dialogue
-            // sheet to pick an index; that resolver is P3. Until then TextAdvance's own handling applies.
+                continue;
+            }
+
+            if (!choice.Type.Equals("List", StringComparison.OrdinalIgnoreCase) || !listVisible || _listAnswered)
+                continue;
+
+            // The data carries text keys; the menu shows text. Resolve the answer key against the
+            // quest's dialogue sheet and pick the entry that says it.
+            var wanted = choice.Answer is { } key ? _texts?.Resolve(_questId, key) : null;
+            if (wanted is null)
+            {
+                _world.Log($"List choice {choice.Answer ?? "?"} could not be resolved for quest {_questId} — leaving the menu to TextAdvance/you.");
+                _listAnswered = true;
+                continue;
+            }
+            var entries = _world.SelectStringEntries();
+            var index = FindEntry(entries, wanted);
+            if (index < 0)
+            {
+                _world.Log($"List choice \"{wanted}\" not among [{string.Join(" | ", entries)}] — leaving the menu.");
+                _listAnswered = true;
+                continue;
+            }
+            _world.SelectStringIndex(index);
+            _listAnswered = true;
         }
+    }
+
+    /// <summary>Exact match first, then a case-insensitive contains either way — menu text can carry a trailing marker.</summary>
+    public static int FindEntry(System.Collections.Generic.IReadOnlyList<string> entries, string wanted)
+    {
+        for (var i = 0; i < entries.Count; i++)
+            if (string.Equals(entries[i].Trim(), wanted.Trim(), StringComparison.Ordinal))
+                return i;
+        for (var i = 0; i < entries.Count; i++)
+        {
+            var e = entries[i].Trim();
+            if (e.Contains(wanted.Trim(), StringComparison.OrdinalIgnoreCase) || wanted.Trim().Contains(e, StringComparison.OrdinalIgnoreCase) && e.Length > 3)
+                return i;
+        }
+        return -1;
     }
 
     private void TickCombat(QuestStep step, DateTime now)

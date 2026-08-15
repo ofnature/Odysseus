@@ -101,6 +101,8 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool IsAddonVisible(string name) => VisibleAddons.Contains(name);
     public void SelectYesNo(bool yes) => Calls.Add($"YesNo {yes}");
     public void SelectStringIndex(int index) => Calls.Add($"Select {index}");
+    public List<string> ListEntries { get; } = [];
+    public IReadOnlyList<string> SelectStringEntries() => VisibleAddons.Contains("SelectString") ? ListEntries : [];
     public void HoldDialogue() => Calls.Add("HoldDialogue");
     public void ReleaseDialogue() => Calls.Add("ReleaseDialogue");
     public void Log(string message) => Calls.Add("Log " + message);

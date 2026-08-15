@@ -83,7 +83,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             duties,
             _quests, message => Log.Information(message));
         _recorderFeed = new RecorderFeed(_world, _quests, aetherytes, duties);
-        _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world), _world, _world, _config,
+        var dialogue = new DialogueCatalog(DataManager, message => Log.Warning(message));
+        _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world, dialogue), _world, _world, _config,
             completed => _catalog.NextMainScenario(completed, _quests.IsComplete),
             message => Log.Information(message));
 

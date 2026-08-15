@@ -301,6 +301,32 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     public void SelectStringIndex(int index) => FireAddonCallback("SelectString", index);
 
+    public IReadOnlyList<string> SelectStringEntries()
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName("SelectString");
+            if (addon.IsNull || !addon.IsVisible)
+                return Array.Empty<string>();
+            var select = (FFXIVClientStructs.FFXIV.Client.UI.AddonSelectString*)addon.Address;
+            var menu = &select->PopupMenu.PopupMenu;
+            var count = Math.Clamp(menu->EntryCount, 0, 32);
+            var entries = new List<string>(count);
+            for (var i = 0; i < count; i++)
+            {
+                var ptr = menu->EntryNames[i].Value;
+                entries.Add(ptr == null ? string.Empty
+                    : Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)ptr).TextValue);
+            }
+            return entries;
+        }
+        catch (Exception ex)
+        {
+            _log($"SelectString read failed: {ex.Message}");
+            return Array.Empty<string>();
+        }
+    }
+
     public void HoldDialogue() => _textAdvance.Hold();
 
     public void ReleaseDialogue() => _textAdvance.Release();

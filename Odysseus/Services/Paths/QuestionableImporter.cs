@@ -202,6 +202,9 @@ public static class QuestionableImporter
         if (e.TryGetProperty("CompletionQuestVariablesFlags", out var flags))
             step.CompletionQuestVariablesFlags = ParseFlags(flags);
 
+        if (e.TryGetProperty("ChatMessage", out var chat) && chat.ValueKind == JsonValueKind.Object)
+            step.ChatMessageKey = Str(chat, "Key");
+
         if (e.TryGetProperty("DialogueChoices", out var choices) && choices.ValueKind == JsonValueKind.Array)
         {
             step.DialogueChoices = [];

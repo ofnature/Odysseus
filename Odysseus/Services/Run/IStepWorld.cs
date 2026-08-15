@@ -134,6 +134,9 @@ public interface IStepWorld
     /// <summary>Picks an entry in a list dialog if one is showing.</summary>
     void SelectStringIndex(int index);
 
+    /// <summary>The entries of the list dialog currently showing, in order; empty when none.</summary>
+    System.Collections.Generic.IReadOnlyList<string> SelectStringEntries();
+
     /// <summary>Ask TextAdvance to drive dialogue for us / stop.</summary>
     void HoldDialogue();
 

@@ -124,6 +124,8 @@ public sealed class QuestStep
     public uint? AetherCurrentId { get; set; }
     public uint? ItemId { get; set; }
     public string? Emote { get; set; }
+    /// <summary>Text key for a <see cref="StepKind.Say"/> step, resolved against the quest's dialogue sheet.</summary>
+    public string? ChatMessageKey { get; set; }
     public uint? ContentFinderConditionId { get; set; }
     /// <summary>For duty kinds: upstream considered the automated handoff usable.</summary>
     public bool? DutyEnabled { get; set; }

@@ -294,7 +294,7 @@ public sealed class QuestController
                 return;
             }
             var skipTeleport = StepConditions.ShouldSkipAetheryte(step, _conditions, snap);
-            _executor.Begin(step, skipTeleport);
+            _executor.Begin(step, skipTeleport, _questId);
             _log($"Step {_stepIndex + 1}/{_block.Steps.Count} in seq {sequence}: {step}" +
                  (step.AetheryteShortcut is { } a ? $" via {a}{(skipTeleport ? " (skipped)" : "")}" : ""));
         }
