@@ -56,6 +56,37 @@ public class QuestCatalogTests
     }
 
     [Fact]
+    public void Frontier_is_the_next_unfinished_unlocked_msq_quest()
+    {
+        var done = new HashSet<ushort> { 1618, 1619, 1620 };
+        Assert.Equal((ushort)1621, Catalog.CurrentMainScenario(done.Contains)!.QuestId);
+        done.UnionWith([1621, 1622]);
+        Assert.Equal((ushort)1623, Catalog.CurrentMainScenario(done.Contains)!.QuestId);
+    }
+
+    [Fact]
+    public void Frontier_skips_untaken_alternates_and_untouched_roots()
+    {
+        // Three city starts; the character took Gridania (39 -> 85), the class variants 123/124 were never taken.
+        var catalog = new QuestCatalog(
+        [
+            new QuestListing(39, "Coming to Gridania", 1, 0, true, [], 0),
+            new QuestListing(107, "Coming to Limsa Lominsa", 1, 0, true, [], 0),
+            new QuestListing(85, "Close to Home", 1, 0, true, [39], 1),
+            new QuestListing(123, "Close to Home", 1, 0, true, [39], 1),
+            new QuestListing(124, "Close to Home", 1, 0, true, [39], 1),
+            new QuestListing(86, "Next", 2, 0, true, [85, 123, 124], 2),
+            new QuestListing(87, "After", 3, 0, true, [86], 1),
+        ]);
+        var done = new HashSet<ushort> { 39, 85, 86 };
+        // 107 is a root (no prerequisites) — not offered. 123/124 have a completed successor (86) — dead alternates.
+        Assert.Equal((ushort)87, catalog.CurrentMainScenario(done.Contains)!.QuestId);
+
+        // Brand-new character: lowest root.
+        Assert.Equal((ushort)39, catalog.CurrentMainScenario(_ => false)!.QuestId);
+    }
+
+    [Fact]
     public void Join_semantics()
     {
         var all = new QuestListing(1, "x", 1, 0, true, [10, 11], 1);

@@ -143,6 +143,37 @@ public sealed class QuestCatalog
         return null;
     }
 
+    /// <summary>
+    /// The character's Main Scenario frontier: the MSQ quest to do next, whether or not it is
+    /// accepted. Null when the story is finished or nothing is unlocked.
+    ///
+    /// <para>
+    /// A frontier quest is MSQ, not complete, has its prerequisites met, has at least one
+    /// prerequisite (so the three "Coming to &lt;city&gt;" roots are not offered to a character
+    /// who already started elsewhere), and has no completed successor — that last clause is what
+    /// drops the untaken alternates: the other two "Close to Home" class variants, the two Grand
+    /// Companies not joined, the 2.x branch not chosen. Ties go to the lowest id.
+    /// </para>
+    /// </summary>
+    public QuestListing? CurrentMainScenario(Func<ushort, bool> isComplete)
+    {
+        QuestListing? best = null;
+        var anyDone = false;
+        foreach (var q in _byId.Values)
+        {
+            if (!q.IsMainScenario) continue;
+            if (isComplete(q.QuestId)) { anyDone = true; continue; }
+            if (q.Previous.Length == 0 || !q.IsUnlockedBy(isComplete)) continue;
+            if (_msqSuccessors.TryGetValue(q.QuestId, out var next) && next.Any(isComplete)) continue;
+            if (best is null || q.QuestId < best.QuestId) best = q;
+        }
+        if (best is not null || anyDone)
+            return best;
+
+        // Brand-new character: nothing done at all. Offer the lowest root.
+        return _byId.Values.Where(q => q.IsMainScenario && q.Previous.Length == 0).OrderBy(q => q.QuestId).FirstOrDefault();
+    }
+
     private ushort? Ready(ushort of, Func<ushort, bool> isComplete)
     {
         if (!_msqSuccessors.TryGetValue(of, out var successors))

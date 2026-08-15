@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
@@ -34,6 +35,11 @@ public sealed class RunWindow : Window
     private readonly Func<uint> _territory;
 
     private ushort _selectedQuest;
+
+    // The story frontier is 1,000+ completion-bit reads; refresh it on a timer, not every frame.
+    private QuestListing? _frontier;
+    private DateTime _frontierAt;
+    private static readonly TimeSpan FrontierRefresh = TimeSpan.FromSeconds(2);
 
     public RunWindow(
         OdysseusConfig config,
@@ -124,11 +130,20 @@ public sealed class RunWindow : Window
             }
         }
 
-        // Compact Start/Stop pinned right, then the window buttons.
+        // Compact Start/Stop pinned right, then the window buttons. Widths come from the labels
+        // and the anchor from the content region, so nothing clips at the window edge.
+        var style = ImGui.GetStyle();
         const float buttonWidth = 64f;
-        const float smallWidth = 52f;
-        var rightEdge = ImGui.GetWindowWidth() - ImGui.GetStyle().WindowPadding.X;
-        ImGui.SameLine(rightEdge - buttonWidth - smallWidth * 2 - 12f);
+        const float gap = 6f;
+        var fleetWidth = ImGui.CalcTextSize("Fleet").X + style.FramePadding.X * 2f + 8f;
+        var settingsWidth = ImGui.CalcTextSize("Settings").X + style.FramePadding.X * 2f + 8f;
+        var total = buttonWidth + fleetWidth + settingsWidth + gap * 2f;
+        var anchor = ImGui.GetWindowContentRegionMax().X - total;
+        if (anchor > ImGui.GetCursorPosX() + 8f)
+            ImGui.SameLine(anchor);
+        else
+            ImGui.SameLine(0f, 12f);
+
         if (Running)
         {
             if (OdysseusTheme.StopButton("Stop##hdr", new Vector2(buttonWidth, 22)))
@@ -142,11 +157,11 @@ public sealed class RunWindow : Window
                     _controller.Start(_selectedQuest);
             }
         }
-        ImGui.SameLine(0f, 6f);
-        if (ImGui.Button("Fleet", new Vector2(smallWidth, 22)))
+        ImGui.SameLine(0f, gap);
+        if (ImGui.Button("Fleet", new Vector2(fleetWidth, 22)))
             _openFleet();
-        ImGui.SameLine(0f, 6f);
-        if (ImGui.Button("Settings", new Vector2(smallWidth, 22)))
+        ImGui.SameLine(0f, gap);
+        if (ImGui.Button("Settings", new Vector2(settingsWidth, 22)))
             _openConfig();
 
         if (_controller.StopAfterQuest && Running)
@@ -159,35 +174,62 @@ public sealed class RunWindow : Window
 
     private void DrawQuestPanel()
     {
-        OdysseusTheme.SectionHeader("QUEST");
+        OdysseusTheme.SectionHeader("MAIN SCENARIO");
 
         var accepted = _quests.ReadAccepted();
-        if (accepted.Count == 0)
+        var now = DateTime.UtcNow;
+        if (now - _frontierAt > FrontierRefresh)
         {
-            ImGui.TextColored(OdysseusTheme.TextDisabled, "No accepted quests.");
-            _selectedQuest = 0;
-            return;
+            _frontierAt = now;
+            _frontier = _catalog.CurrentMainScenario(_quests.IsComplete);
         }
 
-        // MSQ first, then everything else, so the line Odysseus cares about is always at the top.
-        var anySelectable = false;
-        foreach (var msq in new[] { true, false })
+        // An accepted MSQ quest is the current one; otherwise the story frontier, not yet accepted.
+        var anyMsqAccepted = false;
+        foreach (var q in accepted)
         {
-            foreach (var q in accepted)
+            var listing = _catalog.ById(q.QuestId);
+            if (listing?.IsMainScenario != true)
+                continue;
+            anyMsqAccepted = true;
+            var hasPath = _paths.Has(q.QuestId);
+            if (hasPath && _selectedQuest == 0)
+                _selectedQuest = q.QuestId;
+            DrawQuestRow(q, listing.Name, msq: true, hasPath);
+        }
+        if (!anyMsqAccepted)
+        {
+            if (_frontier is { } next)
             {
-                var listing = _catalog.ById(q.QuestId);
-                var isMsq = listing?.IsMainScenario == true;
-                if (isMsq != msq)
-                    continue;
-                var hasPath = _paths.Has(q.QuestId);
-                if (hasPath && _selectedQuest == 0 && isMsq)
-                    _selectedQuest = q.QuestId;
-                anySelectable |= hasPath;
-                DrawQuestRow(q, listing?.Name ?? $"Quest {q.QuestId}", isMsq, hasPath);
+                var hasPath = _paths.Has(next.QuestId);
+                if (hasPath && (_selectedQuest == 0 || !accepted.Any(a => a.QuestId == _selectedQuest)))
+                    _selectedQuest = next.QuestId;
+                var selected = _selectedQuest == next.QuestId;
+                ImGui.TextColored(OdysseusTheme.WakeFoam, selected ? "●" : "○");
+                ImGui.SameLine(0f, 6f);
+                ImGui.TextColored(OdysseusTheme.TextPrimary, next.Name);
+                ImGui.SameLine();
+                ImGui.TextColored(OdysseusTheme.TextSecondary, $"· Lv {next.ClassJobLevel} · not yet accepted");
+                if (!hasPath)
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(OdysseusTheme.TextDisabled, "(no path)");
+                }
+                ImGui.TextColored(OdysseusTheme.TextDisabled, "Start walks to the quest giver and accepts it.");
+            }
+            else
+            {
+                ImGui.TextColored(OdysseusTheme.TextDisabled, "No Main Scenario quest is available — story finished, or nothing unlocked.");
             }
         }
-        if (!anySelectable)
-            ImGui.TextColored(OdysseusTheme.TextDisabled, "No stored path for any accepted quest — import in Settings › Paths.");
+
+        // Everything else, folded away — Odysseus does not run these, but seeing them helps.
+        var others = accepted.Where(q => _catalog.ById(q.QuestId)?.IsMainScenario != true).ToList();
+        if (others.Count > 0 && ImGui.CollapsingHeader($"Other quests ({others.Count})##others"))
+        {
+            foreach (var q in others)
+                DrawQuestRow(q, _catalog.NameOf(q.QuestId), msq: false, _paths.Has(q.QuestId));
+        }
 
         if (_controller.State != RunState.Idle)
         {
