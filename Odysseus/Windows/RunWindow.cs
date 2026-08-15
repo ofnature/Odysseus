@@ -23,6 +23,7 @@ public sealed class RunWindow : Window
     private readonly PathStore _paths;
     private readonly QuestController _controller;
     private readonly Action _openConfig;
+    private readonly Action _openFleet;
 
     private ushort _selectedQuest;
 
@@ -33,7 +34,8 @@ public sealed class RunWindow : Window
         QuestCatalog catalog,
         PathStore paths,
         QuestController controller,
-        Action openConfig)
+        Action openConfig,
+        Action openFleet)
         : base("Odysseus##OdysseusRun")
     {
         _config = config;
@@ -43,6 +45,7 @@ public sealed class RunWindow : Window
         _paths = paths;
         _controller = controller;
         _openConfig = openConfig;
+        _openFleet = openFleet;
 
         Size = new Vector2(440, 400);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -84,7 +87,10 @@ public sealed class RunWindow : Window
         else
             OdysseusTheme.StatusDot(state.IsDriving(), state.ToString(), "Idle");
 
-        ImGui.SameLine(ImGui.GetWindowWidth() - 70f);
+        ImGui.SameLine(ImGui.GetWindowWidth() - 120f);
+        if (ImGui.SmallButton("Fleet"))
+            _openFleet();
+        ImGui.SameLine();
         if (ImGui.SmallButton("Settings"))
             _openConfig();
     }

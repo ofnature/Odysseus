@@ -4,6 +4,7 @@ using Dalamud.Interface.Windowing;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using Odysseus.Config;
+using Odysseus.Services.Fleet;
 using Odysseus.Services.Ipc;
 using Odysseus.Services.Paths;
 using Odysseus.Services.Quest;
@@ -41,10 +42,12 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly PathStore _pathStore;
     private readonly GameStepWorld _world;
     private readonly QuestController _controller;
+    private readonly FleetPublisher _fleet;
     private readonly OdysseusIpc _ipc;
     private readonly ConfigWindow _configWindow;
     private readonly RunWindow _runWindow;
     private readonly DebugWindow _debugWindow;
+    private readonly FleetWindow _fleetWindow;
 
     public OdysseusPlugin(IDalamudPluginInterface pluginInterface)
     {
@@ -80,14 +83,21 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // Published once the controller exists, so the gate never reports on a half-built run.
         _ipc = new OdysseusIpc(PluginInterface, () => _config.Enabled && _controller.State.IsDriving());
 
+        _fleet = new FleetPublisher(
+            new RelayIpc(PluginInterface, message => Log.Warning(message)),
+            BuildFleetStatus,
+            () => _config.PublishFleetStatus);
+
         _configWindow = new ConfigWindow(_config, SaveConfig, _presence, _pathStore,
             QuestionableImporter.DefaultBundlePath(PluginInterface.ConfigDirectory.Parent?.FullName ?? string.Empty));
-        _runWindow = new RunWindow(_config, _presence, _quests, _catalog, _pathStore, _controller, OpenConfig);
+        _runWindow = new RunWindow(_config, _presence, _quests, _catalog, _pathStore, _controller, OpenConfig, () => _fleetWindow!.IsOpen = true);
         _debugWindow = new DebugWindow(_quests, _catalog, _oracle, _presence);
+        _fleetWindow = new FleetWindow(_config, _fleet);
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_runWindow);
         _windowSystem.AddWindow(_debugWindow);
+        _windowSystem.AddWindow(_fleetWindow);
 
         PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += OpenConfig;
@@ -96,7 +106,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandMain, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open Odysseus. \"/odysseus config\" opens settings, \"/odysseus debug\" the quest-state dump, \"/odysseus stop\" stops the run.",
+            HelpMessage = "Open Odysseus. \"/odysseus config\" opens settings, \"/odysseus fleet\" the fleet dashboard, \"/odysseus debug\" the quest-state dump, \"/odysseus stop\" stops the run.",
         });
         CommandManager.AddHandler(CommandShort, new CommandInfo(OnCommand)
         {
@@ -118,11 +128,15 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         _controller.Stop();
         _windowSystem.RemoveAllWindows();
+        _fleet.Dispose();
         _ipc.Dispose();
     }
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        // The dashboard is useful even with the runner off: it says who is where.
+        _fleet.Tick();
+
         if (!_config.Enabled)
         {
             if (_controller.State.IsDriving())
@@ -130,6 +144,32 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             return;
         }
         _controller.Tick();
+    }
+
+    /// <summary>This box's line for the fleet, or null before login.</summary>
+    private FleetStatus? BuildFleetStatus()
+    {
+        var player = ObjectTable.LocalPlayer;
+        if (player is null)
+            return null;
+
+        var name = player.Name.TextValue;
+        var world = player.HomeWorld.ValueNullable?.Name.ExtractText() ?? string.Empty;
+        var questId = _controller.QuestId;
+        var running = _controller.State != RunState.Idle;
+        return new FleetStatus
+        {
+            SenderId = $"{name}@{world}",
+            Character = name,
+            World = world,
+            Level = player.Level,
+            QuestId = running ? questId : (ushort)0,
+            QuestName = running ? _catalog.NameOf(questId) : string.Empty,
+            Sequence = running ? _controller.Sequence : 0,
+            State = _controller.State.ToString(),
+            StatusLine = _controller.StatusLine,
+            SentUnixMs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+        };
     }
 
     private void OnCommand(string command, string args)
@@ -142,6 +182,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 break;
             case "debug":
                 _debugWindow.IsOpen = true;
+                break;
+            case "fleet":
+                _fleetWindow.IsOpen = true;
                 break;
             case "stop":
                 _controller.Stop();
