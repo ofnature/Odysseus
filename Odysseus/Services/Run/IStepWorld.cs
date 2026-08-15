@@ -68,6 +68,8 @@ public interface IStepWorld
 
     // ── Player state ──
 
+    int PlayerLevel { get; }
+
     bool InCombat { get; }
 
     /// <summary>Not occupied, casting, zoning or otherwise mid-something.</summary>

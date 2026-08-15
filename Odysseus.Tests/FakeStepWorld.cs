@@ -14,6 +14,7 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public int PathWaypointCount { get; set; } = 5;
     public bool IsMounted { get; set; }
     public bool CanFlyHere { get; set; }
+    public int PlayerLevel { get; set; } = 54;
     public bool InCombat { get; set; }
     public bool IsReady { get; set; } = true;
     public bool IsOccupied { get; set; }

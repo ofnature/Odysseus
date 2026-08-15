@@ -33,14 +33,18 @@ public class QuestControllerTests : IDisposable
     {
         public bool HandOffSoloDuties { get; set; } = true;
         public bool HandOffDuties { get; set; } = true;
+        public bool ContinueToNextQuest { get; set; }
+        public int StopAtLevel { get; set; }
     }
 
     private readonly Policy _policy = new();
+    private readonly Dictionary<ushort, ushort> _chain = new();
 
     public QuestControllerTests()
     {
         _store = new PathStore(_dir);
-        _controller = new QuestController(_quests, _store, new StepExecutor(_world), _world, _world, _policy, _log.Add);
+        _controller = new QuestController(_quests, _store, new StepExecutor(_world), _world, _world, _policy,
+            id => _chain.TryGetValue(id, out var n) ? n : null, _log.Add);
     }
 
     public void Dispose()
@@ -225,6 +229,85 @@ public class QuestControllerTests : IDisposable
         _controller.Start(1622);
         Ticks(4);
         Assert.Equal(RunState.Handoff, _controller.State);
+    }
+
+    private void StoreTwoQuestChain()
+    {
+        _world.Spawned.UnionWith([1u, 2u]);
+        _store.Save(new QuestPath { QuestId = 1622, Name = "Mogwin's Trial", Category = "3.x/MSQ", Sequences = [new QuestSequence { Sequence = 1, Steps = [Interact(1)] }] });
+        _store.Save(new QuestPath { QuestId = 1623, Name = "Moglin's Judgment", Category = "3.x/MSQ", Sequences = [new QuestSequence { Sequence = 0, Steps = [Interact(2)] }] });
+        _chain[1622] = 1623;
+        _quests.Set(1622, 1);
+    }
+
+    [Fact]
+    public void Rolls_into_the_next_msq_quest_when_continue_is_on()
+    {
+        StoreTwoQuestChain();
+        _policy.ContinueToNextQuest = true;
+        _controller.Start(1622);
+        Ticks(3);
+        _quests.Complete.Add(1622);
+        Ticks(6);
+        Assert.Equal((ushort)1623, _controller.QuestId);
+        Assert.NotEqual(RunState.Idle, _controller.State);
+        Assert.Equal(1, _controller.QuestsThisRun);
+        Ticks(12);
+        Assert.Contains("Interact 2", _world.Calls);
+    }
+
+    [Fact]
+    public void Stops_after_the_quest_when_continue_is_off_or_armed_off()
+    {
+        StoreTwoQuestChain();
+        _policy.ContinueToNextQuest = false;
+        _controller.Start(1622);
+        Ticks(3);
+        _quests.Complete.Add(1622);
+        Ticks(3);
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.Contains("1 done", _controller.StatusLine);
+
+        // Continue on, but the user armed "stop after this quest".
+        _quests.Complete.Remove(1622);
+        _policy.ContinueToNextQuest = true;
+        _controller.Start(1622);
+        _controller.StopAfterQuest = true;
+        Ticks(3);
+        _quests.Complete.Add(1622);
+        Ticks(3);
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.Contains("as armed", _controller.StatusLine);
+        Assert.DoesNotContain("Interact 2", _world.Calls);
+    }
+
+    [Fact]
+    public void Level_stop_holds_the_run_at_the_configured_level()
+    {
+        StoreTwoQuestChain();
+        _policy.ContinueToNextQuest = true;
+        _policy.StopAtLevel = 54;
+        _world.PlayerLevel = 54;
+        _controller.Start(1622);
+        Ticks(3);
+        _quests.Complete.Add(1622);
+        Ticks(3);
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.Contains("level 54", _controller.StatusLine);
+    }
+
+    [Fact]
+    public void No_next_quest_stops_with_a_reason()
+    {
+        StoreTwoQuestChain();
+        _chain.Clear();
+        _policy.ContinueToNextQuest = true;
+        _controller.Start(1622);
+        Ticks(3);
+        _quests.Complete.Add(1622);
+        Ticks(3);
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.Contains("No next MSQ quest", _controller.StatusLine);
     }
 
     [Fact]

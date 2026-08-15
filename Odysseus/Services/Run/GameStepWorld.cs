@@ -144,6 +144,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
 
     // ── Player state ──
 
+    public int PlayerLevel => _objectTable.LocalPlayer?.Level ?? 0;
+
     public bool InCombat => _condition[ConditionFlag.InCombat];
 
     public bool IsReady

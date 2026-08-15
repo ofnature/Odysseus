@@ -13,6 +13,8 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     // IRunPolicy — the controller reads these live.
     bool Services.Run.IRunPolicy.HandOffSoloDuties => HandOffSoloDuties;
     bool Services.Run.IRunPolicy.HandOffDuties => HandOffDutiesToTheseus;
+    bool Services.Run.IRunPolicy.ContinueToNextQuest => ContinueToNextQuest;
+    int Services.Run.IRunPolicy.StopAtLevel => StopAtLevel;
 
     /// <summary>Bumped when a migration is needed; migrations live in <c>OdysseusPlugin</c>.</summary>
     public int Version { get; set; } = 1;

@@ -28,6 +28,10 @@ public interface IRunPolicy
 {
     bool HandOffSoloDuties { get; }
     bool HandOffDuties { get; }
+    /// <summary>Roll into the next MSQ quest when one completes.</summary>
+    bool ContinueToNextQuest { get; }
+    /// <summary>Stop rolling on once the character reaches this level; 0 = never.</summary>
+    int StopAtLevel { get; }
 }
 
 public sealed class QuestController
@@ -42,9 +46,12 @@ public sealed class QuestController
     private readonly IStepWorld _world;
     private readonly IConditionWorld _conditions;
     private readonly IRunPolicy _policy;
+    private readonly Func<ushort, ushort?> _nextQuest;
     private readonly Action<string> _log;
 
     private ushort _questId;
+    private DateTime _runStarted;
+    private int _questsThisRun;
     private QuestPath? _path;
     private int _currentSequence = -1;
     private QuestSequence? _block;
@@ -55,9 +62,11 @@ public sealed class QuestController
     private int _replays;
     private QuestSnapshot _lastSnapshot;
 
+    /// <param name="nextQuest">Given a completed quest id, the next MSQ quest to run, or null when the story is blocked or over.</param>
     public QuestController(
         IQuestStateReader quests, PathStore paths, StepExecutor executor,
-        IStepWorld world, IConditionWorld conditions, IRunPolicy policy, Action<string> log)
+        IStepWorld world, IConditionWorld conditions, IRunPolicy policy,
+        Func<ushort, ushort?> nextQuest, Action<string> log)
     {
         _quests = quests;
         _paths = paths;
@@ -65,8 +74,18 @@ public sealed class QuestController
         _world = world;
         _conditions = conditions;
         _policy = policy;
+        _nextQuest = nextQuest;
         _log = log;
     }
+
+    /// <summary>Armed: finish the current quest, then stop instead of rolling into the next.</summary>
+    public bool StopAfterQuest { get; set; }
+
+    /// <summary>How long the current run has been going; zero when idle.</summary>
+    public TimeSpan Elapsed => State is RunState.Idle or RunState.Faulted ? TimeSpan.Zero : _world.UtcNow - _runStarted;
+
+    /// <summary>Quests completed since Start was pressed.</summary>
+    public int QuestsThisRun => _questsThisRun;
 
     public RunState State { get; private set; } = RunState.Idle;
     public string StatusLine { get; private set; } = string.Empty;
@@ -111,6 +130,16 @@ public sealed class QuestController
             return false;
         }
         Stop();
+        _runStarted = _world.UtcNow;
+        _questsThisRun = 0;
+        StopAfterQuest = false;
+        return Begin(questId, path);
+    }
+
+    private bool Begin(ushort questId, QuestPath path)
+    {
+        _singleStep = null;
+        _executor.Cancel();
         _questId = questId;
         _path = path;
         _currentSequence = -1;
@@ -190,8 +219,9 @@ public sealed class QuestController
         {
             _log($"Quest {_questId} ({_path!.Name}) complete.");
             var id = _questId;
-            Stop();
+            _questsThisRun++;
             QuestCompleted?.Invoke(id);
+            RollOn(id);
             return;
         }
 
@@ -286,6 +316,49 @@ public sealed class QuestController
                 Fault($"step {_stepIndex + 1} ({step}) failed: {_executor.FailReason}");
                 break;
         }
+    }
+
+    /// <summary>After a quest completes: stop, or begin the next one the story allows.</summary>
+    private void RollOn(ushort completed)
+    {
+        var elapsed = _world.UtcNow - _runStarted;
+        var count = _questsThisRun;
+        void StopWith(string line)
+        {
+            Stop();
+            StatusLine = line;
+        }
+
+        if (StopAfterQuest)
+        {
+            StopWith($"Stopped after the quest, as armed — {count} done in {elapsed:h\\:mm}.");
+            return;
+        }
+        if (!_policy.ContinueToNextQuest)
+        {
+            StopWith($"Quest complete — {count} done in {elapsed:h\\:mm}.");
+            return;
+        }
+        if (_policy.StopAtLevel > 0 && _world.PlayerLevel >= _policy.StopAtLevel)
+        {
+            StopWith($"Reached level {_world.PlayerLevel} — stopping as configured ({count} quests, {elapsed:h\\:mm}).");
+            return;
+        }
+
+        var next = _nextQuest(completed);
+        if (next is null)
+        {
+            StopWith($"No next MSQ quest is available after {completed} — story blocked or finished ({count} quests, {elapsed:h\\:mm}).");
+            return;
+        }
+        var path = _paths.ForQuest(next.Value);
+        if (path is null)
+        {
+            StopWith($"Next quest {next} has no stored path — import, then Start.");
+            return;
+        }
+        _log($"Rolling on to {next} ({path.Name}).");
+        Begin(next.Value, path);
     }
 
     private void EnterSequence(int sequence, QuestSnapshot snap)

@@ -118,6 +118,39 @@ internal static class OdysseusTheme
         }
     }
 
+    // ── Control buttons (SealBreaker convention: solid green go, solid red stop, yellow armed) ──
+    public static readonly Vector4 GreenDark = new(0.16f, 0.42f, 0.22f, 1.00f);
+    public static readonly Vector4 RedDark = new(0.50f, 0.16f, 0.14f, 1.00f);
+    public static readonly Vector4 YellowDark = new(0.42f, 0.34f, 0.12f, 1.00f);
+    public static readonly Vector4 NeutralDark = new(0.22f, 0.22f, 0.26f, 1.00f);
+
+    /// <summary>Solid-fill button in a base colour, brighter on hover, darker when pressed.</summary>
+    public static bool SolidButton(string label, Vector4 baseColor, Vector2 size)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Button, baseColor);
+        ImGui.PushStyleColor(ImGuiCol.ButtonHovered, Scale(baseColor, 1.25f));
+        ImGui.PushStyleColor(ImGuiCol.ButtonActive, Scale(baseColor, 0.85f));
+        ImGui.PushStyleColor(ImGuiCol.Text, TextPrimary);
+        try
+        {
+            return ImGui.Button(label, size);
+        }
+        finally
+        {
+            ImGui.PopStyleColor(4);
+        }
+    }
+
+    public static bool StartButton(string label, Vector2 size) => SolidButton(label, GreenDark, size);
+
+    public static bool StopButton(string label, Vector2 size) => SolidButton(label, RedDark, size);
+
+    /// <summary>A toggle that is yellow while armed and neutral otherwise ("stop after this quest").</summary>
+    public static bool ArmedButton(string label, bool armed, Vector2 size) => SolidButton(label, armed ? YellowDark : NeutralDark, size);
+
+    private static Vector4 Scale(Vector4 c, float f)
+        => new(System.Math.Clamp(c.X * f, 0f, 1f), System.Math.Clamp(c.Y * f, 0f, 1f), System.Math.Clamp(c.Z * f, 0f, 1f), c.W);
+
     /// <summary>Hover "(?)" tooltip for a non-obvious control.</summary>
     public static void HelpMarker(string text)
     {

@@ -79,6 +79,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             new DutyCatalog(DataManager, message => Log.Warning(message)),
             _quests, message => Log.Information(message));
         _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world), _world, _world, _config,
+            completed => _catalog.NextMainScenario(completed, _quests.IsComplete),
             message => Log.Information(message));
 
         // Published once the controller exists, so the gate never reports on a half-built run.
@@ -97,7 +98,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
             () => TargetManager.Target?.BaseId);
         _runWindow = new RunWindow(_config, _presence, _quests, _catalog, _pathStore, _controller, OpenConfig,
-            () => _fleetWindow!.IsOpen = true, questId => _pathEditorWindow!.Open(questId));
+            () => _fleetWindow!.IsOpen = true, questId => _pathEditorWindow!.Open(questId),
+            () => TargetManager.Target?.BaseId,
+            () => TargetManager.Target?.Position,
+            () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
+            () => ClientState.TerritoryType);
         _debugWindow = new DebugWindow(_quests, _catalog, _oracle, _presence);
         _fleetWindow = new FleetWindow(_config, _fleet);
 
