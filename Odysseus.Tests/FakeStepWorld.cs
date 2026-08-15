@@ -47,6 +47,24 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     }
 
     public void StopMoving() { Calls.Add("Stop"); IsMoving = false; }
+
+    // ── Travel ──
+    public Dictionary<string, uint> Aetherytes { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<uint, uint> AetheryteTerritories { get; } = new();
+    public bool TeleportAccepted { get; set; } = true;
+    public bool IsTravelBusy { get; set; }
+    /// <summary>When set, a Teleport lands the player in the aetheryte's territory immediately.</summary>
+    public bool ArriveOnTeleport { get; set; } = true;
+    public uint? ResolveAetheryte(string name) => Aetherytes.TryGetValue(name, out var id) ? id : null;
+    public uint? AetheryteTerritory(uint aetheryteId) => AetheryteTerritories.TryGetValue(aetheryteId, out var t) ? t : null;
+    public bool Teleport(uint aetheryteId)
+    {
+        Calls.Add($"Teleport {aetheryteId}");
+        if (!TeleportAccepted) return false;
+        if (ArriveOnTeleport && AetheryteTerritories.TryGetValue(aetheryteId, out var t)) TerritoryId = t;
+        return true;
+    }
+    public bool AethernetTeleport(string destination) { Calls.Add($"Aethernet {destination}"); return TeleportAccepted; }
     public void Mount() { Calls.Add("Mount"); IsMounted = true; }
     public bool IsQuestComplete(ushort questId) => CompletedQuests.Contains(questId);
     public bool IsQuestAccepted(ushort questId) => AcceptedQuests.Contains(questId);

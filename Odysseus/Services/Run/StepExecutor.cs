@@ -28,7 +28,13 @@ public enum StepStatus
 /// </summary>
 public sealed class StepExecutor
 {
-    private enum Phase { None, Delay, Mount, Move, WaitReady, Interact, Dialogue, CombatWait, Combat, Finish }
+    private enum Phase { None, Delay, Teleport, TeleportWait, Aethernet, AethernetWait, Mount, Move, WaitReady, Interact, Dialogue, CombatWait, Combat, Finish }
+
+    /// <summary>
+    /// Same zone, but this far from the target: the aetheryte is almost certainly closer than the
+    /// walk. Below it we just walk even when the step names a shortcut.
+    /// </summary>
+    public const float TeleportWorthDistance = 250f;
 
     /// <summary>How close "arrived" is when the step does not say. Interact range is ~7y; 3 keeps us clearly inside it.</summary>
     public const float DefaultStopDistance = 3f;
@@ -53,6 +59,8 @@ public sealed class StepExecutor
     private static readonly TimeSpan CombatSpawnWait = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan CombatClearSettle = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan CombatMax = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan TravelStart = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan TravelMax = TimeSpan.FromSeconds(90);
     private const int MaxMoveRetries = 3;
 
     private readonly IStepWorld _world;
@@ -66,6 +74,10 @@ public sealed class StepExecutor
     private bool _sawOccupied;
     private bool _sawCombat;
     private DateTime _lastCombatSeen;
+    private bool _skipTeleport;
+    private uint _teleportTarget;
+    private uint _teleportTerritory;
+    private bool _sawTravelBusy;
 
     public StepExecutor(IStepWorld world) => _world = world;
 
@@ -74,13 +86,16 @@ public sealed class StepExecutor
     public QuestStep? Current => _step;
     public string PhaseName => _phase.ToString();
 
-    public void Begin(QuestStep step)
+    /// <param name="skipTeleport">The step's <c>AetheryteShortcutIf</c> holds — walk instead of teleporting.</param>
+    public void Begin(QuestStep step, bool skipTeleport = false)
     {
         _step = step;
         _stepStart = _world.UtcNow;
         _moveRetries = 0;
         _sawOccupied = false;
         _sawCombat = false;
+        _skipTeleport = skipTeleport;
+        _sawTravelBusy = false;
         FailReason = string.Empty;
         Status = StepStatus.Running;
 
@@ -126,6 +141,44 @@ public sealed class StepExecutor
                     Enter(NextAfterDelay());
                 break;
 
+            case Phase.Teleport:
+                if (!_world.IsReady || _world.InCombat)
+                {
+                    if (now - _phaseStart > ReadyWait) Fail("never became ready to teleport");
+                    break;
+                }
+                if (!_world.Teleport(_teleportTarget))
+                {
+                    Fail($"teleport to {step.AetheryteShortcut} (aetheryte {_teleportTarget}) was refused — Lifestream loaded and aetheryte attuned?");
+                    break;
+                }
+                Enter(Phase.TeleportWait);
+                break;
+
+            case Phase.TeleportWait:
+                TickTravelWait(now, arrived: _world.TerritoryId == _teleportTerritory && !_world.IsTravelBusy && _world.IsReady,
+                    what: $"teleport to {step.AetheryteShortcut}", next: NextAfterTeleport);
+                break;
+
+            case Phase.Aethernet:
+                if (!_world.IsReady || _world.IsTravelBusy)
+                {
+                    if (now - _phaseStart > ReadyWait) Fail("never became ready for the aethernet");
+                    break;
+                }
+                if (!_world.AethernetTeleport(step.AethernetShortcut![1]))
+                {
+                    Fail($"aethernet to {step.AethernetShortcut[1]} was refused — Lifestream loaded?");
+                    break;
+                }
+                Enter(Phase.AethernetWait);
+                break;
+
+            case Phase.AethernetWait:
+                TickTravelWait(now, arrived: !_world.IsTravelBusy && _world.IsReady,
+                    what: $"aethernet to {step.AethernetShortcut![1]}", next: NextAfterTravel);
+                break;
+
             case Phase.Mount:
                 if (_world.IsMounted || now - _phaseStart > MountWait)
                     Enter(Phase.Move);
@@ -166,9 +219,54 @@ public sealed class StepExecutor
 
     // ── phases ──
 
+    /// <summary>
+    /// Travel decision. Teleport when the step names an aetheryte and either we are in the wrong
+    /// zone or the target is a long way off in this one; then the aethernet hop if named; then
+    /// walk. A step in another zone with no shortcut is a clear failure, not a doomed pathfind.
+    /// </summary>
     private Phase NextAfterDelay()
     {
         var step = _step!;
+
+        if (step.AetheryteShortcut is { } aetheryteName && !_skipTeleport)
+        {
+            var id = _world.ResolveAetheryte(aetheryteName);
+            if (id is null)
+            {
+                Fail($"unknown aetheryte \"{aetheryteName}\" in the path data");
+                return Phase.None;
+            }
+            var territory = _world.AetheryteTerritory(id.Value) ?? 0;
+            var farAway = step.Position is { } p && Vector3.Distance(_world.PlayerPosition, p) > TeleportWorthDistance;
+            if (_world.TerritoryId != territory || farAway)
+            {
+                _teleportTarget = id.Value;
+                _teleportTerritory = territory;
+                return Phase.Teleport;
+            }
+        }
+
+        return NextAfterTeleport();
+    }
+
+    private Phase NextAfterTeleport()
+    {
+        var step = _step!;
+        if (step.AethernetShortcut is { Length: 2 })
+            return Phase.Aethernet;
+        return NextAfterTravel();
+    }
+
+    private Phase NextAfterTravel()
+    {
+        var step = _step!;
+
+        if (step.TerritoryId != 0 && _world.TerritoryId != step.TerritoryId)
+        {
+            Fail($"step is in territory {step.TerritoryId} but you are in {_world.TerritoryId} and the path gives no way there");
+            return Phase.None;
+        }
+
         if (step.Position is not { } target)
             return Phase.WaitReady;
 
@@ -186,6 +284,26 @@ public sealed class StepExecutor
         return Phase.Move;
     }
 
+    private void TickTravelWait(DateTime now, bool arrived, string what, Func<Phase> next)
+    {
+        if (_world.IsTravelBusy)
+            _sawTravelBusy = true;
+
+        if (arrived && (_sawTravelBusy || now - _phaseStart > TravelStart))
+        {
+            Enter(next());
+            return;
+        }
+
+        if (!_sawTravelBusy && now - _phaseStart > TravelStart && !arrived)
+        {
+            Fail($"{what} never started");
+            return;
+        }
+        if (now - _phaseStart > TravelMax)
+            Fail($"{what} did not finish in {TravelMax.TotalSeconds:F0}s");
+    }
+
     private static Phase NextAfterArrival(QuestStep step) => step.Kind switch
     {
         StepKind.WalkTo or StepKind.None => Phase.Finish,
@@ -200,6 +318,14 @@ public sealed class StepExecutor
         var target = step.Position!.Value;
         var tolerance = StopDistanceFor(step);
         var distance = Vector3.Distance(_world.PlayerPosition, target);
+
+        // A walk across a zone line arrives by changing zone, not by reaching the point.
+        if (step.TargetTerritoryId is { } targetTerritory && _world.TerritoryId == targetTerritory)
+        {
+            _world.StopMoving();
+            Enter(Phase.WaitReady);
+            return;
+        }
 
         if (distance <= tolerance + ArrivalSlack)
         {
@@ -372,6 +498,8 @@ public sealed class StepExecutor
 
     private void Enter(Phase phase)
     {
+        if (phase == Phase.None)
+            return; // a Next* helper already failed the step
         _phase = phase;
         _phaseStart = _world.UtcNow;
         if (phase == Phase.Move)

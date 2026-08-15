@@ -68,6 +68,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             new VnavIpc(PluginInterface, message => Log.Warning(message)),
             new DaedalusIpc(PluginInterface, message => Log.Warning(message)),
             new TextAdvanceIpc(PluginInterface, message => Log.Warning(message)),
+            new LifestreamIpc(PluginInterface, message => Log.Warning(message)),
+            new Services.Travel.AetheryteCatalog(DataManager, message => Log.Warning(message)),
             _quests, message => Log.Information(message));
         _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world), _world, _world,
             message => Log.Information(message));

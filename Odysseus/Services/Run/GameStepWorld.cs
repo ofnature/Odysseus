@@ -36,14 +36,19 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
     private readonly VnavIpc _vnav;
     private readonly DaedalusIpc _daedalus;
     private readonly TextAdvanceIpc _textAdvance;
+    private readonly LifestreamIpc _lifestream;
+    private readonly Travel.AetheryteCatalog _aetherytes;
     private readonly IQuestStateReader _quests;
     private readonly Action<string> _log;
 
     public GameStepWorld(
         IClientState clientState, IObjectTable objectTable, ICondition condition, IGameGui gameGui,
         ITargetManager targets, IDataManager data, VnavIpc vnav, DaedalusIpc daedalus,
-        TextAdvanceIpc textAdvance, IQuestStateReader quests, Action<string> log)
+        TextAdvanceIpc textAdvance, LifestreamIpc lifestream, Travel.AetheryteCatalog aetherytes,
+        IQuestStateReader quests, Action<string> log)
     {
+        _lifestream = lifestream;
+        _aetherytes = aetherytes;
         _clientState = clientState;
         _objectTable = objectTable;
         _condition = condition;
@@ -114,6 +119,22 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
             }
         }
     }
+
+    // ── Travel ──
+
+    public uint? ResolveAetheryte(string name) => _aetherytes.Resolve(name);
+
+    public uint? AetheryteTerritory(uint aetheryteId) => _aetherytes.TerritoryOf(aetheryteId);
+
+    public bool Teleport(uint aetheryteId) => _lifestream.Teleport(aetheryteId);
+
+    public bool AethernetTeleport(string destination) => _lifestream.AethernetTeleport(destination);
+
+    public bool IsTravelBusy
+        => _lifestream.IsBusy
+           || _condition[ConditionFlag.BetweenAreas]
+           || _condition[ConditionFlag.BetweenAreas51]
+           || _condition[ConditionFlag.Casting];
 
     // ── Player state ──
 

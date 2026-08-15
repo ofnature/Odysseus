@@ -191,11 +191,15 @@ public sealed class QuestController
                 _stepIndex++;
                 return;
             }
-            _executor.Begin(step);
-            _log($"Step {_stepIndex + 1}/{_block.Steps.Count} in seq {sequence}: {step}");
+            var skipTeleport = StepConditions.ShouldSkipAetheryte(step, _conditions, snap);
+            _executor.Begin(step, skipTeleport);
+            _log($"Step {_stepIndex + 1}/{_block.Steps.Count} in seq {sequence}: {step}" +
+                 (step.AetheryteShortcut is { } a ? $" via {a}{(skipTeleport ? " (skipped)" : "")}" : ""));
         }
 
-        State = _world.InCombat ? RunState.Combat : RunState.Step;
+        State = _world.InCombat ? RunState.Combat
+            : _executor.PhaseName.StartsWith("Teleport") || _executor.PhaseName.StartsWith("Aethernet") ? RunState.Travel
+            : RunState.Step;
         StatusLine = $"Seq {sequence} · step {_stepIndex + 1}/{_block.Steps.Count} · {step.Kind} · {_executor.PhaseName}";
 
         switch (_executor.Tick())

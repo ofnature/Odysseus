@@ -49,6 +49,23 @@ public interface IStepWorld
     /// <summary>Flying is available in the current zone (aether currents attuned).</summary>
     bool CanFlyHere { get; }
 
+    // ── Travel ──
+
+    /// <summary>Aetheryte id for a name as the path data spells it, or null when unknown.</summary>
+    uint? ResolveAetheryte(string name);
+
+    /// <summary>The zone an aetheryte stands in.</summary>
+    uint? AetheryteTerritory(uint aetheryteId);
+
+    /// <summary>Start a teleport. False when refused outright (no Lifestream, unknown/locked aetheryte).</summary>
+    bool Teleport(uint aetheryteId);
+
+    /// <summary>Start an aethernet hop to a shard by its display name. False when refused.</summary>
+    bool AethernetTeleport(string destination);
+
+    /// <summary>A teleport or aethernet hop is in progress (Lifestream busy, or the player is between areas).</summary>
+    bool IsTravelBusy { get; }
+
     // ── Player state ──
 
     bool InCombat { get; }
