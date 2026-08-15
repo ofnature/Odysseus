@@ -48,6 +48,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly RunWindow _runWindow;
     private readonly DebugWindow _debugWindow;
     private readonly FleetWindow _fleetWindow;
+    private readonly PathEditorWindow _pathEditorWindow;
 
     public OdysseusPlugin(IDalamudPluginInterface pluginInterface)
     {
@@ -90,7 +91,13 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         _configWindow = new ConfigWindow(_config, SaveConfig, _presence, _pathStore,
             QuestionableImporter.DefaultBundlePath(PluginInterface.ConfigDirectory.Parent?.FullName ?? string.Empty));
-        _runWindow = new RunWindow(_config, _presence, _quests, _catalog, _pathStore, _controller, OpenConfig, () => _fleetWindow!.IsOpen = true);
+        _pathEditorWindow = new PathEditorWindow(
+            _pathStore, _catalog, _controller,
+            () => ClientState.TerritoryType,
+            () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
+            () => TargetManager.Target?.BaseId);
+        _runWindow = new RunWindow(_config, _presence, _quests, _catalog, _pathStore, _controller, OpenConfig,
+            () => _fleetWindow!.IsOpen = true, questId => _pathEditorWindow!.Open(questId));
         _debugWindow = new DebugWindow(_quests, _catalog, _oracle, _presence);
         _fleetWindow = new FleetWindow(_config, _fleet);
 
@@ -98,6 +105,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _windowSystem.AddWindow(_runWindow);
         _windowSystem.AddWindow(_debugWindow);
         _windowSystem.AddWindow(_fleetWindow);
+        _windowSystem.AddWindow(_pathEditorWindow);
 
         PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += OpenConfig;
@@ -106,7 +114,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandMain, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open Odysseus. \"/odysseus config\" opens settings, \"/odysseus fleet\" the fleet dashboard, \"/odysseus debug\" the quest-state dump, \"/odysseus stop\" stops the run.",
+            HelpMessage = "Open Odysseus. \"/odysseus config\" settings, \"/odysseus fleet\" dashboard, \"/odysseus paths\" step editor, \"/odysseus debug\" quest-state dump, \"/odysseus stop\" stops the run.",
         });
         CommandManager.AddHandler(CommandShort, new CommandInfo(OnCommand)
         {
@@ -185,6 +193,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 break;
             case "fleet":
                 _fleetWindow.IsOpen = true;
+                break;
+            case "paths":
+            case "edit":
+                if (_controller.QuestId != 0) _pathEditorWindow.Open(_controller.QuestId);
+                else _pathEditorWindow.IsOpen = true;
                 break;
             case "stop":
                 _controller.Stop();

@@ -82,6 +82,26 @@ public sealed class QuestController
 
     public event Action<ushort>? QuestCompleted;
 
+    private QuestStep? _singleStep;
+
+    /// <summary>
+    /// Run exactly one step, then stop. For checking a repaired step from the editor without
+    /// committing to the quest — editing a position by hand is guesswork until something walks it.
+    /// </summary>
+    public bool StepOnce(QuestStep step)
+    {
+        if (State is not (RunState.Idle or RunState.Faulted))
+            return false;
+        _singleStep = step;
+        _path = null;
+        _block = null;
+        _executor.Begin(step);
+        State = RunState.Step;
+        StatusLine = $"Single step: {step}";
+        _log($"Step once: {step}");
+        return true;
+    }
+
     public bool Start(ushort questId)
     {
         var path = _paths.ForQuest(questId);
@@ -104,6 +124,7 @@ public sealed class QuestController
 
     public void Stop()
     {
+        _singleStep = null;
         _executor.Cancel();
         _world.StopMoving();
         _world.ReleaseDialogue();
@@ -118,16 +139,48 @@ public sealed class QuestController
     /// <summary>Called every framework tick.</summary>
     public void Tick()
     {
-        if (State is RunState.Idle or RunState.Faulted || _path is null)
+        if (State is RunState.Idle or RunState.Faulted)
             return;
 
         try
         {
+            if (_singleStep is not null)
+            {
+                TickSingleStep();
+                return;
+            }
+            if (_path is null)
+                return;
             TickInner();
         }
         catch (Exception ex)
         {
             Fault($"{ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private void TickSingleStep()
+    {
+        var phase = _executor.PhaseName;
+        State = phase.Contains("Duty") ? RunState.Handoff
+            : _world.InCombat ? RunState.Combat
+            : phase.StartsWith("Teleport") || phase.StartsWith("Aethernet") ? RunState.Travel
+            : RunState.Step;
+        StatusLine = $"Single step · {_singleStep} · {phase}";
+
+        switch (_executor.Tick())
+        {
+            case StepStatus.Done:
+                _log($"Step once done: {_singleStep}");
+                var done = _singleStep;
+                Stop();
+                StatusLine = $"Step done: {done}";
+                break;
+            case StepStatus.Failed:
+                var reason = _executor.FailReason;
+                _singleStep = null;
+                Fault($"single step failed: {reason}");
+                break;
         }
     }
 

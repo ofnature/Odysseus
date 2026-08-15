@@ -24,6 +24,7 @@ public sealed class RunWindow : Window
     private readonly QuestController _controller;
     private readonly Action _openConfig;
     private readonly Action _openFleet;
+    private readonly Action<ushort> _openEditor;
 
     private ushort _selectedQuest;
 
@@ -35,7 +36,8 @@ public sealed class RunWindow : Window
         PathStore paths,
         QuestController controller,
         Action openConfig,
-        Action openFleet)
+        Action openFleet,
+        Action<ushort> openEditor)
         : base("Odysseus##OdysseusRun")
     {
         _config = config;
@@ -46,6 +48,7 @@ public sealed class RunWindow : Window
         _controller = controller;
         _openConfig = openConfig;
         _openFleet = openFleet;
+        _openEditor = openEditor;
 
         Size = new Vector2(440, 400);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -179,6 +182,13 @@ public sealed class RunWindow : Window
                 if (OdysseusTheme.AccentButton(_controller.State == RunState.Faulted ? "Retry" : "Start quest"))
                     _controller.Start(_selectedQuest);
             }
+        }
+
+        if (_selectedQuest != 0 && _paths.Has(_selectedQuest))
+        {
+            ImGui.SameLine(0f, 0f);
+            if (ImGui.SmallButton("Edit path"))
+                _openEditor(_selectedQuest);
         }
 
         if (_controller.State == RunState.Faulted)

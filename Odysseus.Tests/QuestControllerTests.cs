@@ -228,6 +228,35 @@ public class QuestControllerTests : IDisposable
     }
 
     [Fact]
+    public void Step_once_runs_one_step_and_returns_to_idle_without_a_quest()
+    {
+        _world.Spawned.Add(77);
+        var step = Interact(77);
+        Assert.True(_controller.StepOnce(step));
+        Assert.Equal(RunState.Step, _controller.State);
+        Ticks(12);
+        Assert.Contains("Interact 77", _world.Calls);
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.Contains("Step done", _controller.StatusLine);
+    }
+
+    [Fact]
+    public void Step_once_is_refused_while_a_quest_runs_and_faults_on_a_bad_step()
+    {
+        _world.Spawned.Add(1);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+        _quests.Set(1622, 1);
+        _controller.Start(1622);
+        Assert.False(_controller.StepOnce(Interact(2)));
+        _controller.Stop();
+
+        Assert.True(_controller.StepOnce(Interact(404)));
+        Ticks(100, seconds: 1);
+        Assert.Equal(RunState.Faulted, _controller.State);
+        Assert.Contains("single step failed", _controller.StatusLine);
+    }
+
+    [Fact]
     public void Stop_returns_to_idle_and_releases_the_world()
     {
         _world.Spawned.Add(1);
