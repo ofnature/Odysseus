@@ -1,9 +1,11 @@
 using System;
+using System.IO;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
 using Odysseus.Config;
 using Odysseus.Services.Ipc;
+using Odysseus.Services.Paths;
 
 namespace Odysseus.Windows;
 
@@ -11,6 +13,7 @@ namespace Odysseus.Windows;
 internal enum ConfigSection
 {
     General,
+    Paths,
     Wake,
     Handoffs,
     Fleet,
@@ -29,15 +32,22 @@ public sealed class ConfigWindow : Window
     private readonly OdysseusConfig _config;
     private readonly Action _save;
     private readonly PluginPresence _presence;
+    private readonly PathStore _pathStore;
+    private readonly string _defaultBundlePath;
 
     private ConfigSection _currentSection = ConfigSection.General;
+    private string _bundlePath;
+    private string _importStatus = string.Empty;
 
-    public ConfigWindow(OdysseusConfig config, Action save, PluginPresence presence)
+    public ConfigWindow(OdysseusConfig config, Action save, PluginPresence presence, PathStore pathStore, string defaultBundlePath)
         : base("Odysseus Settings##OdysseusConfig")
     {
         _config = config;
         _save = save;
         _presence = presence;
+        _pathStore = pathStore;
+        _defaultBundlePath = defaultBundlePath;
+        _bundlePath = defaultBundlePath;
 
         Size = new Vector2(620, 520);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -129,6 +139,7 @@ public sealed class ConfigWindow : Window
 
         DrawCategoryHeader("RUN");
         DrawNavItem("General", ConfigSection.General);
+        DrawNavItem("Paths", ConfigSection.Paths);
         DrawNavItem("Handoffs", ConfigSection.Handoffs);
         ImGui.Spacing();
 
@@ -194,6 +205,7 @@ public sealed class ConfigWindow : Window
         switch (_currentSection)
         {
             case ConfigSection.General: DrawGeneralSection(); break;
+            case ConfigSection.Paths: DrawPathsSection(); break;
             case ConfigSection.Handoffs: DrawHandoffsSection(); break;
             case ConfigSection.Wake: DrawWakeSection(); break;
             case ConfigSection.Fleet: DrawFleetSection(); break;
@@ -222,6 +234,59 @@ public sealed class ConfigWindow : Window
             _save();
         }
         OdysseusTheme.HelpMarker("0 = never. Parks a trial alt short of its cap, or holds a sync level.");
+    }
+
+    private void DrawPathsSection()
+    {
+        OdysseusTheme.SectionHeader("QUEST PATHS");
+        ImGui.TextWrapped(
+            "Odysseus converts the quest paths already installed on this machine into its own format, " +
+            "once, and runs from the converted copy. Nothing is downloaded and nothing leaves this PC.");
+        ImGui.Spacing();
+
+        ImGui.TextColored(OdysseusTheme.TextSecondary, $"{_pathStore.Count} quest paths stored in {_pathStore.Directory}");
+        ImGui.Spacing();
+
+        ImGui.SetNextItemWidth(-1f);
+        ImGui.InputText("##bundle", ref _bundlePath, 512);
+        var exists = File.Exists(_bundlePath);
+        if (!exists)
+            ImGui.TextColored(OdysseusTheme.StatusYellow, "Bundle not found at that path.");
+        if (_bundlePath != _defaultBundlePath && ImGui.SmallButton("Use default location"))
+            _bundlePath = _defaultBundlePath;
+
+        ImGui.Spacing();
+        using (ImRaii.Disabled(!exists))
+        {
+            if (ImGui.Button("Import Main Scenario only"))
+                RunImport(folder => folder.Contains("/MSQ", StringComparison.OrdinalIgnoreCase));
+            ImGui.SameLine();
+            if (ImGui.Button("Import everything"))
+                RunImport(null);
+        }
+        OdysseusTheme.HelpMarker(
+            "MSQ only is ~1,000 quests and is all v1 runs. Everything is ~4,700; harmless, just more files.");
+
+        if (_importStatus.Length > 0)
+        {
+            ImGui.Spacing();
+            ImGui.TextWrapped(_importStatus);
+        }
+    }
+
+    private void RunImport(Func<string, bool>? filter)
+    {
+        try
+        {
+            var report = _pathStore.ImportBundle(_bundlePath, filter);
+            _importStatus = report.ToString();
+            if (report.Errors.Count > 0)
+                _importStatus += "\nFirst errors: " + string.Join("; ", report.Errors.GetRange(0, Math.Min(3, report.Errors.Count)));
+        }
+        catch (Exception ex)
+        {
+            _importStatus = $"Import failed: {ex.Message}";
+        }
     }
 
     private void DrawHandoffsSection()
