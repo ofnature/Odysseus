@@ -36,7 +36,8 @@ public sealed class AetheryteCatalog
     };
 
     private readonly Dictionary<string, uint> _byName = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<uint, (string Name, uint TerritoryId)> _byId = new();
+    private readonly Dictionary<uint, (string Name, string Zone, uint TerritoryId, System.Numerics.Vector3? Position)> _byId = new();
+    private readonly Dictionary<uint, string> _aliasById = new();
 
     /// <summary>Build from the game's sheets.</summary>
     public AetheryteCatalog(IDataManager data, Action<string> log)
@@ -49,7 +50,8 @@ public sealed class AetheryteCatalog
                     Id: a.RowId,
                     Name: a.PlaceName.ValueNullable?.Name.ExtractText() ?? string.Empty,
                     Zone: a.Territory.ValueNullable?.PlaceName.ValueNullable?.Name.ExtractText() ?? string.Empty,
-                    Territory: a.Territory.RowId));
+                    Territory: a.Territory.RowId,
+                    Position: LevelPosition(a)));
             Load(rows);
         }
         catch (Exception ex)
@@ -58,16 +60,35 @@ public sealed class AetheryteCatalog
         }
     }
 
-    /// <summary>Build from explicit rows — what the tests use.</summary>
-    public AetheryteCatalog(IEnumerable<(uint Id, string Name, string Zone, uint Territory)> rows) => Load(rows);
-
-    private void Load(IEnumerable<(uint Id, string Name, string Zone, uint Territory)> rows)
+    private static System.Numerics.Vector3? LevelPosition(Aetheryte a)
     {
-        foreach (var (id, name, zone, territory) in rows)
+        try
+        {
+            foreach (var l in a.Level)
+                if (l.RowId != 0 && l.ValueNullable is { } lv)
+                    return new System.Numerics.Vector3(lv.X, lv.Y, lv.Z);
+        }
+        catch
+        {
+            // A missing Level row is a missing position, not a missing aetheryte.
+        }
+        return null;
+    }
+
+    /// <summary>Build from explicit rows — what the tests use.</summary>
+    public AetheryteCatalog(IEnumerable<(uint Id, string Name, string Zone, uint Territory)> rows)
+        => Load(rows.Select(r => (r.Id, r.Name, r.Zone, r.Territory, (System.Numerics.Vector3?)null)));
+
+    /// <summary>Build from explicit rows with positions.</summary>
+    public AetheryteCatalog(IEnumerable<(uint Id, string Name, string Zone, uint Territory, System.Numerics.Vector3? Position)> rows) => Load(rows);
+
+    private void Load(IEnumerable<(uint Id, string Name, string Zone, uint Territory, System.Numerics.Vector3? Position)> rows)
+    {
+        foreach (var (id, name, zone, territory, position) in rows)
         {
             if (name.Length == 0)
                 continue;
-            _byId[id] = (name, territory);
+            _byId[id] = (name, zone, territory, position);
             // Sheet-exact and canonical forms both, so either spelling in the data hits.
             _byName.TryAdd(name, id);
             _byName.TryAdd(Canon(name), id);
@@ -75,7 +96,41 @@ public sealed class AetheryteCatalog
         }
         foreach (var (alias, real) in CityAliases)
             if (_byName.TryGetValue(real, out var id))
+            {
                 _byName[alias] = id;
+                _aliasById[id] = alias;
+            }
+    }
+
+    /// <summary>The name in the path data's own spelling — what the recorder writes so the resolver reads it back.</summary>
+    public string DataName(uint aetheryteId)
+    {
+        if (_aliasById.TryGetValue(aetheryteId, out var alias))
+            return alias;
+        if (!_byId.TryGetValue(aetheryteId, out var v))
+            return $"aetheryte {aetheryteId}";
+        return v.Zone.Length > 0 && !Canon(v.Zone).Equals(Canon(v.Name), StringComparison.OrdinalIgnoreCase)
+            ? $"{Canon(v.Zone)} - {Canon(v.Name)}"
+            : Canon(v.Name);
+    }
+
+    /// <summary>The nearest aetheryte in a zone within <paramref name="maxDistance"/> of a point, or null.</summary>
+    public uint? NearestIn(uint territoryId, System.Numerics.Vector3 point, float maxDistance)
+    {
+        uint? best = null;
+        var bestDistance = maxDistance;
+        foreach (var (id, v) in _byId)
+        {
+            if (v.TerritoryId != territoryId || v.Position is not { } p)
+                continue;
+            var d = System.Numerics.Vector3.Distance(p, point);
+            if (d <= bestDistance)
+            {
+                bestDistance = d;
+                best = id;
+            }
+        }
+        return best;
     }
 
     public int Count => _byId.Count;

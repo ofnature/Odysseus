@@ -22,6 +22,7 @@ public sealed class PathEditorWindow : Window
     private readonly PathStore _store;
     private readonly QuestCatalog _catalog;
     private readonly QuestController _controller;
+    private readonly PathRecorder _recorder;
     private readonly Func<uint> _territory;
     private readonly Func<Vector3> _playerPosition;
     private readonly Func<uint?> _targetDataId;
@@ -33,18 +34,23 @@ public sealed class PathEditorWindow : Window
     private bool _dirty;
     private string _status = string.Empty;
     private int _questInput;
+    /// <summary>A finished recording waiting on the overwrite decision.</summary>
+    private QuestPath? _recordedPending;
 
     public PathEditorWindow(
-        PathStore store, QuestCatalog catalog, QuestController controller,
+        PathStore store, QuestCatalog catalog, QuestController controller, PathRecorder recorder,
         Func<uint> territory, Func<Vector3> playerPosition, Func<uint?> targetDataId)
         : base("Odysseus Path Editor##OdysseusPaths")
     {
         _store = store;
         _catalog = catalog;
         _controller = controller;
+        _recorder = recorder;
         _territory = territory;
         _playerPosition = playerPosition;
         _targetDataId = targetDataId;
+        _recorder.Note += n => _status = $"Recording: {n}";
+        _recorder.StepRecorded += s => _status = $"Recorded: {s}";
         Size = new Vector2(760, 520);
         SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(600, 380), MaximumSize = new Vector2(1400, 1000) };
@@ -68,9 +74,13 @@ public sealed class PathEditorWindow : Window
         _status = _path is null ? $"No stored path for quest {questId}." : string.Empty;
     }
 
+    /// <summary>The recorder's quest, so the plugin knows what to observe.</summary>
+    public ushort RecordingQuestId { get; private set; }
+
     public override void Draw()
     {
         DrawHeader();
+        DrawRecorderBar();
         ImGui.Separator();
         var avail = ImGui.GetContentRegionAvail();
         ImGui.BeginChild("##steps", new Vector2(avail.X * 0.42f, avail.Y - 28f), true);
@@ -104,6 +114,92 @@ public sealed class PathEditorWindow : Window
             ImGui.TextColored(OdysseusTheme.TextSecondary, $"· {p.Category} · {p.Sequences.Count} seq / {p.StepCount} steps" +
                                                              (p.LastChecked is { } lc ? $" · upstream checked {lc}" : ""));
         }
+    }
+
+    // ── recorder ──
+
+    private void DrawRecorderBar()
+    {
+        if (_recordedPending is { } pending)
+        {
+            ImGui.TextColored(OdysseusTheme.StatusYellow,
+                $"Recorded {pending.StepCount} steps for {pending.Name}. A stored path already exists for quest {pending.QuestId}.");
+            if (OdysseusTheme.SolidButton("Overwrite stored path", OdysseusTheme.RedDark, new Vector2(170, 24)))
+            {
+                _store.Save(pending);
+                _recordedPending = null;
+                Load(pending.QuestId);
+                _status = "Recording saved over the stored path.";
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Discard recording", new Vector2(150, 24)))
+            {
+                _recordedPending = null;
+                _status = "Recording discarded.";
+            }
+            return;
+        }
+
+        if (_recorder.IsRecording)
+        {
+            ImGui.TextColored(OdysseusTheme.StatusRed, "● REC");
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.TextSecondary, $"{_recorder.Path!.Name} · {_recorder.StepCount} steps");
+            ImGui.SameLine(0f, 12f);
+            if (ImGui.Button("Walk-to here", new Vector2(100, 22)))
+                _recorder.AddWalkToHere();
+            ImGui.SameLine();
+            if (OdysseusTheme.SolidButton("Stop & keep", OdysseusTheme.GreenDark, new Vector2(100, 22)))
+                StopRecording(keep: true);
+            ImGui.SameLine();
+            if (OdysseusTheme.SolidButton("Stop & discard", OdysseusTheme.RedDark, new Vector2(110, 22)))
+                StopRecording(keep: false);
+            // While recording the list mirrors the recorder's path.
+            _path = _recorder.Path;
+            _questId = _recorder.Path.QuestId;
+            return;
+        }
+
+        var canRecord = _questInput is > 0 and <= ushort.MaxValue && _controller.State is RunState.Idle or RunState.Faulted;
+        using (ImRaii.Disabled(!canRecord))
+        {
+            if (OdysseusTheme.SolidButton("● Record", OdysseusTheme.RedDark, new Vector2(90, 22)))
+            {
+                var id = (ushort)_questInput;
+                var listing = _catalog.ById(id);
+                var category = listing?.IsMainScenario == true ? "Recorded/MSQ" : "Recorded";
+                _recorder.Begin(id, listing?.Name ?? $"Quest {id}", category);
+                RecordingQuestId = id;
+                _selectedSeq = -1;
+                _selectedStep = -1;
+                _dirty = false;
+                _status = $"Recording {listing?.Name ?? id.ToString()} — play the quest; talk, fight, teleport, and it writes the steps.";
+            }
+        }
+        OdysseusTheme.HelpMarker(
+            "Records a path from play for the quest id above: each NPC you talk to, each fight, each teleport and zone " +
+            "line, each instance, plus the quest-variable landmarks the Wake resumes on. Add waypoints with \"Walk-to here\". " +
+            "Stop & keep saves it as this quest's path.");
+    }
+
+    private void StopRecording(bool keep)
+    {
+        var path = _recorder.Finish();
+        RecordingQuestId = 0;
+        if (path is null || !keep)
+        {
+            _status = "Recording discarded.";
+            Load(_questId);
+            return;
+        }
+        if (_store.Has(path.QuestId))
+        {
+            _recordedPending = path;
+            return;
+        }
+        _store.Save(path);
+        Load(path.QuestId);
+        _status = $"Recording saved: {path.StepCount} steps.";
     }
 
     private void DrawStepList()

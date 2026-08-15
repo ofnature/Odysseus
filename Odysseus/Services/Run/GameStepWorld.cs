@@ -22,7 +22,7 @@ namespace Odysseus.Services.Run;
 /// the thing" or "report the fact", and all judgement lives in <see cref="StepExecutor"/> and
 /// <see cref="QuestController"/> where it can be tested.
 /// </summary>
-public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
+public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IRecorderWorld
 {
     /// <summary>GeneralAction 9 — Mount Roulette (verified against the sheet 2026-08-15).</summary>
     private const uint MountRouletteGeneralAction = 9;
@@ -167,6 +167,34 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld
            || _condition[ConditionFlag.WatchingCutscene78];
 
     public bool IsDead => _objectTable.LocalPlayer?.IsDead ?? false;
+
+    // ── IRecorderWorld ──
+
+    public bool IsCasting => _condition[ConditionFlag.Casting];
+
+    public bool IsBetweenAreas => _condition[ConditionFlag.BetweenAreas] || _condition[ConditionFlag.BetweenAreas51];
+
+    public uint CurrentDutyCfc
+    {
+        get
+        {
+            try
+            {
+                var main = FFXIVClientStructs.FFXIV.Client.Game.GameMain.Instance();
+                return main == null ? 0u : (uint)Math.Max(0, (int)main->CurrentContentFinderConditionId);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+    }
+
+    public uint? TargetDataId => _targets.Target?.BaseId;
+
+    public Vector3? TargetPosition => _targets.Target?.Position;
+
+    public bool TargetIsEnemy => _targets.Target is { ObjectKind: ObjectKind.BattleNpc };
 
     // ── IConditionWorld ──
 

@@ -49,6 +49,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly DebugWindow _debugWindow;
     private readonly FleetWindow _fleetWindow;
     private readonly PathEditorWindow _pathEditorWindow;
+    private readonly PathRecorder _recorder = new();
+    private readonly RecorderFeed _recorderFeed;
 
     public OdysseusPlugin(IDalamudPluginInterface pluginInterface)
     {
@@ -67,17 +69,20 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "paths"),
             message => Log.Information(message));
 
+        var aetherytes = new Services.Travel.AetheryteCatalog(DataManager, message => Log.Warning(message));
+        var duties = new DutyCatalog(DataManager, message => Log.Warning(message));
         _world = new GameStepWorld(
             ClientState, ObjectTable, Condition, GameGui, TargetManager, DataManager,
             new VnavIpc(PluginInterface, message => Log.Warning(message)),
             new DaedalusIpc(PluginInterface, message => Log.Warning(message)),
             new TextAdvanceIpc(PluginInterface, message => Log.Warning(message)),
             new LifestreamIpc(PluginInterface, message => Log.Warning(message)),
-            new Services.Travel.AetheryteCatalog(DataManager, message => Log.Warning(message)),
+            aetherytes,
             new TheseusIpc(PluginInterface, message => Log.Warning(message)),
             new ChatCommandSender(message => Log.Warning(message)),
-            new DutyCatalog(DataManager, message => Log.Warning(message)),
+            duties,
             _quests, message => Log.Information(message));
+        _recorderFeed = new RecorderFeed(_world, _quests, aetherytes, duties);
         _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world), _world, _world, _config,
             completed => _catalog.NextMainScenario(completed, _quests.IsComplete),
             message => Log.Information(message));
@@ -93,7 +98,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _configWindow = new ConfigWindow(_config, SaveConfig, _presence, _pathStore,
             QuestionableImporter.DefaultBundlePath(PluginInterface.ConfigDirectory.Parent?.FullName ?? string.Empty));
         _pathEditorWindow = new PathEditorWindow(
-            _pathStore, _catalog, _controller,
+            _pathStore, _catalog, _controller, _recorder,
             () => ClientState.TerritoryType,
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
             () => TargetManager.Target?.BaseId);
@@ -149,6 +154,18 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     {
         // The dashboard is useful even with the runner off: it says who is where.
         _fleet.Tick();
+
+        if (_recorder.IsRecording)
+        {
+            try
+            {
+                _recorder.Observe(_recorderFeed.Next(_pathEditorWindow.RecordingQuestId));
+            }
+            catch (System.Exception ex)
+            {
+                Log.Warning($"Recorder tick failed: {ex.Message}");
+            }
+        }
 
         if (!_config.Enabled)
         {
