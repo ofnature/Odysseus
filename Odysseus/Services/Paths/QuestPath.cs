@@ -32,6 +32,21 @@ public enum StepKind
     Dive,
     Say,
     EquipRecommended,
+    // ── Seen only outside the MSQ (bundle-wide survey 2026-08-15) — named so Unknown means new ──
+    Craft,
+    Action,
+    Gather,
+    WaitForNpcAtPosition,
+    PurchaseItem,
+    SwitchClass,
+    UpdateGearset,
+    CreateGearset,
+    Instruction,
+    Fish,
+    UnlockTaxiStand,
+    RegisterFreeOrFavoredAetheryte,
+    WaitForManualProgress,
+    StatusOff,
 }
 
 /// <summary>How the enemies for a <see cref="StepKind.Combat"/> step come to exist.</summary>

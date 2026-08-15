@@ -14,13 +14,16 @@ public sealed class ImportReport
 {
     public int Converted { get; set; }
     public int Failed { get; set; }
+    /// <summary>Files that are not quests (no <c>{id}_</c> prefix — allied-society and delivery bundles). Expected, not an error.</summary>
+    public int Skipped { get; set; }
     public int UnknownKinds { get; set; }
     public string DataVersion { get; set; } = string.Empty;
     public string GeneratedAt { get; set; } = string.Empty;
     public List<string> Errors { get; } = [];
 
     public override string ToString()
-        => $"{Converted} converted, {Failed} failed" + (UnknownKinds > 0 ? $", {UnknownKinds} steps of unknown kind" : "")
+        => $"{Converted} converted, {Failed} failed" + (Skipped > 0 ? $", {Skipped} non-quest files skipped" : "")
+           + (UnknownKinds > 0 ? $", {UnknownKinds} steps of unknown kind" : "")
            + (DataVersion.Length > 0 ? $" · bundle {DataVersion} ({GeneratedAt})" : "");
 }
 
@@ -90,8 +93,7 @@ public static class QuestionableImporter
                 var path = Parse(entry.Name, folder, json, out var unknownKinds);
                 if (path is null)
                 {
-                    report.Failed++;
-                    report.Errors.Add($"{entry.FullName}: file name carries no quest id");
+                    report.Skipped++;
                     continue;
                 }
                 report.UnknownKinds += unknownKinds;
