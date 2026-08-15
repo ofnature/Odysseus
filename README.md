@@ -18,14 +18,26 @@ the ship as the feature that actually matters.
 **It resumes — from the game, not from a file.** Quest, sequence and the quest's own progress
 variables are all held server-side, so Odysseus reads them back rather than trusting anything it
 saved. A crash, a logout, a plugin reload or a full client restart all pick up exactly where the
-game says you are.
+game says you are. The run window shows the live quest state and, in foam, what the Wake did
+about it.
+
+<img src="images/run.png" alt="Odysseus run window: live quest state, the Wake's resume line, and the stop button" width="440">
 
 **It hands off instead of reimplementing.** Solo instances go to BossMod Reborn's AI. Dungeons and
 trials inside a quest go to Theseus. Combat goes to Daedalus. Odysseus owns the quest and the
-walk between; everything else is delegated to the plugin built for it.
+walk between; everything else is delegated to the plugin built for it. Each handoff is a toggle;
+with it off, Odysseus walks to the entrance and waits for you.
+
+<img src="images/settings.png" alt="Odysseus settings window: sidebar with Run, Recovery, Fleet and System sections; dependency chips in the footer" width="660">
 
 **Fleet visibility, not fleet lockstep.** Every character quests independently. A read-only
-dashboard shows where each box in the fleet is in the story.
+dashboard shows where each box in the fleet is in the story, which state it is in, and when it
+was last heard from.
+
+<img src="images/fleet.png" alt="Odysseus fleet dashboard: one row per character with quest, sequence, state and last-seen" width="560">
+
+> The screenshots above are design mockups of the intended UI, not captures of the running
+> plugin.
 
 ## Dependencies
 
