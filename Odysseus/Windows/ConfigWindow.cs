@@ -1,0 +1,328 @@
+using System;
+using System.Numerics;
+using Dalamud.Bindings.ImGui;
+using Dalamud.Interface.Windowing;
+using Odysseus.Config;
+using Odysseus.Services.Ipc;
+
+namespace Odysseus.Windows;
+
+/// <summary>Navigation sections in the settings sidebar.</summary>
+internal enum ConfigSection
+{
+    General,
+    Wake,
+    Handoffs,
+    Fleet,
+    Debug,
+}
+
+/// <summary>
+/// Odysseus settings window. Same layout as the rest of the suite — master toggle in the header,
+/// left sidebar with dim small-cap group headers and an accent bar on the selected row, bordered
+/// content pane, footer status line — carrying the wine-dark accent.
+/// </summary>
+public sealed class ConfigWindow : Window
+{
+    private const float SidebarWidth = 150f;
+
+    private readonly OdysseusConfig _config;
+    private readonly Action _save;
+    private readonly PluginPresence _presence;
+
+    private ConfigSection _currentSection = ConfigSection.General;
+
+    public ConfigWindow(OdysseusConfig config, Action save, PluginPresence presence)
+        : base("Odysseus Settings##OdysseusConfig")
+    {
+        _config = config;
+        _save = save;
+        _presence = presence;
+
+        Size = new Vector2(620, 520);
+        SizeCondition = ImGuiCond.FirstUseEver;
+        SizeConstraints = new WindowSizeConstraints
+        {
+            MinimumSize = new Vector2(540, 400),
+            MaximumSize = new Vector2(900, 900),
+        };
+    }
+
+    public override void Draw()
+    {
+        ImGui.PushStyleVar(ImGuiStyleVar.FrameRounding, 4f);
+        try
+        {
+            DrawHeader();
+            ImGui.Separator();
+            ImGui.Spacing();
+            DrawMainLayout();
+            ImGui.Spacing();
+            ImGui.Separator();
+            DrawFooter();
+        }
+        finally
+        {
+            ImGui.PopStyleVar();
+        }
+    }
+
+    // ------------------------------------------------------------------ header / footer
+
+    private void DrawHeader()
+    {
+        var enabled = _config.Enabled;
+        if (ImGui.Checkbox("Enable Odysseus", ref enabled))
+        {
+            _config.Enabled = enabled;
+            _save();
+        }
+
+        ImGui.SameLine(0f, 20f);
+        var missing = _presence.MissingSummary();
+        if (missing.Length == 0)
+            OdysseusTheme.StatusDot(_config.Enabled, "Ready", "Disabled");
+        else
+            ImGui.TextColored(OdysseusTheme.StatusRed, "⚠ " + missing);
+
+        ImGui.TextDisabled("Runs the Main Scenario unattended — and remembers where it stopped.");
+    }
+
+    private void DrawFooter()
+    {
+        ImGui.TextColored(OdysseusTheme.TextSecondary, $"Odysseus v{OdysseusPlugin.PluginVersion}");
+
+        ImGui.SameLine(0f, 20f);
+        OdysseusTheme.DependencyChip("vnavmesh", _presence.Vnavmesh);
+        ImGui.SameLine(0f, 12f);
+        OdysseusTheme.DependencyChip("Lifestream", _presence.Lifestream);
+        ImGui.SameLine(0f, 12f);
+        OdysseusTheme.DependencyChip("TextAdvance", _presence.TextAdvance);
+        ImGui.SameLine(0f, 12f);
+        OdysseusTheme.DependencyChip("Daedalus", _presence.Daedalus, required: false);
+        ImGui.SameLine(0f, 12f);
+        OdysseusTheme.DependencyChip("BossMod", _presence.BossMod, required: false);
+        ImGui.SameLine(0f, 12f);
+        OdysseusTheme.DependencyChip("Theseus", _presence.Theseus, required: false);
+    }
+
+    // ------------------------------------------------------------------ layout
+
+    private void DrawMainLayout()
+    {
+        var availableHeight = ImGui.GetContentRegionAvail().Y - 32f; // reserve the footer line
+
+        ImGui.BeginChild("##SidebarContainer", new Vector2(SidebarWidth + 10f, availableHeight), false);
+        DrawSidebar();
+        ImGui.EndChild();
+
+        ImGui.SameLine();
+
+        ImGui.BeginChild("##ContentArea", new Vector2(0, availableHeight), true);
+        DrawCurrentSection();
+        ImGui.EndChild();
+    }
+
+    private void DrawSidebar()
+    {
+        ImGui.BeginChild("##ConfigSidebar", new Vector2(SidebarWidth, 0), true);
+
+        DrawCategoryHeader("RUN");
+        DrawNavItem("General", ConfigSection.General);
+        DrawNavItem("Handoffs", ConfigSection.Handoffs);
+        ImGui.Spacing();
+
+        DrawCategoryHeader("RECOVERY");
+        // The Wake gets its own foam so the resume system is identifiable on sight.
+        DrawNavItem("The Wake", ConfigSection.Wake, OdysseusTheme.WakeFoam);
+        ImGui.Spacing();
+
+        DrawCategoryHeader("FLEET");
+        DrawNavItem("Dashboard", ConfigSection.Fleet);
+        ImGui.Spacing();
+
+        DrawCategoryHeader("SYSTEM");
+        DrawNavItem("Debug", ConfigSection.Debug);
+
+        ImGui.EndChild();
+    }
+
+    private static void DrawCategoryHeader(string label)
+        => ImGui.TextColored(OdysseusTheme.StatusGrey, label);
+
+    private void DrawNavItem(string label, ConfigSection section, Vector4? color = null)
+    {
+        var isSelected = _currentSection == section;
+        var rowAccent = color ?? OdysseusTheme.AccentWine;
+        var rowWash = color is null ? OdysseusTheme.AccentWash : OdysseusTheme.WakeWash;
+
+        // Selection: faint wash + 2px accent bar on the left edge (suite identity).
+        if (isSelected)
+        {
+            var cursorPos = ImGui.GetCursorScreenPos();
+            var regionAvail = ImGui.GetContentRegionAvail();
+            var drawList = ImGui.GetWindowDrawList();
+            var rowMax = new Vector2(cursorPos.X + regionAvail.X,
+                cursorPos.Y + ImGui.GetTextLineHeightWithSpacing());
+            drawList.AddRectFilled(cursorPos, rowMax, ImGui.GetColorU32(rowWash));
+            drawList.AddRectFilled(cursorPos, new Vector2(cursorPos.X + 2f, rowMax.Y),
+                ImGui.GetColorU32(rowAccent));
+        }
+
+        ImGui.Indent(10);
+
+        var textColor = isSelected ? rowAccent : color ?? OdysseusTheme.TextSecondary;
+        ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+        ImGui.PushStyleColor(ImGuiCol.Header, rowWash);
+        ImGui.PushStyleColor(ImGuiCol.HeaderHovered, rowWash);
+        ImGui.PushStyleColor(ImGuiCol.HeaderActive, rowWash);
+
+        var clicked = ImGui.Selectable($"  {label}##{section}", isSelected, ImGuiSelectableFlags.None,
+            new Vector2(SidebarWidth - 25, 0));
+
+        ImGui.PopStyleColor(4);
+        ImGui.Unindent(10);
+
+        if (clicked)
+            _currentSection = section;
+    }
+
+    // ------------------------------------------------------------------ sections
+
+    private void DrawCurrentSection()
+    {
+        switch (_currentSection)
+        {
+            case ConfigSection.General: DrawGeneralSection(); break;
+            case ConfigSection.Handoffs: DrawHandoffsSection(); break;
+            case ConfigSection.Wake: DrawWakeSection(); break;
+            case ConfigSection.Fleet: DrawFleetSection(); break;
+            case ConfigSection.Debug: DrawDebugSection(); break;
+        }
+    }
+
+    private void DrawGeneralSection()
+    {
+        OdysseusTheme.SectionHeader("GENERAL");
+
+        var continueNext = _config.ContinueToNextQuest;
+        if (ImGui.Checkbox("Continue into the next MSQ quest", ref continueNext))
+        {
+            _config.ContinueToNextQuest = continueNext;
+            _save();
+        }
+        OdysseusTheme.HelpMarker(
+            "Off runs one quest and stops — what you want while a path is still being proven.");
+
+        var stopAt = _config.StopAtLevel;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("Stop at level", ref stopAt))
+        {
+            _config.StopAtLevel = Math.Clamp(stopAt, 0, 100);
+            _save();
+        }
+        OdysseusTheme.HelpMarker("0 = never. Parks a trial alt short of its cap, or holds a sync level.");
+    }
+
+    private void DrawHandoffsSection()
+    {
+        OdysseusTheme.SectionHeader("HANDOFFS");
+        ImGui.TextWrapped(
+            "Instanced content inside a quest is handed to the plugin that already does it. " +
+            "With a handoff off, Odysseus walks to the entrance and waits for you.");
+        ImGui.Spacing();
+
+        var solo = _config.HandOffSoloDuties;
+        if (ImGui.Checkbox("Solo duties → BossMod Reborn", ref solo))
+        {
+            _config.HandOffSoloDuties = solo;
+            _save();
+        }
+        if (!_presence.BossMod)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.StatusYellow, "(BossMod not loaded)");
+        }
+
+        var duties = _config.HandOffDutiesToTheseus;
+        if (ImGui.Checkbox("Dungeons and trials → Theseus", ref duties))
+        {
+            _config.HandOffDutiesToTheseus = duties;
+            _save();
+        }
+        if (!_presence.Theseus)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.StatusYellow, "(Theseus not loaded)");
+        }
+    }
+
+    private void DrawWakeSection()
+    {
+        OdysseusTheme.SectionHeader("THE WAKE", OdysseusTheme.WakeFoam);
+        ImGui.TextWrapped(
+            "Quest, sequence and the quest's own progress variables are read straight from the game, " +
+            "so an interrupted quest picks up where the game says it stopped — after a crash, a " +
+            "logout or a reload. Nothing saved locally is trusted over that.");
+        ImGui.Spacing();
+
+        var resume = _config.EnableResume;
+        if (ImGui.Checkbox("Resume interrupted quests", ref resume))
+        {
+            _config.EnableResume = resume;
+            _save();
+        }
+
+        using (ImRaii.Disabled(!resume))
+        {
+            var confirm = _config.ConfirmBeforeResume;
+            if (ImGui.Checkbox("Ask before resuming", ref confirm))
+            {
+                _config.ConfirmBeforeResume = confirm;
+                _save();
+            }
+        }
+    }
+
+    private void DrawFleetSection()
+    {
+        OdysseusTheme.SectionHeader("FLEET DASHBOARD");
+        ImGui.TextWrapped(
+            "Read-only. Each box publishes where it is in the MSQ over the Daedalus relay; the " +
+            "dashboard shows every box at once. Nothing on the wire changes what this box does.");
+        ImGui.Spacing();
+
+        var publish = _config.PublishFleetStatus;
+        if (ImGui.Checkbox("Publish this character's status", ref publish))
+        {
+            _config.PublishFleetStatus = publish;
+            _save();
+        }
+        if (!_presence.Daedalus)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.StatusYellow, "(Daedalus not loaded — no relay)");
+        }
+
+        var stale = _config.PeerStaleSeconds;
+        ImGui.SetNextItemWidth(160f);
+        if (ImGui.SliderFloat("Peer stale after (s)", ref stale, 3f, 60f, "%.0f"))
+        {
+            _config.PeerStaleSeconds = stale;
+            _save();
+        }
+    }
+
+    private void DrawDebugSection()
+    {
+        OdysseusTheme.SectionHeader("DEBUG");
+
+        var debug = _config.DebugMode;
+        if (ImGui.Checkbox("Debug mode", ref debug))
+        {
+            _config.DebugMode = debug;
+            _save();
+        }
+        OdysseusTheme.HelpMarker("Verbose step logging and the debug window (/odysseus debug).");
+    }
+}

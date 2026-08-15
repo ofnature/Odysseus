@@ -1,0 +1,21 @@
+{
+  "Author": "ofnature",
+  "Name": "Odysseus",
+  "InternalName": "Odysseus",
+  "Punchline": "Runs the Main Scenario unattended — and remembers where it stopped.",
+  "Description": "Automated Main Scenario questing. Walks each quest from accept to complete, travels between zones, resolves dialogue, and hands solo instances to BossMod Reborn and dungeons to Theseus. Progress is read back from the game's own quest state, so a crash, logout or reload resumes exactly where it stopped. Every character quests independently; a fleet dashboard shows where each one is. Companion to Daedalus and Theseus.",
+  "ApplicableVersion": "any",
+  "DalamudApiLevel": 15,
+  "RepoUrl": "https://github.com/ofnature/Odysseus",
+  "IconUrl": "https://raw.githubusercontent.com/ofnature/Odysseus/main/images/icon.png",
+  "Tags": [
+    "quest",
+    "msq",
+    "automation",
+    "multibox"
+  ],
+  "CategoryTags": [
+    "utility"
+  ],
+  "LoadPriority": 0
+}
