@@ -38,7 +38,6 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly PluginPresence _presence;
     private readonly IQuestStateReader _quests;
     private readonly QuestCatalog _catalog;
-    private readonly QuestionableOracle _oracle;
     private readonly PathStore _pathStore;
     private readonly GameStepWorld _world;
     private readonly QuestController _controller;
@@ -66,8 +65,6 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _presence = new PluginPresence(PluginInterface);
         _quests = new QuestStateReader(fault => Log.Warning($"Quest state read failed. {fault}"));
         _catalog = new QuestCatalog(DataManager, message => Log.Warning(message));
-        // Differential test oracle only — see QuestionableOracle. Never on the run path.
-        _oracle = new QuestionableOracle(PluginInterface);
 
         _pathStore = new PathStore(
             System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "paths"),
@@ -113,7 +110,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
             () => TargetManager.Target?.BaseId);
         _logWindow = new LogWindow(_runLog);
-        _debugWindow = new DebugWindow(_quests, _catalog, _oracle, _presence);
+        _debugWindow = new DebugWindow(_quests, _catalog);
         _fleetWindow = new FleetWindow(_config, _fleet);
         _mainWindow = new MainWindow(new MainWindowDeps(
             _config, SaveConfig, _presence, _quests, _catalog, _pathStore, _controller, _frontier, _fleet,

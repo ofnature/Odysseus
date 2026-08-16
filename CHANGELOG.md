@@ -26,5 +26,5 @@ First cut. Everything below is built and unit-tested; in-game verification is in
 
 ### Diagnostics
 - Step log with repeat offenders and a copy button; `runlog.jsonl` under the config directory
-- Debug window with a differential check against Questionable's own reading of quest state
+- Debug window: the story frontier's two sources and every accepted quest's live sequence and variables
 <!-- LATEST-END -->
