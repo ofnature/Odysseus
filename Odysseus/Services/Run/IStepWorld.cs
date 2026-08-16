@@ -72,6 +72,15 @@ public interface IStepWorld
 
     bool IsCasting { get; }
 
+    /// <summary>The current class/job is a Disciple of War or Magic.</summary>
+    bool IsCombatJob { get; }
+
+    /// <summary>Equip a gearset by id (0-based). False when refused.</summary>
+    bool EquipGearset(int gearsetId);
+
+    /// <summary>Gearset ids whose class is a combat job, in order.</summary>
+    System.Collections.Generic.IReadOnlyList<int> CombatGearsets();
+
     bool InCombat { get; }
 
     /// <summary>Not occupied, casting, zoning or otherwise mid-something.</summary>
@@ -152,6 +161,12 @@ public interface IStepWorld
 
     /// <summary>The entries of the list dialog currently showing, in order; empty when none.</summary>
     System.Collections.Generic.IReadOnlyList<string> SelectStringEntries();
+
+    /// <summary>The entries of the icon-list dialog (quest offers) currently showing; empty when none.</summary>
+    System.Collections.Generic.IReadOnlyList<string> SelectIconStringEntries();
+
+    /// <summary>Picks an entry in the icon-list dialog if one is showing.</summary>
+    void SelectIconStringIndex(int index);
 
     /// <summary>
     /// Press Complete on the quest reward window. Returns false when the window is not up or the

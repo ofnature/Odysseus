@@ -44,6 +44,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly StoryFrontier _frontier;
     private readonly PriorityList _priority;
     private readonly PriorityWorld _priorityWorld;
+    private readonly Services.Tribes.TribeCatalog _tribes;
+    private readonly Services.Tribes.TribeState _tribeState;
+    private readonly Services.Tribes.TribeRunner _tribeRunner;
+    private readonly System.Collections.Generic.Queue<byte> _tribeQueue = new();
+    private readonly TribesWindow _tribesWindow;
     private System.DateTime _lastPrune;
     private readonly RunLog _runLog;
     private readonly FleetPublisher _fleet;
@@ -113,6 +118,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _controller.PriorityNext = () => _priority.NextReady(_priorityWorld);
         _controller.StoryCurrent = () => _frontier.Current()?.QuestId;
 
+        _tribes = new Services.Tribes.TribeCatalog(DataManager, message => Log.Warning(message));
+        _tribeState = new Services.Tribes.TribeState(_tribes, message => Log.Warning(message));
+        _tribeRunner = new Services.Tribes.TribeRunner(_world, _tribeState, _controller,
+            new StepExecutor(_world, dialogue), message => Log.Information(message));
+
         // Published once the controller exists, so the gate never reports on a half-built run.
         _ipc = new OdysseusIpc(PluginInterface, () => _config.Enabled && _controller.State.IsDriving());
 
@@ -145,8 +155,13 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ClientState.TerritoryType,
             () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—"));
 
+        _tribesWindow = new TribesWindow(_config, _tribes, _tribeState, _tribeRunner,
+            id => { if (!_tribeQueue.Contains(id)) _tribeQueue.Enqueue(id); },
+            () => { _tribeQueue.Clear(); _tribeRunner.Stop(); });
+
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
+        _windowSystem.AddWindow(_tribesWindow);
         _windowSystem.AddWindow(_debugWindow);
         _windowSystem.AddWindow(_fleetWindow);
         _windowSystem.AddWindow(_pathEditorWindow);
@@ -159,7 +174,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandMain, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open Odysseus. \"/odysseus config\" settings, \"/odysseus fleet\" dashboard, \"/odysseus log\" step log, \"/odysseus paths\" step editor, \"/odysseus debug\" quest-state dump, \"/odysseus stop\" stops the run.",
+            HelpMessage = "Open Odysseus. \"/odysseus config\" settings, \"/odysseus tribes\" allied societies, \"/odysseus fleet\" dashboard, \"/odysseus log\" step log, \"/odysseus paths\" step editor, \"/odysseus debug\" quest-state dump, \"/odysseus stop\" stops the run.",
         });
         CommandManager.AddHandler(CommandShort, new CommandInfo(OnCommand)
         {
@@ -242,6 +257,24 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 _controller.Stop();
             return;
         }
+
+        // Tribe dailies own the controller while a run is active; otherwise the MSQ controller does.
+        if (_tribeRunner.State is not (Services.Tribes.TribeRunState.Idle or Services.Tribes.TribeRunState.Done or Services.Tribes.TribeRunState.Faulted))
+        {
+            _tribeRunner.Tick();
+            return;
+        }
+        if (_tribeQueue.Count > 0 && _controller.State == RunState.Idle)
+        {
+            var next = _tribeQueue.Peek();
+            if (_tribes.ById(next) is { } tribe && _tribeRunner.Start(tribe))
+            {
+                _tribeQueue.Dequeue();
+                return;
+            }
+            _tribeQueue.Dequeue(); // could not start (nothing left / not unlocked) — drop and move on
+        }
+
         _controller.Tick();
     }
 
@@ -306,6 +339,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             case "fleet":
                 _fleetWindow.IsOpen = true;
                 break;
+            case "tribes":
+                _tribesWindow.IsOpen = true;
+                break;
             case "log":
                 _logWindow.IsOpen = true;
                 break;
@@ -315,6 +351,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 else _pathEditorWindow.IsOpen = true;
                 break;
             case "stop":
+                _tribeQueue.Clear();
+                _tribeRunner.Stop();
                 _controller.Stop();
                 break;
             default:

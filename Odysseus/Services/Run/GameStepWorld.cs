@@ -146,6 +146,48 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     public int PlayerLevel => _objectTable.LocalPlayer?.Level ?? 0;
 
+    /// <summary>ClassJob role 1–4 (tank, melee, ranged, healer); crafters and gatherers are role 0.</summary>
+    public bool IsCombatJob => (_objectTable.LocalPlayer?.ClassJob.ValueNullable?.Role ?? 0) != 0;
+
+    public bool EquipGearset(int gearsetId)
+    {
+        try
+        {
+            var module = FFXIVClientStructs.FFXIV.Client.UI.Misc.RaptureGearsetModule.Instance();
+            if (module == null || !module->IsValidGearset(gearsetId)) return false;
+            return module->EquipGearset(gearsetId, 0) >= 0;
+        }
+        catch (Exception ex)
+        {
+            _log($"EquipGearset {gearsetId} failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public IReadOnlyList<int> CombatGearsets()
+    {
+        var result = new List<int>();
+        try
+        {
+            var module = FFXIVClientStructs.FFXIV.Client.UI.Misc.RaptureGearsetModule.Instance();
+            if (module == null) return result;
+            var jobs = _data.GetExcelSheet<ClassJob>();
+            for (var i = 0; i < 100; i++)
+            {
+                if (!module->IsValidGearset(i)) continue;
+                var entry = module->GetGearset(i);
+                if (entry == null) continue;
+                var role = jobs.GetRowOrDefault(entry->ClassJob)?.Role ?? 0;
+                if (role != 0) result.Add(i);
+            }
+        }
+        catch (Exception ex)
+        {
+            _log($"Gearset scan failed: {ex.Message}");
+        }
+        return result;
+    }
+
     public bool InCombat => _condition[ConditionFlag.InCombat];
 
     public bool IsReady
@@ -402,22 +444,45 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
             if (addon.IsNull || !addon.IsVisible)
                 return Array.Empty<string>();
             var select = (FFXIVClientStructs.FFXIV.Client.UI.AddonSelectString*)addon.Address;
-            var menu = &select->PopupMenu.PopupMenu;
-            var count = Math.Clamp(menu->EntryCount, 0, 32);
-            var entries = new List<string>(count);
-            for (var i = 0; i < count; i++)
-            {
-                var ptr = menu->EntryNames[i].Value;
-                entries.Add(ptr == null ? string.Empty
-                    : Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)ptr).TextValue);
-            }
-            return entries;
+            return ReadPopupMenu(&select->PopupMenu.PopupMenu);
         }
         catch (Exception ex)
         {
             _log($"SelectString read failed: {ex.Message}");
             return Array.Empty<string>();
         }
+    }
+
+    public IReadOnlyList<string> SelectIconStringEntries()
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName("SelectIconString");
+            if (addon.IsNull || !addon.IsVisible)
+                return Array.Empty<string>();
+            var select = (FFXIVClientStructs.FFXIV.Client.UI.AddonSelectIconString*)addon.Address;
+            return ReadPopupMenu(&select->PopupMenu.PopupMenu);
+        }
+        catch (Exception ex)
+        {
+            _log($"SelectIconString read failed: {ex.Message}");
+            return Array.Empty<string>();
+        }
+    }
+
+    public void SelectIconStringIndex(int index) => FireAddonCallback("SelectIconString", index);
+
+    private static IReadOnlyList<string> ReadPopupMenu(FFXIVClientStructs.FFXIV.Client.UI.PopupMenu* menu)
+    {
+        var count = Math.Clamp(menu->EntryCount, 0, 32);
+        var entries = new List<string>(count);
+        for (var i = 0; i < count; i++)
+        {
+            var ptr = menu->EntryNames[i].Value;
+            entries.Add(ptr == null ? string.Empty
+                : Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)ptr).TextValue);
+        }
+        return entries;
     }
 
     /// <summary>

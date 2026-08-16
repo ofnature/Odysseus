@@ -16,6 +16,13 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool CanFlyHere { get; set; }
     public int PlayerLevel { get; set; } = 54;
     public bool IsCasting { get; set; }
+    public bool IsCombatJob { get; set; } = true;
+    public List<int> Gearsets { get; } = [0];
+    public bool EquipGearset(int id) { Calls.Add($"Gearset {id}"); IsCombatJob = true; return Gearsets.Contains(id); }
+    public IReadOnlyList<int> CombatGearsets() => Gearsets;
+    public List<string> IconEntries { get; } = [];
+    public IReadOnlyList<string> SelectIconStringEntries() => VisibleAddons.Contains("SelectIconString") ? IconEntries : [];
+    public void SelectIconStringIndex(int index) => Calls.Add($"IconSelect {index}");
     public bool InCombat { get; set; }
     public bool IsReady { get; set; } = true;
     public bool IsOccupied { get; set; }
