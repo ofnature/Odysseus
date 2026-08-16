@@ -24,6 +24,8 @@ public sealed record MainWindowDeps(
     QuestController Controller,
     StoryFrontier Frontier,
     FleetPublisher Fleet,
+    PriorityList Priority,
+    IPriorityWorld PriorityWorld,
     Action OpenConfig,
     Action OpenFleet,
     Action OpenLog,
@@ -157,12 +159,14 @@ public sealed class MainWindow : OdysseusWindow
         var accepted = _d.Quests.ReadAccepted();
         var acceptedMsq = accepted.FirstOrDefault(q => _d.Catalog.ById(q.QuestId)?.IsMainScenario == true);
 
-        // What is "the quest": the running one, else the accepted MSQ, else the frontier.
+        // What is "the quest": the running one; else a ready priority entry (they come first at
+        // every boundary, and Start is one); else the accepted MSQ; else the frontier.
+        var priorityNext = Running ? null : _d.Priority.NextReady(_d.PriorityWorld);
         ushort questId = Running || Ctl.State == RunState.Faulted ? Ctl.QuestId
-            : acceptedMsq.IsAvailable ? acceptedMsq.QuestId
-            : _frontier?.QuestId ?? 0;
+            : priorityNext ?? (acceptedMsq.IsAvailable ? acceptedMsq.QuestId : _frontier?.QuestId ?? 0);
         if (_selectedQuest == 0 || (!Running && _selectedQuest != questId))
             _selectedQuest = questId;
+        var isPriority = _d.Priority.Contains(questId);
 
         if (questId == 0)
         {
@@ -175,13 +179,18 @@ public sealed class MainWindow : OdysseusWindow
         var snap = _d.Quests.Read(questId);
         var name = listing?.Name ?? $"Quest {questId}";
 
-        ImGui.TextColored(OdysseusTheme.TextPrimary, "Quest: ");
+        ImGui.TextColored(OdysseusTheme.TextPrimary, isPriority ? "Priority: " : "Quest: ");
         ImGui.SameLine(0f, 0f);
         ImGui.TextColored(OdysseusTheme.TextPrimary, name);
         ImGui.SameLine(0f, 6f);
         OdysseusTheme.IdChip($"#{questId}");
         ImGui.SameLine(0f, 6f);
         OdysseusTheme.JobChip(_d.JobAbbreviation());
+        if (_d.Priority.Count > 0 && !isPriority)
+        {
+            ImGui.SameLine(0f, 6f);
+            ImGui.TextColored(OdysseusTheme.TextDisabled, $"({_d.Priority.Count} in priority, none ready)");
+        }
         var hasPath = _d.Paths.Has(questId);
         if (!hasPath)
         {
@@ -375,9 +384,16 @@ public sealed class MainWindow : OdysseusWindow
             foreach (var q in others)
             {
                 var hasPath = _d.Paths.Has(q.QuestId);
+                var listed = _d.Priority.Contains(q.QuestId);
+                using (ImRaii.Disabled(listed))
+                {
+                    if (OdysseusTheme.IconButton($"pri{q.QuestId}", FontAwesomeIcon.Plus, listed ? "In the priority list" : "Add to priority list", new Vector2(22, 20)))
+                        _d.Priority.Add(q.QuestId);
+                }
+                ImGui.SameLine(0f, 4f);
                 using (ImRaii.Disabled(!hasPath || Running))
                 {
-                    if (ImGui.Selectable($"  {_d.Catalog.NameOf(q.QuestId)}##oq{q.QuestId}", _selectedQuest == q.QuestId))
+                    if (ImGui.Selectable($"{_d.Catalog.NameOf(q.QuestId)}##oq{q.QuestId}", _selectedQuest == q.QuestId, ImGuiSelectableFlags.None, new Vector2(ImGui.GetContentRegionAvail().X * 0.6f, 0)))
                         _selectedQuest = q.QuestId;
                 }
                 ImGui.SameLine();

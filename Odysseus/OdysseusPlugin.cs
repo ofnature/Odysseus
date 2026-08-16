@@ -42,6 +42,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly GameStepWorld _world;
     private readonly QuestController _controller;
     private readonly StoryFrontier _frontier;
+    private readonly PriorityList _priority;
+    private readonly PriorityWorld _priorityWorld;
+    private System.DateTime _lastPrune;
     private readonly RunLog _runLog;
     private readonly FleetPublisher _fleet;
     private readonly OdysseusIpc _ipc;
@@ -99,6 +102,17 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             id => _catalog.ById(id)?.ClassJobLevel ?? 0,
             _runLog, message => Log.Information(message));
 
+        // Priority list: saved in config only while the persist toggle is on.
+        _priority = new PriorityList(_catalog, _config.PriorityQuests, _config.PersistPriorityList, ids =>
+        {
+            _config.PriorityQuests = new System.Collections.Generic.List<ushort>(ids);
+            PluginInterface.SavePluginConfig(_config);
+        })
+        { AutoRemoveCompleted = _config.AutoRemoveCompletedPriority };
+        _priorityWorld = new PriorityWorld(_quests, _pathStore, () => _world.PlayerLevel);
+        _controller.PriorityNext = () => _priority.NextReady(_priorityWorld);
+        _controller.StoryCurrent = () => _frontier.Current()?.QuestId;
+
         // Published once the controller exists, so the gate never reports on a half-built run.
         _ipc = new OdysseusIpc(PluginInterface, () => _config.Enabled && _controller.State.IsDriving());
 
@@ -108,7 +122,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => _config.PublishFleetStatus);
 
         _configWindow = new ConfigWindow(_config, SaveConfig, _presence, _pathStore,
-            QuestionableImporter.DefaultBundlePath(PluginInterface.ConfigDirectory.Parent?.FullName ?? string.Empty));
+            QuestionableImporter.DefaultBundlePath(PluginInterface.ConfigDirectory.Parent?.FullName ?? string.Empty),
+            _priority, _priorityWorld, _catalog);
         _pathEditorWindow = new PathEditorWindow(
             _pathStore, _catalog, _controller, _recorder,
             () => ClientState.TerritoryType,
@@ -118,7 +133,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _debugWindow = new DebugWindow(_quests, _catalog);
         _fleetWindow = new FleetWindow(_config, _fleet);
         _mainWindow = new MainWindow(new MainWindowDeps(
-            _config, SaveConfig, _presence, _quests, _catalog, _pathStore, _controller, _frontier, _fleet,
+            _config, SaveConfig, _presence, _quests, _catalog, _pathStore, _controller, _frontier, _fleet, _priority, _priorityWorld,
             OpenConfig,
             () => _fleetWindow.IsOpen = true,
             () => _logWindow.IsOpen = true,
@@ -198,6 +213,17 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // The dashboard is useful even with the runner off: it says who is where.
         _fleet.Tick();
 
+        // Auto-remove completed priority entries — quests finished by hand count too, so poll.
+        var now = System.DateTime.UtcNow;
+        if (now - _lastPrune > System.TimeSpan.FromSeconds(5))
+        {
+            _lastPrune = now;
+            _priority.AutoRemoveCompleted = _config.AutoRemoveCompletedPriority;
+            var pruned = _priority.Prune(_quests.IsComplete);
+            if (pruned > 0)
+                Log.Information($"Priority list: removed {pruned} completed quest(s).");
+        }
+
         if (_recorder.IsRecording)
         {
             try
@@ -217,6 +243,27 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             return;
         }
         _controller.Tick();
+    }
+
+    /// <summary>What the priority list needs from the game, adapted from the pieces we already have.</summary>
+    private sealed class PriorityWorld : IPriorityWorld
+    {
+        private readonly IQuestStateReader _quests;
+        private readonly PathStore _paths;
+        private readonly System.Func<int> _level;
+
+        public PriorityWorld(IQuestStateReader quests, PathStore paths, System.Func<int> level)
+        {
+            _quests = quests;
+            _paths = paths;
+            _level = level;
+        }
+
+        public bool IsComplete(ushort questId) => _quests.IsComplete(questId);
+        public bool IsAccepted(ushort questId) => _quests.IsAccepted(questId);
+        public bool HasPath(ushort questId) => _paths.Has(questId);
+        public int PlayerLevel => _level();
+        public CharacterFacts Character => _quests.Character();
     }
 
     /// <summary>This box's line for the fleet, or null before login.</summary>

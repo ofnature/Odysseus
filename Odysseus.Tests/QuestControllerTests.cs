@@ -306,6 +306,30 @@ public class QuestControllerTests : IDisposable
     }
 
     [Fact]
+    public void A_ready_priority_quest_runs_before_the_next_msq_quest()
+    {
+        StoreTwoQuestChain(); // 1622 -> 1623 in the chain
+        _world.Spawned.Add(3);
+        _store.Save(new QuestPath { QuestId = 7000, Name = "Side Errand", Category = "x", Sequences = [new QuestSequence { Sequence = 0, Steps = [Interact(3)] }] });
+        _policy.ContinueToNextQuest = true;
+        _controller.PriorityNext = () => 7000;
+        _controller.StoryCurrent = () => 1623;              // where the story stands, independent of what just ran
+
+        _controller.Start(1622);
+        Ticks(3);
+        _quests.Complete.Add(1622);
+        Ticks(6);
+        Assert.Equal((ushort)7000, _controller.QuestId);    // priority first…
+        Ticks(12);
+        Assert.Contains("Interact 3", _world.Calls);
+
+        _controller.PriorityNext = () => null;              // …then, with the list drained, the story
+        _quests.Complete.Add(7000);
+        Ticks(6);
+        Assert.Equal((ushort)1623, _controller.QuestId);
+    }
+
+    [Fact]
     public void Level_gate_stops_before_walking_to_a_quest_the_character_cannot_accept()
     {
         _world.Spawned.Add(1);

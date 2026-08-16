@@ -148,6 +148,19 @@ public sealed class QuestCatalog
 
     public int Count => _byId.Count;
 
+    /// <summary>Name search, case-insensitive contains; MSQ and lower ids first, capped.</summary>
+    public IEnumerable<QuestListing> Search(string text, int max)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return Array.Empty<QuestListing>();
+        return _byId.Values
+            .Where(q => q.Name.Contains(text, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(q => q.Name.StartsWith(text, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+            .ThenByDescending(q => q.IsMainScenario)
+            .ThenBy(q => q.QuestId)
+            .Take(max);
+    }
+
     /// <summary>
     /// The next MSQ quest to run after <paramref name="completed"/>, or null when the story is
     /// blocked or over.

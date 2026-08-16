@@ -1,11 +1,14 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
 using Odysseus.Config;
 using Odysseus.Services.Ipc;
 using Odysseus.Services.Paths;
+using Odysseus.Services.Quest;
 
 namespace Odysseus.Windows;
 
@@ -13,6 +16,7 @@ namespace Odysseus.Windows;
 internal enum ConfigSection
 {
     General,
+    Priority,
     Paths,
     Wake,
     Handoffs,
@@ -34,12 +38,17 @@ public sealed class ConfigWindow : OdysseusWindow
     private readonly PluginPresence _presence;
     private readonly PathStore _pathStore;
     private readonly string _defaultBundlePath;
+    private readonly PriorityList _priority;
+    private readonly IPriorityWorld _priorityWorld;
+    private readonly QuestCatalog _catalog;
 
     private ConfigSection _currentSection = ConfigSection.General;
     private string _bundlePath;
     private string _importStatus = string.Empty;
+    private string _prioritySearch = string.Empty;
 
-    public ConfigWindow(OdysseusConfig config, Action save, PluginPresence presence, PathStore pathStore, string defaultBundlePath)
+    public ConfigWindow(OdysseusConfig config, Action save, PluginPresence presence, PathStore pathStore, string defaultBundlePath,
+        PriorityList priority, IPriorityWorld priorityWorld, QuestCatalog catalog)
         : base("Odysseus Settings##OdysseusConfig")
     {
         _config = config;
@@ -48,6 +57,9 @@ public sealed class ConfigWindow : OdysseusWindow
         _pathStore = pathStore;
         _defaultBundlePath = defaultBundlePath;
         _bundlePath = defaultBundlePath;
+        _priority = priority;
+        _priorityWorld = priorityWorld;
+        _catalog = catalog;
 
         Size = new Vector2(620, 520);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -139,6 +151,7 @@ public sealed class ConfigWindow : OdysseusWindow
 
         DrawCategoryHeader("RUN");
         DrawNavItem("General", ConfigSection.General);
+        DrawNavItem("Priority", ConfigSection.Priority);
         DrawNavItem("Paths", ConfigSection.Paths);
         DrawNavItem("Handoffs", ConfigSection.Handoffs);
         ImGui.Spacing();
@@ -205,6 +218,7 @@ public sealed class ConfigWindow : OdysseusWindow
         switch (_currentSection)
         {
             case ConfigSection.General: DrawGeneralSection(); break;
+            case ConfigSection.Priority: DrawPrioritySection(); break;
             case ConfigSection.Paths: DrawPathsSection(); break;
             case ConfigSection.Handoffs: DrawHandoffsSection(); break;
             case ConfigSection.Wake: DrawWakeSection(); break;
@@ -259,6 +273,113 @@ public sealed class ConfigWindow : OdysseusWindow
         {
             ImGui.SameLine();
             ImGui.TextColored(OdysseusTheme.StatusYellow, "(TextAdvance not loaded)");
+        }
+    }
+
+    private void DrawPrioritySection()
+    {
+        OdysseusTheme.SectionHeader("PRIORITY QUESTS");
+        ImGui.TextWrapped(
+            "Quests to run before the Main Scenario continues, in this order. Checked at every quest boundary — " +
+            "when you press Start and after each quest completes — never mid-quest. The first entry that is ready " +
+            "(unlocked, level met, has a path) runs; an entry already in your journal runs first of all.");
+        ImGui.Spacing();
+
+        var persist = _config.PersistPriorityList;
+        if (ImGui.Checkbox("Keep the list across sessions", ref persist))
+        {
+            _config.PersistPriorityList = persist;
+            _priority.SetPersist(persist);
+            _save();
+        }
+        OdysseusTheme.HelpMarker("Off: the list lives until the client closes, and the saved copy is cleared now.");
+
+        var autoRemove = _config.AutoRemoveCompletedPriority;
+        if (ImGui.Checkbox("Remove quests from the list when they complete", ref autoRemove))
+        {
+            _config.AutoRemoveCompletedPriority = autoRemove;
+            _priority.AutoRemoveCompleted = autoRemove;
+            _save();
+        }
+        OdysseusTheme.HelpMarker("Checked every few seconds against the game, so quests you finish by hand leave the list too.");
+
+        // ── search / add ──
+        ImGui.Spacing();
+        ImGui.SetNextItemWidth(-1f);
+        ImGui.InputTextWithHint("##prisearch", "Search quests by name or id…", ref _prioritySearch, 80);
+        var query = _prioritySearch.Trim();
+        if (query.Length >= 2)
+        {
+            var results = ushort.TryParse(query, out var id) && _catalog.ById(id) is { } byId
+                ? [byId]
+                : _catalog.Search(query, 12).ToList();
+            if (results.Count == 0)
+                ImGui.TextColored(OdysseusTheme.TextDisabled, "No quest matches.");
+            foreach (var r in results)
+            {
+                var already = _priority.Contains(r.QuestId);
+                using (ImRaii.Disabled(already))
+                {
+                    if (OdysseusTheme.IconButton($"add{r.QuestId}", FontAwesomeIcon.Plus, already ? "Already listed" : "Add to priority", new Vector2(24, 22)))
+                    {
+                        _priority.Add(r.QuestId);
+                        _prioritySearch = string.Empty;
+                    }
+                }
+                ImGui.SameLine();
+                ImGui.TextColored(OdysseusTheme.TextPrimary, r.Name);
+                ImGui.SameLine();
+                ImGui.TextColored(OdysseusTheme.TextDisabled, $"#{r.QuestId} · Lv {r.ClassJobLevel}{(r.IsMainScenario ? " · MSQ" : "")}{(_pathStore.Has(r.QuestId) ? "" : " · no path")}");
+            }
+        }
+
+        // ── the list ──
+        OdysseusTheme.SectionHeader($"LIST ({_priority.Count})");
+        var entries = _priority.Entries(_priorityWorld);
+        if (entries.Count == 0)
+        {
+            ImGui.TextColored(OdysseusTheme.TextDisabled, "Empty — the story runs on its own.");
+        }
+        else
+        {
+            var next = _priority.NextReady(_priorityWorld);
+            for (var i = 0; i < entries.Count; i++)
+            {
+                var e = entries[i];
+                var isNext = e.QuestId == next;
+                using (ImRaii.Disabled(i == 0))
+                {
+                    if (OdysseusTheme.IconButton($"up{e.QuestId}", FontAwesomeIcon.ArrowUp, "Move up", new Vector2(24, 22))) _priority.Move(e.QuestId, -1);
+                }
+                ImGui.SameLine(0f, 2f);
+                using (ImRaii.Disabled(i == entries.Count - 1))
+                {
+                    if (OdysseusTheme.IconButton($"dn{e.QuestId}", FontAwesomeIcon.ArrowDown, "Move down", new Vector2(24, 22))) _priority.Move(e.QuestId, +1);
+                }
+                ImGui.SameLine(0f, 2f);
+                if (OdysseusTheme.IconButton($"rm{e.QuestId}", FontAwesomeIcon.Trash, "Remove", new Vector2(24, 22))) _priority.Remove(e.QuestId);
+                ImGui.SameLine(0f, 8f);
+                var color = e.Status switch
+                {
+                    PriorityStatus.Ready or PriorityStatus.Accepted => OdysseusTheme.TextPrimary,
+                    PriorityStatus.Complete => OdysseusTheme.TextDisabled,
+                    _ => OdysseusTheme.TextSecondary,
+                };
+                ImGui.TextColored(isNext ? OdysseusTheme.WakeFoam : color, (isNext ? "▸ " : "") + e.Name);
+                ImGui.SameLine();
+                var detailColor = e.Status switch
+                {
+                    PriorityStatus.Ready => OdysseusTheme.StatusGreen,
+                    PriorityStatus.Accepted => OdysseusTheme.WakeFoam,
+                    PriorityStatus.Complete => OdysseusTheme.TextDisabled,
+                    PriorityStatus.NoPath or PriorityStatus.UnknownQuest => OdysseusTheme.StatusYellow,
+                    _ => OdysseusTheme.TextDisabled,
+                };
+                ImGui.TextColored(detailColor, $"· #{e.QuestId} · {e.Detail}");
+            }
+            ImGui.Spacing();
+            if (ImGui.SmallButton("Clear list"))
+                _priority.Clear();
         }
     }
 

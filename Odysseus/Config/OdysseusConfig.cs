@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Dalamud.Configuration;
 
 namespace Odysseus.Config;
@@ -56,6 +57,17 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// pauses there and says so.
     /// </summary>
     public bool PickQuestRewards { get; set; } = true;
+
+    // ── Priority quests ──
+
+    /// <summary>The list, in priority order. Only meaningful while <see cref="PersistPriorityList"/> is on.</summary>
+    public List<ushort> PriorityQuests { get; set; } = [];
+
+    /// <summary>Keep the priority list across sessions. Off = it lasts until the client closes.</summary>
+    public bool PersistPriorityList { get; set; } = true;
+
+    /// <summary>Drop priority entries automatically once the game says the quest is complete.</summary>
+    public bool AutoRemoveCompletedPriority { get; set; } = true;
 
     // ── The Wake (resume) ──
 

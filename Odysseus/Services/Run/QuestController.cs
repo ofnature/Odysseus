@@ -53,6 +53,21 @@ public sealed class QuestController
     private readonly IStepLog _stepLog;
     private readonly Action<string> _log;
 
+    /// <summary>
+    /// The priority list's answer to "anything to run before the story continues?" — null when
+    /// none. Set by the plugin; consulted at every quest boundary, never mid-quest.
+    /// </summary>
+    public Func<ushort?>? PriorityNext { get; set; }
+
+    /// <summary>
+    /// The story's next quest regardless of what just finished — used after a priority quest,
+    /// where "the quest after the one that completed" is meaningless. Set by the plugin.
+    /// </summary>
+    public Func<ushort?>? StoryCurrent { get; set; }
+
+    /// <summary>The running quest came from the priority list, not the story.</summary>
+    private bool _runningPriority;
+
     private ushort _questId;
     private DateTime _runStarted;
     private int _questsThisRun;
@@ -199,6 +214,8 @@ public sealed class QuestController
         _runStarted = _world.UtcNow;
         _questsThisRun = 0;
         StopAfterQuest = false;
+        // Started by hand on a listed quest: treat it as the priority run it is.
+        _runningPriority = PriorityNext?.Invoke() == questId;
         return Begin(questId, path);
     }
 
@@ -480,7 +497,20 @@ public sealed class QuestController
             return;
         }
 
-        var next = _nextQuest(completed);
+        // Priority list first: a ready entry runs before the story continues.
+        var wasPriority = _runningPriority;
+        _runningPriority = false;
+        if (PriorityNext?.Invoke() is { } priority && priority != completed && _paths.ForQuest(priority) is { } priorityPath)
+        {
+            _log($"Rolling on to priority quest {priority} ({priorityPath.Name}).");
+            _runningPriority = true;
+            Begin(priority, priorityPath);
+            return;
+        }
+
+        // After a story quest, the story continues from it; after a priority quest, from wherever
+        // the story actually is.
+        var next = wasPriority ? StoryCurrent?.Invoke() : _nextQuest(completed);
         if (next is null)
         {
             StopWith($"No next MSQ quest is available after {completed} — story blocked or finished ({count} quests, {elapsed:h\\:mm}).");
