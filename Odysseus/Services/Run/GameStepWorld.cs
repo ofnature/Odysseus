@@ -372,6 +372,38 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         }
     }
 
+    /// <summary>
+    /// Clicks the Complete button the way a mouse would: replay the button's own click event into
+    /// the addon (the ECommons <c>ClickAddonButton</c> mechanism). No signature needed. Reward
+    /// <i>selection</i> is a native call TextAdvance sig-scans for; that stays with TextAdvance.
+    /// </summary>
+    public bool CompleteQuestRewardWindow()
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName("JournalResult");
+            if (addon.IsNull || !addon.IsVisible)
+                return false;
+            var journal = (FFXIVClientStructs.FFXIV.Client.UI.AddonJournalResult*)addon.Address;
+            var button = journal->CompleteButton;
+            if (button == null || !button->IsEnabled)
+                return false;
+            var owner = button->AtkComponentBase.OwnerNode;
+            if (owner == null)
+                return false;
+            var evt = owner->AtkResNode.AtkEventManager.Event;
+            if (evt == null)
+                return false;
+            journal->AtkUnitBase.ReceiveEvent(evt->State.EventType, (int)evt->Param, evt, null);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log($"JournalResult complete failed: {ex.Message}");
+            return false;
+        }
+    }
+
     public void HoldDialogue() => _textAdvance.Hold();
 
     public void ReleaseDialogue() => _textAdvance.Release();

@@ -77,7 +77,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             ClientState, ObjectTable, Condition, GameGui, TargetManager, DataManager,
             new VnavIpc(PluginInterface, message => Log.Warning(message)),
             new DaedalusIpc(PluginInterface, message => Log.Warning(message)),
-            new TextAdvanceIpc(PluginInterface, message => Log.Warning(message)),
+            new TextAdvanceIpc(PluginInterface, () => _config.PickQuestRewards, message => Log.Warning(message)),
             new LifestreamIpc(PluginInterface, message => Log.Warning(message)),
             aetherytes,
             new TheseusIpc(PluginInterface, message => Log.Warning(message)),

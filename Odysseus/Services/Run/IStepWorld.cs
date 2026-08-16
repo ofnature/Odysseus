@@ -145,6 +145,12 @@ public interface IStepWorld
     /// <summary>The entries of the list dialog currently showing, in order; empty when none.</summary>
     System.Collections.Generic.IReadOnlyList<string> SelectStringEntries();
 
+    /// <summary>
+    /// Press Complete on the quest reward window. Returns false when the window is not up or the
+    /// button is disabled — which means an optional reward still needs choosing.
+    /// </summary>
+    bool CompleteQuestRewardWindow();
+
     /// <summary>Ask TextAdvance to drive dialogue for us / stop.</summary>
     void HoldDialogue();
 

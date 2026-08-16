@@ -41,6 +41,7 @@ public sealed class TextAdvanceIpc
 
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly Action<string>? _log;
+    private readonly Func<bool> _pickRewards;
 
     private ICallGateSubscriber<string, ExternalTerritoryConfig, bool>? _enable;
     private ICallGateSubscriber<string, bool>? _disable;
@@ -48,9 +49,15 @@ public sealed class TextAdvanceIpc
     private bool _warned;
     private bool _held;
 
-    public TextAdvanceIpc(IDalamudPluginInterface pluginInterface, Action<string>? log = null)
+    /// <param name="pickRewards">
+    /// Whether TextAdvance may choose optional quest rewards for us. Read live so the setting
+    /// applies to the next hold. Picking uses TextAdvance's own priority (gil, vendor value, gear
+    /// coffers, current-job gear); Odysseus does not second-guess it.
+    /// </param>
+    public TextAdvanceIpc(IDalamudPluginInterface pluginInterface, Func<bool>? pickRewards = null, Action<string>? log = null)
     {
         _pluginInterface = pluginInterface;
+        _pickRewards = pickRewards ?? (() => true);
         _log = log;
     }
 
@@ -60,7 +67,7 @@ public sealed class TextAdvanceIpc
         try
         {
             _enable ??= _pluginInterface.GetIpcSubscriber<string, ExternalTerritoryConfig, bool>(EnableGate);
-            var ok = _enable.InvokeFunc(PluginName, new ExternalTerritoryConfig());
+            var ok = _enable.InvokeFunc(PluginName, new ExternalTerritoryConfig { EnableRewardPick = _pickRewards() });
             _held = ok;
             _warned = false;
             return ok;

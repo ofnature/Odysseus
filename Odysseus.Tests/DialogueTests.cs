@@ -72,6 +72,53 @@ public class DialogueTests
     }
 
     [Fact]
+    public void Reward_window_left_open_gets_completed_by_us_after_a_grace()
+    {
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w);
+        var step = Interact(7);
+        step.Kind = StepKind.CompleteQuest;
+        ex.Begin(step, questId: 1);
+        Ticks(ex, w, 3);
+
+        // Hand-in dialogue, then the reward window appears and nobody presses Complete.
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("JournalResult");
+        Ticks(ex, w, 2);
+        Assert.DoesNotContain("CompleteReward", w.Calls);   // grace: TextAdvance gets first go
+        Ticks(ex, w, 6);
+        Assert.Contains("CompleteReward", w.Calls);
+        Assert.DoesNotContain("JournalResult", w.VisibleAddons); // the fake closes it on Complete
+        Assert.Equal(StepStatus.Done, Run(ex, w));
+    }
+
+    [Fact]
+    public void Reward_window_needing_a_choice_says_so_instead_of_timing_out_silently()
+    {
+        var w = new FakeStepWorld { RewardCompleteEnabled = false };
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w);
+        var step = Interact(7);
+        step.Kind = StepKind.CompleteQuest;
+        ex.Begin(step, questId: 1);
+        Ticks(ex, w, 3);
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("JournalResult");
+        Ticks(ex, w, 300, s: 1);
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.Contains("reward window is waiting for a choice", ex.FailReason);
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("optional reward needs choosing"));
+        Assert.Equal(1, w.Calls.Count(c => c.StartsWith("Log") && c.Contains("optional reward"))); // said once
+    }
+
+    private static StepStatus Run(StepExecutor ex, FakeStepWorld w)
+    {
+        for (var i = 0; i < 40 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }
+        return ex.Status;
+    }
+
+    [Fact]
     public void Say_resolves_the_key_and_speaks_it()
     {
         var texts = new Texts();

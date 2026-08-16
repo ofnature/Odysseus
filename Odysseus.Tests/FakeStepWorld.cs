@@ -104,6 +104,15 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool IsAddonVisible(string name) => VisibleAddons.Contains(name);
     public void SelectYesNo(bool yes) => Calls.Add($"YesNo {yes}");
     public void SelectStringIndex(int index) => Calls.Add($"Select {index}");
+    public bool RewardCompleteEnabled { get; set; } = true;
+    public bool CompleteQuestRewardWindow()
+    {
+        Calls.Add("CompleteReward");
+        if (!VisibleAddons.Contains("JournalResult") || !RewardCompleteEnabled) return false;
+        VisibleAddons.Remove("JournalResult");
+        IsOccupied = false;
+        return true;
+    }
     public List<string> ListEntries { get; } = [];
     public IReadOnlyList<string> SelectStringEntries() => VisibleAddons.Contains("SelectString") ? ListEntries : [];
     public void HoldDialogue() => Calls.Add("HoldDialogue");

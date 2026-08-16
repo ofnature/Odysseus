@@ -71,6 +71,9 @@ public sealed class StepExecutor
     private static readonly TimeSpan ReadyWait = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DialogueSettle = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan DialogueMax = TimeSpan.FromSeconds(120);
+    /// <summary>How long the reward window may sit before we press Complete ourselves — TextAdvance gets first go.</summary>
+    private static readonly TimeSpan RewardWindowGrace = TimeSpan.FromSeconds(2.5);
+    private static readonly TimeSpan RewardCompleteRetry = TimeSpan.FromSeconds(1.5);
     private static readonly TimeSpan CombatSpawnWait = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan CombatClearSettle = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan CombatMax = TimeSpan.FromMinutes(5);
@@ -88,6 +91,9 @@ public sealed class StepExecutor
     private QuestStep? _step;
     private ushort _questId;
     private bool _listAnswered;
+    private DateTime _rewardWindowSince;
+    private DateTime _rewardLastTry;
+    private bool _rewardNeedsChoiceLogged;
     private Phase _phase = Phase.None;
     private DateTime _phaseStart;
     private DateTime _stepStart;
@@ -122,6 +128,8 @@ public sealed class StepExecutor
         _step = step;
         _questId = questId;
         _listAnswered = false;
+        _rewardWindowSince = default;
+        _rewardNeedsChoiceLogged = false;
         _stepStart = _world.UtcNow;
         _moveRetries = 0;
         _sawOccupied = false;
@@ -628,9 +636,17 @@ public sealed class StepExecutor
             AnswerDialogue(step);
         }
 
+        var rewardWindow = _world.IsAddonVisible("JournalResult");
+        if (rewardWindow)
+            TickRewardWindow(now);
+        else
+            _rewardWindowSince = default;
+
         if (now - _phaseStart > DialogueMax)
         {
-            Fail("dialogue never ended");
+            Fail(rewardWindow
+                ? "the quest reward window is waiting for a choice — pick a reward (or turn on \"Pick quest rewards automatically\"), then Retry"
+                : "dialogue never ended");
             return;
         }
 
@@ -655,6 +671,38 @@ public sealed class StepExecutor
                 return;
         }
         Enter(Phase.Finish);
+    }
+
+    /// <summary>
+    /// The quest reward window. TextAdvance (under our external control) picks any optional
+    /// reward and normally completes; if the window is still up after a short grace we press
+    /// Complete ourselves. A disabled Complete means a choice is outstanding — that is either the
+    /// reward toggle being off or TextAdvance not being loaded, and we say which rather than wait
+    /// two minutes in silence.
+    /// </summary>
+    private void TickRewardWindow(DateTime now)
+    {
+        if (_rewardWindowSince == default)
+        {
+            _rewardWindowSince = now;
+            _rewardLastTry = default;
+            return;
+        }
+        if (now - _rewardWindowSince < RewardWindowGrace || now - _rewardLastTry < RewardCompleteRetry)
+            return;
+
+        _rewardLastTry = now;
+        if (_world.CompleteQuestRewardWindow())
+        {
+            _rewardNeedsChoiceLogged = false;
+            return;
+        }
+        if (!_rewardNeedsChoiceLogged)
+        {
+            _rewardNeedsChoiceLogged = true;
+            _world.Log("Quest reward window is up and Complete is not available — an optional reward needs choosing. " +
+                       "Waiting for TextAdvance or you.");
+        }
     }
 
     private void AnswerDialogue(QuestStep step)

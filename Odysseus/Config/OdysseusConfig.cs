@@ -43,6 +43,13 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// </summary>
     public int StopAtLevel { get; set; }
 
+    /// <summary>
+    /// Let TextAdvance choose optional quest rewards (its own priority: gil, vendor value, gear
+    /// coffers, gear for the current job). Off means the reward window waits for you — the run
+    /// pauses there and says so.
+    /// </summary>
+    public bool PickQuestRewards { get; set; } = true;
+
     // ── The Wake (resume) ──
 
     /// <summary>

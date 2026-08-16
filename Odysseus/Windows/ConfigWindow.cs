@@ -234,6 +234,22 @@ public sealed class ConfigWindow : Window
             _save();
         }
         OdysseusTheme.HelpMarker("0 = never. Parks a trial alt short of its cap, or holds a sync level.");
+
+        var pickRewards = _config.PickQuestRewards;
+        if (ImGui.Checkbox("Pick quest rewards automatically", ref pickRewards))
+        {
+            _config.PickQuestRewards = pickRewards;
+            _save();
+        }
+        OdysseusTheme.HelpMarker(
+            "Done by TextAdvance under Odysseus's control, using TextAdvance's own reward priority (gil, vendor " +
+            "value, gear coffers, gear for your job). Odysseus then presses Complete. Off = the reward window " +
+            "waits for you and the run says so.");
+        if (!_presence.TextAdvance)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.StatusYellow, "(TextAdvance not loaded)");
+        }
     }
 
     private void DrawPathsSection()
