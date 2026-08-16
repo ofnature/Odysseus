@@ -23,4 +23,20 @@
     </AssemblyAttribute>
   </ItemGroup>
 
+  <!--
+    Dev-plugin reload race (same fix as Charon). Dalamud watches the DLL and reloads the moment it
+    changes, then reads Odysseus.json alongside it. The compiler writes the DLL FIRST and
+    DalamudPackager writes the manifest afterwards, so the reload can read a manifest that is
+    still being written and fail with a "load error" that nothing retries.
+
+    Touching the DLL after the manifest is written makes the DLL the LAST file to change, so the
+    watcher's event always finds a complete manifest next to it. This must hook the PACKAGER's
+    targets, not "Build": DalamudPackager registers on AfterTargets="Build" too and SDK targets
+    run after project-defined ones.
+  -->
+  <Target Name="TouchAssemblyAfterPackaging"
+          AfterTargets="DefaultDalamudPackagerDebug;DefaultDalamudPackagerRelease">
+    <Touch Files="$(TargetPath)" />
+  </Target>
+
 </Project>

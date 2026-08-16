@@ -60,6 +60,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // see Service for why that distinction silently kills the client.
         pluginInterface.Create<Service>();
 
+        // Everything below is wrapped so a construction failure lands in a file we control —
+        // Dalamud's own log stops writing once it hits its size cap, and "failed to load" is all
+        // the installer says.
+        try
+        {
         _config = PluginInterface.GetPluginConfig() as OdysseusConfig ?? new OdysseusConfig();
         OdysseusTheme.SetMode(_config.Theme);
         _presence = new PluginPresence(PluginInterface);
@@ -147,6 +152,29 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         });
 
         Log.Information($"Odysseus v{PluginVersion} loaded.");
+        }
+        catch (System.Exception ex)
+        {
+            WriteStartupError(pluginInterface, ex);
+            throw;
+        }
+    }
+
+    /// <summary>Full exception to <c>startup-error.txt</c> in the plugin's config directory, and to the log.</summary>
+    private static void WriteStartupError(IDalamudPluginInterface pluginInterface, System.Exception ex)
+    {
+        try
+        {
+            Log.Error(ex, "Odysseus failed to construct.");
+            var dir = pluginInterface.ConfigDirectory.FullName;
+            System.IO.Directory.CreateDirectory(dir);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(dir, "startup-error.txt"),
+                $"{System.DateTime.Now:O}\nOdysseus v{PluginVersion}\n\n{ex}\n");
+        }
+        catch
+        {
+            // Nothing left to report to.
+        }
     }
 
     public void Dispose()
