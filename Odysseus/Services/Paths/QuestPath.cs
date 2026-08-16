@@ -208,7 +208,18 @@ public sealed class QuestSequence
 /// </summary>
 public sealed class QuestPath
 {
-    public const int CurrentFormatVersion = 1;
+    /// <summary>
+    /// Bump whenever the converter learns something — a new step kind, a new field — so stored
+    /// paths are re-converted instead of kept. <see cref="PathStore.ImportBundle"/> skips a quest
+    /// only when its source hash <i>and</i> this version both match, so without a bump a path
+    /// converted by an older build silently keeps its old parse.
+    ///
+    /// <para>
+    /// 1 → 2 (2026-08-16): named the 14 non-MSQ verbs (Action, Craft, Gather, Instruction,
+    /// StatusOff, …) and added ActionName, GroundTarget, RequiredQuestVariables, ChatMessageKey.
+    /// </para>
+    /// </summary>
+    public const int CurrentFormatVersion = 2;
 
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     public ushort QuestId { get; set; }

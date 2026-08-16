@@ -60,6 +60,33 @@ public class PathStoreTests : IDisposable
     }
 
     [Fact]
+    public void A_stored_path_from_an_older_converter_is_reconverted_even_when_the_source_is_unchanged()
+    {
+        // The bug this pins: adding a step kind changed nothing for quests that had not changed
+        // upstream, because the skip test only compared source hashes.
+        var bundle = QuestionableImporter.DefaultBundlePath(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "XIVLauncher", "pluginConfigs"));
+        if (!File.Exists(bundle))
+            return;
+
+        var store = new PathStore(_dir);
+        var first = store.ImportBundle(bundle, folder => folder.Contains("3.x - Heavensward/MSQ"));
+        Assert.True(first.Converted > 0);
+
+        // Re-importing the same bundle with the same converter writes nothing…
+        var again = new PathStore(_dir).ImportBundle(bundle, folder => folder.Contains("3.x - Heavensward/MSQ"));
+        Assert.Equal(0, again.Reconverted);
+
+        // …but a path stored under an older format version is replaced.
+        var one = new PathStore(_dir).All.First();
+        one.FormatVersion = QuestPath.CurrentFormatVersion - 1;
+        new PathStore(_dir).Save(one);
+        var third = new PathStore(_dir).ImportBundle(bundle, folder => folder.Contains("3.x - Heavensward/MSQ"));
+        Assert.Equal(1, third.Reconverted);
+        Assert.Equal(QuestPath.CurrentFormatVersion, new PathStore(_dir).ForQuest(one.QuestId)!.FormatVersion);
+    }
+
+    [Fact]
     public void Missing_directory_is_an_empty_store_not_an_error()
     {
         var store = new PathStore(Path.Combine(_dir, "nope"));

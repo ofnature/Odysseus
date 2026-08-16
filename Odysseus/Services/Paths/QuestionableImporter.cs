@@ -16,6 +16,8 @@ public sealed class ImportReport
     public int Failed { get; set; }
     /// <summary>Files that are not quests (no <c>{id}_</c> prefix — allied-society and delivery bundles). Expected, not an error.</summary>
     public int Skipped { get; set; }
+    /// <summary>Unchanged upstream, but re-parsed because the converter version moved on.</summary>
+    public int Reconverted { get; set; }
     public int UnknownKinds { get; set; }
     public string DataVersion { get; set; } = string.Empty;
     public string GeneratedAt { get; set; } = string.Empty;
@@ -23,6 +25,7 @@ public sealed class ImportReport
 
     public override string ToString()
         => $"{Converted} converted, {Failed} failed" + (Skipped > 0 ? $", {Skipped} non-quest files skipped" : "")
+           + (Reconverted > 0 ? $", {Reconverted} re-parsed for the new converter" : "")
            + (UnknownKinds > 0 ? $", {UnknownKinds} steps of unknown kind" : "")
            + (DataVersion.Length > 0 ? $" · bundle {DataVersion} ({GeneratedAt})" : "");
 }

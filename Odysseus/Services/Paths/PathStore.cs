@@ -69,16 +69,23 @@ public sealed class PathStore
         EnsureLoaded();
         var (paths, report) = QuestionableImporter.Import(bundlePath, filter);
         var written = 0;
+        var reconverted = 0;
         foreach (var path in paths)
         {
-            // Same source, same converter — nothing to do. Anything else overwrites.
-            if (_paths.TryGetValue(path.QuestId, out var existing)
-                && existing.SourceHash == path.SourceHash
-                && existing.FormatVersion == QuestPath.CurrentFormatVersion)
-                continue;
+            // Same source AND same converter — nothing to do. A converter bump re-parses
+            // everything, which is how new step kinds and fields reach paths that did not change
+            // upstream (see QuestPath.CurrentFormatVersion).
+            if (_paths.TryGetValue(path.QuestId, out var existing))
+            {
+                if (existing.SourceHash == path.SourceHash && existing.FormatVersion == QuestPath.CurrentFormatVersion)
+                    continue;
+                if (existing.SourceHash == path.SourceHash)
+                    reconverted++;
+            }
             Save(path);
             written++;
         }
+        report.Reconverted = reconverted;
         _log?.Invoke($"Import: {report}; {written} written to {_directory}");
         return report;
     }
