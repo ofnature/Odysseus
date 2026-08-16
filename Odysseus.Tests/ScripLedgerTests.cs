@@ -24,14 +24,19 @@ public class ScripLedgerTests
         public int? UsedThisWeek(DeliveryClient c) => Used.GetValueOrDefault(c.Index);
         public int Rank(DeliveryClient c) => 1;
         public bool DataLoaded => true;
+        /// <summary>Default (0, 0) means "gauge full" — no rank-up cap unless a test asks for one.</summary>
+        public Dictionary<uint, (int, int)> Gauge { get; } = new();
+        public (int Current, int Max) Satisfaction(DeliveryClient c) => Gauge.GetValueOrDefault(c.Index);
     }
 
     private sealed class Rewards : IDeliveryRewards
     {
         public int Normal { get; set; } = 100;
         public int Bonus { get; set; } = 150;
+        public int Satisfaction { get; set; } = 25;
         public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false)
             => new Dictionary<int, int> { [2] = bonus ? Bonus : Normal, [6] = 60 };
+        public int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false) => Satisfaction;
     }
 
     private sealed class Bonus : IDeliveryBonus
@@ -107,6 +112,37 @@ public class ScripLedgerTests
 
         cur.Amounts[PurpleCrafters.ItemId] = 3899; // + 100 fits exactly
         Assert.True(ledger.MayTurnIn(Zhloe).Allowed);
+    }
+
+    /// <summary>
+    /// Turn-ins fill the satisfaction gauge and the rank-up changes the payout, so the estimate must
+    /// stop at the rank boundary rather than project the whole allowance at the current rate. This
+    /// is what put our figure 4x above Satisfier's.
+    /// </summary>
+    [Fact]
+    public void The_estimate_stops_at_the_next_rank_up()
+    {
+        var (ledger, _, state, _, rewards) = Make();
+        state.Unlocked.Add(Zhloe.Index);
+        rewards.Satisfaction = 25;
+        state.Gauge[Zhloe.Index] = (100, 150);    // 50 to go, 25 a delivery → 2 turn-ins, not 6
+
+        Assert.Equal(6, ledger.RemainingDeliveries(Zhloe));   // the allowance is untouched
+        Assert.Equal(2, ledger.PayingDeliveries(Zhloe));
+        Assert.Equal(200, ledger.Read().Single(s => s.Scrip.RewardCurrency == 2).MaxGain);
+
+        state.Gauge[Zhloe.Index] = (140, 150);    // a part delivery still counts as one
+        Assert.Equal(1, ledger.PayingDeliveries(Zhloe));
+    }
+
+    [Fact]
+    public void A_full_gauge_counts_every_remaining_delivery()
+    {
+        var (ledger, _, state, _, _) = Make();
+        state.Unlocked.Add(Zhloe.Index);
+        state.Gauge[Zhloe.Index] = (150, 150);    // nothing left to fill — top rank
+        Assert.Equal(6, ledger.PayingDeliveries(Zhloe));
+        Assert.Equal(600, ledger.Read().Single(s => s.Scrip.RewardCurrency == 2).MaxGain);
     }
 
     /// <summary>

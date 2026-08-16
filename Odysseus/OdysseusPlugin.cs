@@ -162,7 +162,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             id => { if (!_tribeQueue.Contains(id)) _tribeQueue.Enqueue(id); },
             () => { _tribeQueue.Clear(); _tribeRunner.Stop(); });
         _deliveries = new Services.Deliveries.DeliveryCatalog(DataManager, message => Log.Warning(message));
-        var deliveryState = new Services.Deliveries.DeliveryState(_quests, message => Log.Warning(message));
+        var deliveryState = new Services.Deliveries.DeliveryState(_quests, DataManager, message => Log.Warning(message));
         var deliveryBonus = new Services.Deliveries.DeliveryBonus(DataManager, message => Log.Warning(message));
         var deliveryRewards = new Services.Deliveries.DeliveryRewards(DataManager, message => Log.Warning(message));
         var scrips = new Services.Deliveries.ScripLedger(DataManager, new Services.Deliveries.InventoryCurrencyReader(),

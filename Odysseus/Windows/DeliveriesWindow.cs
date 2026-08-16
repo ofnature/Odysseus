@@ -144,7 +144,19 @@ public sealed class DeliveriesWindow : OdysseusWindow
 
         ImGui.TableNextColumn();
         if (open)
-            ImGui.TextColored(OdysseusTheme.TextSecondary, $"rank {_state.Rank(client)}");
+        {
+            var (gauge, needed) = _state.Satisfaction(client);
+            ImGui.TextColored(OdysseusTheme.TextSecondary,
+                needed > 0 ? $"rank {_state.Rank(client)} · {gauge}/{needed}" : $"rank {_state.Rank(client)}");
+            if (ImGui.IsItemHovered())
+            {
+                var paying = _scrips.PayingDeliveries(client);
+                ImGui.SetTooltip(paying < remaining
+                    ? $"{paying} of the {remaining} remaining deliveries are counted in the estimate —\n" +
+                      "the gauge fills first and the rank-up changes the payout."
+                    : "All remaining deliveries pay at this rate.");
+            }
+        }
         else
             ImGui.TextColored(OdysseusTheme.TextDisabled, "—");
 

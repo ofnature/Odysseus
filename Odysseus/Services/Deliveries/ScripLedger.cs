@@ -15,6 +15,10 @@ namespace Odysseus.Services.Deliveries;
 public sealed record ScripKind(int RewardCurrency, uint ItemId, string Name, int Cap);
 
 /// <summary>Where a scrip stands, and what this week's remaining deliveries would do to it.</summary>
+/// <param name="MaxGain">
+/// The most the week's remaining deliveries could pay, counting only as far as each client's next
+/// rank-up — see <see cref="ScripLedger.PayingDeliveries"/>.
+/// </param>
 public sealed record ScripStanding(ScripKind Scrip, int Current, int MaxGain)
 {
     public int Cap => Scrip.Cap;
@@ -136,7 +140,7 @@ public sealed class ScripLedger
         return (true, null);
     }
 
-    /// <summary>Deliveries left this week for a client (0 when locked or unreadable).</summary>
+    /// <summary>Deliveries left this week for a client — the weekly allowance (0 when locked or unreadable).</summary>
     public int RemainingDeliveries(DeliveryClient client)
     {
         if (!_state.IsUnlocked(client)) return 0;
@@ -144,15 +148,41 @@ public sealed class ScripLedger
         return used is { } u ? Math.Max(0, client.DeliveriesPerWeek - u) : client.DeliveriesPerWeek;
     }
 
+    /// <summary>
+    /// How many of this week's remaining deliveries the estimate can speak for: the allowance, but
+    /// no further than the client's next rank-up.
+    ///
+    /// <para>
+    /// Each turn-in also fills the satisfaction gauge, and when it fills the client ranks up and
+    /// pays from a different reward row. So counting the whole allowance at the current rank's rate
+    /// projects a payout that will not happen — the estimate stops at the rank boundary instead,
+    /// which is what Satisfier shows. At the top rank the gauge has no requirement and the full
+    /// allowance counts.
+    /// </para>
+    /// </summary>
+    public int PayingDeliveries(DeliveryClient client)
+    {
+        var remaining = RemainingDeliveries(client);
+        if (remaining <= 0) return 0;
+
+        var (current, max) = _state.Satisfaction(client);
+        if (max <= current) return remaining;
+
+        var perDelivery = _rewards.SatisfactionPerDelivery(client, _state.Rank(client), _bonus.For(client).Craft);
+        if (perDelivery <= 0) return remaining;
+
+        return Math.Min(remaining, (int)Math.Ceiling((max - current) / (double)perDelivery));
+    }
+
     private Dictionary<int, int> MaxGainByCurrency()
     {
         var total = new Dictionary<int, int>();
         foreach (var client in _clients.All)
         {
-            var remaining = RemainingDeliveries(client);
-            if (remaining <= 0) continue;
+            var paying = PayingDeliveries(client);
+            if (paying <= 0) continue;
             foreach (var (currency, amount) in _rewards.PerDelivery(client, _state.Rank(client), _bonus.For(client).Craft))
-                total[currency] = total.GetValueOrDefault(currency) + amount * remaining;
+                total[currency] = total.GetValueOrDefault(currency) + amount * paying;
         }
         return total;
     }

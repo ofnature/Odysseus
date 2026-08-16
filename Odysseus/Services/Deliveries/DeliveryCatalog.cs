@@ -20,6 +20,12 @@ public interface IDeliveryState
     int Rank(DeliveryClient client);
 
     /// <summary>
+    /// The satisfaction gauge: how far into the current rank, and what the rank needs. Max is 0 at
+    /// the top rank, where there is nothing left to fill.
+    /// </summary>
+    (int Current, int Max) Satisfaction(DeliveryClient client);
+
+    /// <summary>
     /// The client has fetched delivery data from the server. Ranks and weekly allowances read as
     /// zero until it has — opening the game's Custom Deliveries window once is what loads them —
     /// so the UI can say "not loaded yet" instead of showing zeros as though they were facts.
@@ -83,11 +89,13 @@ public sealed class DeliveryCatalog
 public sealed unsafe class DeliveryState : IDeliveryState
 {
     private readonly Quest.IQuestStateReader _quests;
+    private readonly IDataManager _data;
     private readonly Action<string>? _log;
 
-    public DeliveryState(Quest.IQuestStateReader quests, Action<string>? log = null)
+    public DeliveryState(Quest.IQuestStateReader quests, IDataManager data, Action<string>? log = null)
     {
         _quests = quests;
+        _data = data;
         _log = log;
     }
 
@@ -131,6 +139,34 @@ public sealed unsafe class DeliveryState : IDeliveryState
         {
             _log?.Invoke($"Delivery rank read failed: {ex.Message}");
             return 0;
+        }
+    }
+
+    /// <summary>
+    /// Current gauge from the manager, the rank's requirement from
+    /// <c>SatisfactionNpc.SatisfactionNpcParams[rank].SatisfactionRequired</c>.
+    /// </summary>
+    public (int Current, int Max) Satisfaction(DeliveryClient client)
+    {
+        try
+        {
+            var manager = FFXIVClientStructs.FFXIV.Client.Game.SatisfactionSupplyManager.Instance();
+            if (manager == null) return (0, 0);
+            var index = (int)client.Index - 1;
+            var gauge = manager->Satisfaction;
+            if (index < 0 || index >= gauge.Length) return (0, 0);
+
+            var rank = Rank(client);
+            var npc = _data.GetExcelSheet<SatisfactionNpc>().GetRowOrDefault(client.Index);
+            if (npc is not { } n) return (gauge[index], 0);
+            var parms = n.SatisfactionNpcParams;
+            if (rank < 0 || rank >= parms.Count) return (gauge[index], 0);
+            return (gauge[index], parms[rank].SatisfactionRequired);
+        }
+        catch (Exception ex)
+        {
+            _log?.Invoke($"Satisfaction read failed: {ex.Message}");
+            return (0, 0);
         }
     }
 

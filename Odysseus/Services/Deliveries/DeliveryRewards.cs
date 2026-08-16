@@ -10,6 +10,12 @@ public interface IDeliveryRewards
 {
     /// <param name="bonus">This week's bonus applies to the route — the payout comes from the bonus row instead.</param>
     IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false);
+
+    /// <summary>
+    /// How much the satisfaction gauge moves per delivery, from the same reward row. Needed to work
+    /// out how many turn-ins are left before the client ranks up and the payout changes.
+    /// </summary>
+    int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false);
 }
 
 /// <summary>
@@ -32,9 +38,12 @@ public sealed class DeliveryRewards : IDeliveryRewards
     /// <summary>Supply subrow slot for the crafted item.</summary>
     private const byte CraftSlot = 1;
 
+    /// <summary>Everything one delivery is worth: scrip by currency index, and gauge movement.</summary>
+    private sealed record Payout(IReadOnlyDictionary<int, int> Currency, int Satisfaction);
+
     private readonly IDataManager _data;
     private readonly Action<string>? _log;
-    private readonly Dictionary<(uint, int, bool), IReadOnlyDictionary<int, int>> _cache = new();
+    private readonly Dictionary<(uint, int, bool), Payout> _cache = new();
 
     public DeliveryRewards(IDataManager data, Action<string>? log = null)
     {
@@ -43,12 +52,19 @@ public sealed class DeliveryRewards : IDeliveryRewards
     }
 
     public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false)
+        => Read(client, rank, bonus).Currency;
+
+    public int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false)
+        => Read(client, rank, bonus).Satisfaction;
+
+    private Payout Read(DeliveryClient client, int rank, bool bonus)
     {
         var key = (client.Index, rank, bonus);
         if (_cache.TryGetValue(key, out var cached))
             return cached;
 
         var result = new Dictionary<int, int>();
+        var satisfaction = 0;
         try
         {
             var npc = _data.GetExcelSheet<SatisfactionNpc>().GetRowOrDefault(client.Index);
@@ -68,6 +84,7 @@ public sealed class DeliveryRewards : IDeliveryRewards
                         foreach (var entry in reward.SatisfactionSupplyRewardData)
                             if (entry.RewardCurrency != 0 && entry.QuantityHigh > 0)
                                 result[entry.RewardCurrency] = entry.QuantityHigh;
+                        satisfaction = reward.SatisfactionHigh;
                         break;
                     }
                 }
@@ -78,8 +95,9 @@ public sealed class DeliveryRewards : IDeliveryRewards
             _log?.Invoke($"Delivery reward read failed for {client.Name}: {ex.Message}");
         }
 
-        _cache[key] = result;
-        return result;
+        var payout = new Payout(result, satisfaction);
+        _cache[key] = payout;
+        return payout;
     }
 }
 
