@@ -35,9 +35,9 @@ public class ScripLedgerTests
         public int Normal { get; set; } = 100;
         public int Bonus { get; set; } = 150;
         public int Satisfaction { get; set; } = 25;
-        public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false)
+        public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft)
             => new Dictionary<int, int> { [2] = bonus ? Bonus : Normal, [6] = 60 };
-        public int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false) => Satisfaction;
+        public int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft) => Satisfaction;
     }
 
     private sealed class Bonus : IDeliveryBonus
@@ -228,9 +228,9 @@ public class ScripLedgerTests
     private sealed class PerClientRewards : IDeliveryRewards
     {
         public Dictionary<uint, int> Rates { get; } = new();
-        public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false)
+        public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft)
             => new Dictionary<int, int> { [2] = Rates.GetValueOrDefault(client.Index) };
-        public int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false) => 0;
+        public int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft) => 0;
     }
 
     [Fact]

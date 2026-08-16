@@ -9,13 +9,13 @@ namespace Odysseus.Services.Deliveries;
 public interface IDeliveryRewards
 {
     /// <param name="bonus">This week's bonus applies to the route — the payout comes from the bonus row instead.</param>
-    IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false);
+    IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft);
 
     /// <summary>
     /// How much the satisfaction gauge moves per delivery, from the same reward row. Needed to work
     /// out how many turn-ins are left before the client ranks up and the payout changes.
     /// </summary>
-    int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false);
+    int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft);
 }
 
 /// <summary>
@@ -29,21 +29,18 @@ public interface IDeliveryRewards
 /// </para>
 ///
 /// <para>
-/// Slot 1 is the craft turn-in (2 gather, 3 fish) — the same assumption vsatisfy makes. Only the
-/// craft slot is read, because craft is the only route Odysseus can run.
+/// Slot 1 is the craft turn-in, 2 gather, 3 fish — the same numbering
+/// <see cref="DeliveryRoute"/> uses.
 /// </para>
 /// </summary>
 public sealed class DeliveryRewards : IDeliveryRewards
 {
-    /// <summary>Supply subrow slot for the crafted item.</summary>
-    private const byte CraftSlot = 1;
-
     /// <summary>Everything one delivery is worth: scrip by currency index, and gauge movement.</summary>
     private sealed record Payout(IReadOnlyDictionary<int, int> Currency, int Satisfaction);
 
     private readonly IDataManager _data;
     private readonly Action<string>? _log;
-    private readonly Dictionary<(uint, int, bool), Payout> _cache = new();
+    private readonly Dictionary<(uint, int, bool, DeliveryRoute), Payout> _cache = new();
 
     public DeliveryRewards(IDataManager data, Action<string>? log = null)
     {
@@ -51,15 +48,15 @@ public sealed class DeliveryRewards : IDeliveryRewards
         _log = log;
     }
 
-    public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false)
-        => Read(client, rank, bonus).Currency;
+    public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft)
+        => Read(client, rank, bonus, route).Currency;
 
-    public int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false)
-        => Read(client, rank, bonus).Satisfaction;
+    public int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft)
+        => Read(client, rank, bonus, route).Satisfaction;
 
-    private Payout Read(DeliveryClient client, int rank, bool bonus)
+    private Payout Read(DeliveryClient client, int rank, bool bonus, DeliveryRoute route)
     {
-        var key = (client.Index, rank, bonus);
+        var key = (client.Index, rank, bonus, route);
         if (_cache.TryGetValue(key, out var cached))
             return cached;
 
@@ -80,7 +77,7 @@ public sealed class DeliveryRewards : IDeliveryRewards
                     // larger reward row; take whichever matches this week.
                     foreach (var sub in rows)
                     {
-                        if (sub.Slot != CraftSlot || sub.IsBonus != bonus || sub.Reward.ValueNullable is not { } reward) continue;
+                        if (sub.Slot != (byte)route || sub.IsBonus != bonus || sub.Reward.ValueNullable is not { } reward) continue;
                         foreach (var entry in reward.SatisfactionSupplyRewardData)
                             if (entry.RewardCurrency != 0 && entry.QuantityHigh > 0)
                                 result[entry.RewardCurrency] = entry.QuantityHigh;

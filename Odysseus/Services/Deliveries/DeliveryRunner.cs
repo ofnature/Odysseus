@@ -34,6 +34,8 @@ public enum DeliveryRunState
     Idle,
     /// <summary>Waiting on Artisan to make the requested item.</summary>
     Craft,
+    /// <summary>Waiting for the requested item to be gathered or fished.</summary>
+    Gather,
     /// <summary>Travelling to the client.</summary>
     Travel,
     /// <summary>Buying ingredients from the merchant standing near the client.</summary>
@@ -60,8 +62,9 @@ public enum DeliveryRunState
 /// </para>
 ///
 /// <para>
-/// Only the craft route is run. Gathering and fishing need their own handoffs and are not wired up;
-/// <see cref="Start"/> refuses them rather than pretending.
+/// All three routes turn in the same way, so gather and fish share everything but the sourcing:
+/// craft buys and crafts, while gather and fish check the bag and — when it is short — stop with
+/// the item, the collectability, the job and the place to find it. Nothing walks to a node yet.
 /// </para>
 ///
 /// <para>
@@ -89,6 +92,7 @@ public sealed class DeliveryRunner
     private readonly ICrafter _crafter;
     private readonly IRecipeLookup _recipes;
     private readonly IIngredientSource _ingredients;
+    private readonly IGatheringSource _gathering;
     private readonly StepExecutor _travel;
     private readonly Func<int> _preferredCraftType;
     private readonly Action<string> _log;
@@ -101,13 +105,15 @@ public sealed class DeliveryRunner
     private int _target;
     private bool _craftStarted;
     private RecipeOption? _recipe;
+    private DeliveryRoute _route = DeliveryRoute.Craft;
 
     public DeliveryRunner(IStepWorld world, IDeliveryWorld game, IDeliveryState state, IDeliveryRequests requests,
         ScripLedger scrips, ICrafter crafter, IRecipeLookup recipes, IIngredientSource ingredients,
-        StepExecutor travel, Func<int> preferredCraftType, Action<string> log)
+        IGatheringSource gathering, StepExecutor travel, Func<int> preferredCraftType, Action<string> log)
     {
         _preferredCraftType = preferredCraftType;
         _ingredients = ingredients;
+        _gathering = gathering;
         _world = world;
         _game = game;
         _state = state;
@@ -133,15 +139,19 @@ public sealed class DeliveryRunner
     /// <summary>What the run is aiming for — the whole allowance, or fewer on a test run.</summary>
     public int Target => _target;
 
-    /// <summary>What this client is asking for on the craft route, once a run has started.</summary>
+    /// <summary>What this client is asking for on the running route, once a run has started.</summary>
     public DeliveryRequest? Request => _request;
+    public DeliveryRoute Route => _route;
 
     /// <summary>Begin this client's craft deliveries. False with a reason in <see cref="StatusLine"/>.</summary>
     /// <param name="limit">
     /// Cap the run at this many deliveries. 0 means the whole remaining allowance. 1 is the
     /// one-shot used to check a client end to end before trusting it with the week.
     /// </param>
-    public bool Start(DeliveryClient client, int limit = 0)
+    public bool Start(DeliveryClient client, int limit = 0) => Start(client, DeliveryRoute.Craft, limit);
+
+    /// <inheritdoc cref="Start(DeliveryClient, int)"/>
+    public bool Start(DeliveryClient client, DeliveryRoute route, int limit = 0)
     {
         if (!_state.IsUnlocked(client))
             return Refuse(DeliveryStop.Setup, $"{client.Name} is not unlocked yet.");
@@ -156,18 +166,19 @@ public sealed class DeliveryRunner
                   "every client. It resets with the weekly reset (Tuesday 08:00 UTC)."
                 : $"{client.Name} has taken all {client.DeliveriesPerWeek} of its own deliveries this week.");
 
-        var (allowed, reason) = _scrips.MayTurnIn(client);
+        var (allowed, reason) = _scrips.MayTurnIn(client, route);
         if (!allowed)
             return Refuse(DeliveryStop.ScripCap, reason!);
 
-        var request = _requests.For(client, _state.Rank(client)).FirstOrDefault(r => r.Route == DeliveryRoute.Craft);
+        var request = _requests.For(client, _state.Rank(client)).FirstOrDefault(r => r.Route == route);
         if (request is null)
-            return Refuse(DeliveryStop.Setup, $"Could not work out what {client.Name} is asking for.");
+            return Refuse(DeliveryStop.Setup, $"Could not work out what {client.Name} wants for the {route} route.");
         if (client.NpcDataId == 0)
             return Refuse(DeliveryStop.Setup, $"{client.Name} has no NPC position in the sheet.");
 
         _client = client;
         _request = request;
+        _route = route;
         _delivered = 0;
         _target = limit > 0 ? Math.Min(limit, remaining) : remaining;
         _craftStarted = false;
@@ -209,6 +220,7 @@ public sealed class DeliveryRunner
                 case DeliveryRunState.Travel: TickTravel(); break;
                 case DeliveryRunState.Shop: TickShop(); break;
                 case DeliveryRunState.Craft: TickCraft(); break;
+                case DeliveryRunState.Gather: TickGather(); break;
                 case DeliveryRunState.Interact: TickInteract(); break;
                 case DeliveryRunState.TurnIn: TickTurnIn(); break;
             }
@@ -291,7 +303,8 @@ public sealed class DeliveryRunner
             && Vector3.Distance(_world.PlayerPosition, client.Position) <= StepExecutor.DefaultStopDistance + StepExecutor.ArrivalSlack)
         {
             _travel.Cancel();
-            Enter(DeliveryRunState.Shop);
+            // Buying and crafting only exist for the craft route; the others just check the bag.
+            Enter(_route == DeliveryRoute.Craft ? DeliveryRunState.Shop : DeliveryRunState.Gather);
             return;
         }
 
@@ -315,6 +328,29 @@ public sealed class DeliveryRunner
     {
         if (_recipe is not null) return _recipe;
         return _recipe = RecipePicker.Pick(_recipes.OptionsFor(_request!.ItemId), _preferredCraftType(), _game.CurrentCraftType);
+    }
+
+    /// <summary>
+    /// Gather and fish have no sourcing step of their own yet. What they can do is check the bag
+    /// and, when it is short, say exactly what to go and get — item, collectability, job and place —
+    /// rather than a bare "not built".
+    /// </summary>
+    private void TickGather()
+    {
+        var client = _client!;
+        var request = _request!;
+        var short_ = Shortfall();
+        if (short_ <= 0)
+        {
+            Enter(DeliveryRunState.Interact);
+            return;
+        }
+
+        var where = _gathering.For(request.ItemId) is { } origin ? $" Found at {origin.Describe()}." : string.Empty;
+        Block(DeliveryStop.Materials,
+              $"{client.Name}: {short_} × {request.ItemName} needed at collectability {request.CollectabilityHigh}, " +
+              $"and Odysseus does not {(_route == DeliveryRoute.Fish ? "fish" : "gather")} yet.{where} " +
+              "Get them and start it again — the travel and turn-in are handled.");
     }
 
     private void TickShop()
@@ -430,7 +466,7 @@ public sealed class DeliveryRunner
             return;
         }
 
-        var (allowed, reason) = _scrips.MayTurnIn(client);
+        var (allowed, reason) = _scrips.MayTurnIn(client, _route);
         if (!allowed)
         {
             Block(DeliveryStop.ScripCap, reason!);
@@ -450,7 +486,7 @@ public sealed class DeliveryRunner
         // just the handover between the two.
         if (_game.IsTradeOpen(request.ItemId))
         {
-            if (!_game.CommitTrade(DeliveryRoute.Craft))
+            if (!_game.CommitTrade(_route))
             {
                 // Retry rather than fault: the three events need the agent to have caught up, and
                 // a refusal one frame can succeed the next. The stall clock is the real backstop.
@@ -469,7 +505,7 @@ public sealed class DeliveryRunner
 
         if (_game.IsSupplyOpen(client))
         {
-            _game.OpenRoute(DeliveryRoute.Craft);
+            _game.OpenRoute(_route);
             _lastAction = _world.UtcNow;
             return;
         }

@@ -107,9 +107,9 @@ public sealed class ScripLedger
         return _kinds.Select(k => new ScripStanding(k, _currency.Count(k.ItemId), gain.GetValueOrDefault(k.RewardCurrency))).ToList();
     }
 
-    /// <summary>What one more craft delivery from this client would pay, by reward-currency index.</summary>
-    public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client)
-        => _rewards.PerDelivery(client, _state.Rank(client), _bonus.For(client).Craft);
+    /// <summary>What one more delivery on this route would pay, by reward-currency index.</summary>
+    public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, DeliveryRoute route = DeliveryRoute.Craft)
+        => _rewards.PerDelivery(client, _state.Rank(client), _bonus.For(client)[route], route);
 
     /// <summary>
     /// Would turning in everything still available this week overflow any scrip? The list is the
@@ -125,9 +125,9 @@ public sealed class ScripLedger
     /// overflow, so it stops instead — with the scrip named and the numbers shown.
     /// </para>
     /// </summary>
-    public (bool Allowed, string? Reason) MayTurnIn(DeliveryClient client)
+    public (bool Allowed, string? Reason) MayTurnIn(DeliveryClient client, DeliveryRoute route = DeliveryRoute.Craft)
     {
-        var payout = PerDelivery(client);
+        var payout = PerDelivery(client, route);
         foreach (var standing in Read())
         {
             if (!payout.TryGetValue(standing.Scrip.RewardCurrency, out var amount) || amount <= 0) continue;

@@ -303,25 +303,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
             return;
         }
 
-        // The route carrying this week's bonus is the one worth running, so it wears the accent.
-        var (allowed, reason) = _scrips.MayTurnIn(client);
-        var colour = !allowed ? OdysseusTheme.NeutralDark : bonus.Craft ? OdysseusTheme.AccentDim : OdysseusTheme.GreenDark;
-        var payout = string.Join(", ", _scrips.PerDelivery(client).Select(p =>
-            $"{p.Value:N0} {_scrips.Kinds.FirstOrDefault(k => k.RewardCurrency == p.Key)?.Name ?? p.Key.ToString()}"));
         var running = _runner.Client?.Index == client.Index && !_runner.IsFinished;
-
-        // Name what they are actually asking for — it decides whether this client is worth a run.
-        var wanted = _requests.For(client, _state.Rank(client)).FirstOrDefault(r => r.Route == DeliveryRoute.Craft);
-        var asking = wanted is null
-            ? "Cannot read this week's request yet."
-            : $"Wants {wanted.ItemName} (collectability {wanted.CollectabilityHigh}).";
-
-        var tip = allowed
-            ? $"Craft turn-in{(bonus.Craft ? " (bonus week)" : "")} — pays {payout} each.\n{asking}\n" +
-              (_oneShot ? "Test run: one delivery, then stop." : $"Runs all {remaining} remaining.") +
-              "\nCrafts through Artisan; ingredients must already be stocked."
-            : reason;
-
         if (running)
         {
             if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Stop, "Stop", OdysseusTheme.NeutralDark,
@@ -330,35 +312,66 @@ public sealed class DeliveriesWindow : OdysseusWindow
                 _runner.Stop();
                 _status = $"{client.Name}: stopped.";
             }
+            return;
         }
-        else if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Hammer, "Craft turn-in", colour, tip ?? string.Empty, new Vector2(ActionWidth, 22)))
-        {
-            if (!allowed)
-            {
-                _blockedReason = reason ?? "At the scrip cap.";
-                _blockedKind = DeliveryStop.ScripCap;
-                _openBlockedPopup = true;
-            }
-            else if (!_runner.Start(client, _oneShot ? 1 : 0))
-            {
-                _blockedReason = _runner.StatusLine;
-                _blockedKind = _runner.StoppedBecause;
-                _openBlockedPopup = true;
-            }
-            else
-            {
-                _status = _runner.StatusLine;
-            }
-        }
+
+        RouteButton(client, DeliveryRoute.Craft, bonus, remaining, FontAwesomeIcon.Hammer, "Craft turn-in", ActionWidth);
         ImGui.SameLine();
-        using (ImRaii.Disabled(true))
+        RouteButton(client, DeliveryRoute.Gather, bonus, remaining, FontAwesomeIcon.Leaf, "Gather", 74f);
+        ImGui.SameLine();
+        RouteButton(client, DeliveryRoute.Fish, bonus, remaining, FontAwesomeIcon.Fish, "Fish", 62f);
+    }
+
+    /// <summary>
+    /// One route's button. All three run the same travel and turn-in; only the sourcing differs, so
+    /// the tooltip is where the difference is spelled out.
+    /// </summary>
+    private void RouteButton(DeliveryClient client, DeliveryRoute route, BonusFlags bonus, int remaining,
+        FontAwesomeIcon icon, string label, float width)
+    {
+        var (allowed, reason) = _scrips.MayTurnIn(client, route);
+        var hasBonus = bonus[route];
+        // The route carrying this week's bonus is the one worth running, so it wears the accent.
+        var colour = !allowed ? OdysseusTheme.NeutralDark : hasBonus ? OdysseusTheme.AccentDim : OdysseusTheme.GreenDark;
+
+        var payout = string.Join(", ", _scrips.PerDelivery(client, route).Select(p =>
+            $"{p.Value:N0} {_scrips.Kinds.FirstOrDefault(k => k.RewardCurrency == p.Key)?.Name ?? p.Key.ToString()}"));
+
+        // Name what they are actually asking for — it decides whether this route is worth running.
+        var wanted = _requests.For(client, _state.Rank(client)).FirstOrDefault(r => r.Route == route);
+        var asking = wanted is null
+            ? "Cannot read this week's request yet."
+            : $"Wants {wanted.ItemName} (collectability {wanted.CollectabilityHigh}).";
+        var sourcing = route == DeliveryRoute.Craft
+            ? "Buys ingredients from the merchant nearby, then crafts through Artisan."
+            : $"Odysseus does not {(route == DeliveryRoute.Fish ? "fish" : "gather")} yet — have them in the bag and it\n" +
+              "handles the travel and the turn-in, or it stops and says where to find them.";
+
+        var tip = allowed
+            ? $"{label}{(hasBonus ? " (bonus week)" : "")} — pays {payout} each.\n{asking}\n" +
+              (_oneShot ? "Test run: one delivery, then stop." : $"Runs all {remaining} remaining.") +
+              $"\n{sourcing}"
+            : reason;
+
+        if (!OdysseusTheme.IconTextButton(icon, label, colour, tip ?? string.Empty, new Vector2(width, 22)))
+            return;
+
+        if (!allowed)
         {
-            ImGui.Button("Gather##g" + client.Index, new Vector2(62, 22));
-            ImGui.SameLine();
-            ImGui.Button("Fish##f" + client.Index, new Vector2(50, 22));
+            _blockedReason = reason ?? "At the scrip cap.";
+            _blockedKind = DeliveryStop.ScripCap;
+            _openBlockedPopup = true;
         }
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            ImGui.SetTooltip("Gathering and fishing deliveries are not automated.");
+        else if (!_runner.Start(client, route, _oneShot ? 1 : 0))
+        {
+            _blockedReason = _runner.StatusLine;
+            _blockedKind = _runner.StoppedBecause;
+            _openBlockedPopup = true;
+        }
+        else
+        {
+            _status = _runner.StatusLine;
+        }
     }
 
     private void DrawScrips()

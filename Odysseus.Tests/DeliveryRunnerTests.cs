@@ -33,9 +33,9 @@ public class DeliveryRunnerTests
     private sealed class Rewards : IDeliveryRewards
     {
         public int PerTurnIn { get; set; } = 100;
-        public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient c, int rank, bool bonus = false)
+        public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient c, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft)
             => new Dictionary<int, int> { [2] = PerTurnIn };
-        public int SatisfactionPerDelivery(DeliveryClient c, int rank, bool bonus = false) => 0;
+        public int SatisfactionPerDelivery(DeliveryClient c, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft) => 0;
     }
 
     private sealed class Bonus : IDeliveryBonus
@@ -45,11 +45,22 @@ public class DeliveryRunnerTests
         public BonusFlags For(DeliveryClient c) => BonusFlags.None;
     }
 
+    private const uint GatherItemId = 40001;
+
     private sealed class Requests : IDeliveryRequests
     {
         public List<DeliveryRequest> Items { get; } =
-            [new(DeliveryRoute.Craft, 0, ItemId, "Rroneek Cheese", 500, false)];
+        [
+            new(DeliveryRoute.Craft, 0, ItemId, "Rroneek Cheese", 500, false),
+            new(DeliveryRoute.Gather, 1, GatherItemId, "Yak T'el Marlin", 400, false),
+        ];
         public IReadOnlyList<DeliveryRequest> For(DeliveryClient c, int rank) => Items;
+    }
+
+    private sealed class Gathering : IGatheringSource
+    {
+        public GatheringOrigin? Origin { get; set; } = new("Botanist", 100, "Ok'hanu", "Yak T'el");
+        public GatheringOrigin? For(uint itemId) => Origin;
     }
 
     private sealed class Crafter : ICrafter
@@ -78,9 +89,12 @@ public class DeliveryRunnerTests
         public int Committed { get; private set; }
         public int CurrentCraftType { get; set; } = -1;
 
+        /// <summary>Whatever the open trade is asking for — the route decides which item that is.</summary>
+        private uint _pending;
+
         public bool IsSupplyOpen(DeliveryClient c) => SupplyOpen;
         public void OpenRoute(DeliveryRoute route) => TradeOpen = true;
-        public bool IsTradeOpen(uint itemId) => TradeOpen;
+        public bool IsTradeOpen(uint itemId) { if (TradeOpen) _pending = itemId; return TradeOpen; }
         public int ItemCount(uint itemId) => Bag.GetValueOrDefault(itemId);
 
         public bool CommitTrade(DeliveryRoute route)
@@ -88,7 +102,7 @@ public class DeliveryRunnerTests
             if (RefuseCommit) return false;
             Committed++;
             TradeOpen = false;
-            Bag[ItemId] = Math.Max(0, Bag.GetValueOrDefault(ItemId) - 1);
+            Bag[_pending] = Math.Max(0, Bag.GetValueOrDefault(_pending) - 1);
             return true;
         }
 
@@ -141,6 +155,7 @@ public class DeliveryRunnerTests
     private readonly Recipes _recipes = new();
     private readonly Game _game = new();
     private readonly Ingredients _ingredients = new();
+    private readonly Gathering _gathering = new();
     private readonly ScripLedger _scrips;
     private readonly DeliveryRunner _runner;
     private readonly List<string> _log = [];
@@ -149,7 +164,7 @@ public class DeliveryRunnerTests
     public DeliveryRunnerTests()
     {
         _scrips = new ScripLedger([Purple], _currency, new DeliveryCatalog([Zhloe]), _state, _rewards, new Bonus());
-        _runner = new DeliveryRunner(_world, _game, _state, _requests, _scrips, _crafter, _recipes, _ingredients,
+        _runner = new DeliveryRunner(_world, _game, _state, _requests, _scrips, _crafter, _recipes, _ingredients, _gathering,
             new StepExecutor(_world), () => _preferredJob, _log.Add);
         _world.PlayerPosition = Zhloe.Position;   // standing at the client
         _world.Spawned.Add(Zhloe.NpcDataId);
@@ -389,6 +404,52 @@ public class DeliveryRunnerTests
         Assert.Equal(DeliveryStop.Materials, _runner.StoppedBecause);
         Assert.Contains("gil", _runner.StatusLine);
         Assert.Empty(_game.Bought);
+    }
+
+    /// <summary>
+    /// Gather has no sourcing of its own, but everything after it is shared — so with the items in
+    /// the bag the route runs end to end, never touching the vendor or Artisan.
+    /// </summary>
+    [Fact]
+    public void A_gather_delivery_runs_when_the_items_are_already_in_the_bag()
+    {
+        _game.Bag[GatherItemId] = 6;
+        Assert.True(_runner.Start(Zhloe, DeliveryRoute.Gather));
+        Run();
+
+        Assert.Equal(DeliveryRunState.Done, _runner.State);
+        Assert.Equal(6, _game.Committed);
+        Assert.Equal(0, _game.Bag[GatherItemId]);   // the gathered items, not the crafted one
+        Assert.Empty(_game.Bought);
+        Assert.Empty(_crafter.Asked);
+        Assert.Equal(DeliveryRoute.Gather, _runner.Route);
+    }
+
+    [Fact]
+    public void A_short_gather_bag_stops_and_says_where_to_find_them()
+    {
+        _game.Bag[GatherItemId] = 2;
+        Assert.True(_runner.Start(Zhloe, DeliveryRoute.Gather));
+        Run();
+
+        Assert.Equal(DeliveryRunState.Blocked, _runner.State);
+        Assert.Equal(DeliveryStop.Materials, _runner.StoppedBecause);
+        Assert.Contains("4 × Yak T'el Marlin", _runner.StatusLine);
+        Assert.Contains("collectability 400", _runner.StatusLine);
+        Assert.Contains("Ok'hanu, Yak T'el — Botanist Lv 100", _runner.StatusLine);
+        Assert.Equal(0, _game.Committed);
+    }
+
+    [Fact]
+    public void An_item_no_node_lists_still_stops_cleanly()
+    {
+        _gathering.Origin = null;
+        Assert.True(_runner.Start(Zhloe, DeliveryRoute.Gather, limit: 1));
+        Run();
+
+        Assert.Equal(DeliveryRunState.Blocked, _runner.State);
+        Assert.Contains("does not gather yet", _runner.StatusLine);
+        Assert.DoesNotContain("Found at", _runner.StatusLine);
     }
 
     /// <summary>Two different limits, two different reasons — "done this week" is not specific enough.</summary>
