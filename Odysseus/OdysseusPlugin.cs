@@ -171,9 +171,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var artisan = new ArtisanIpc(PluginInterface, message => Log.Warning(message));
         var gatherBuddy = new GatherBuddyIpc(PluginInterface, message => Log.Warning(message));
         var deliveryRequests = new Services.Deliveries.DeliveryRequests(DataManager, message => Log.Warning(message));
+        var deliveryWorld = new Services.Deliveries.GameDeliveryWorld(message => Log.Warning(message));
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(
             _world,
-            new Services.Deliveries.GameDeliveryWorld(message => Log.Warning(message)),
+            deliveryWorld,
             deliveryState,
             deliveryRequests,
             scrips,
@@ -185,8 +186,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             new StepExecutor(_world, dialogue),
             () => _config.DeliveryCraftJob,
             message => Log.Information(message));
+        var scripShop = new Services.Deliveries.ScripShop(DataManager, scrips.Kinds, message => Log.Warning(message));
+        var spending = new Services.Deliveries.SpendPlanner(scripShop, scrips, id => deliveryWorld.ItemCount(id));
         _deliveriesWindow = new DeliveriesWindow(_deliveries, deliveryState, deliveryBonus, scrips,
-            artisan, unlockPlanner, _deliveryRunner, deliveryRequests, _config, SaveConfig, gatherBuddy);
+            artisan, unlockPlanner, _deliveryRunner, deliveryRequests, _config, SaveConfig, gatherBuddy,
+            scripShop, spending);
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);

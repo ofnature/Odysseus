@@ -74,6 +74,26 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// </summary>
     public int DeliveryCraftJob { get; set; } = -1;
 
+    /// <summary>
+    /// Spend scrips without being asked, when a turn-in would otherwise overcap. Off by default:
+    /// spending is irreversible and the cap guard already stops the waste, so this only exists to
+    /// keep a long run from stalling.
+    /// </summary>
+    public bool AutoSpendScrips { get; set; }
+
+    /// <summary>
+    /// Buy master recipe tomes and folklore books not yet learned. Cascades under
+    /// <see cref="AutoSpendScrips"/> for the automatic case, but also applies to the Spend button.
+    /// The one rule that empties itself — once they are read it stops firing.
+    /// </summary>
+    public bool SpendOnMasterBooks { get; set; }
+
+    /// <summary>Items opted into buying with scrips, in preference order. Empty until you tick some.</summary>
+    public List<Services.Deliveries.SpendEntry> SpendList { get; set; } = [];
+
+    /// <summary>Scrips left untouched when spending, so it makes room rather than stripping the balance.</summary>
+    public int SpendReserve { get; set; } = 500;
+
     /// <summary>Keep the priority list across sessions. Off = it lasts until the client closes.</summary>
     public bool PersistPriorityList { get; set; } = true;
 

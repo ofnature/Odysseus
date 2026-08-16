@@ -34,6 +34,8 @@ public sealed class DeliveriesWindow : OdysseusWindow
     private readonly IDeliveryRequests _requests;
     private readonly OdysseusConfig _config;
     private readonly IGatherer _gatherer;
+    private readonly IScripShop _shop;
+    private readonly SpendPlanner _spending;
     private readonly Action _save;
 
     /// <summary>
@@ -55,7 +57,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
 
     public DeliveriesWindow(DeliveryCatalog catalog, IDeliveryState state, IDeliveryBonus bonus, ScripLedger scrips,
         ArtisanIpc artisan, UnlockPlanner unlock, DeliveryRunner runner, IDeliveryRequests requests,
-        OdysseusConfig config, Action save, IGatherer gatherer)
+        OdysseusConfig config, Action save, IGatherer gatherer, IScripShop shop, SpendPlanner spending)
         : base("Odysseus Deliveries##OdysseusDeliveries")
     {
         _catalog = catalog;
@@ -69,6 +71,8 @@ public sealed class DeliveriesWindow : OdysseusWindow
         _config = config;
         _save = save;
         _gatherer = gatherer;
+        _shop = shop;
+        _spending = spending;
         Size = new Vector2(760, 620);
         SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(560, 320), MaximumSize = new Vector2(1400, 1400) };
@@ -471,6 +475,8 @@ public sealed class DeliveriesWindow : OdysseusWindow
         }
         ImGui.EndTable();
 
+        DrawSpending();
+
         ImGui.Spacing();
         if (_status.Length > 0)
             OdysseusTheme.TextWrappedColored(OdysseusTheme.TextSecondary, _status);
@@ -479,6 +485,105 @@ public sealed class DeliveriesWindow : OdysseusWindow
             "at their highest rate, bonus weeks included — it is a ceiling, not a forecast. Overcap is what would " +
             "be thrown away — spend those scrips first. A turn-in that would overcap is stopped and says so. Unlock queues " +
             "the client's opening quest chain onto the priority list.");
+    }
+
+    /// <summary>
+    /// What to spend scrips on. The auto toggle is the parent and the rules cascade under it, but
+    /// they also drive the Spend button — so what happens unattended is exactly what the button
+    /// would have done, rather than a second, hidden policy.
+    /// </summary>
+    private void DrawSpending()
+    {
+        ImGui.Spacing();
+        if (!ImGui.CollapsingHeader("Spending"))
+            return;
+
+        var auto = _config.AutoSpendScrips;
+        if (ImGui.Checkbox("Spend scrips automatically when a turn-in would overcap", ref auto))
+        {
+            _config.AutoSpendScrips = auto;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Off, nothing is ever bought without pressing Spend.\n" +
+                             "On, the rules below run themselves rather than letting a run stall at the cap.");
+
+        ImGui.Indent(18f);
+
+        var books = _config.SpendOnMasterBooks;
+        if (ImGui.Checkbox("Master recipe tomes I have not read", ref books))
+        {
+            _config.SpendOnMasterBooks = books;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Bought cheapest first, one copy each, and only if unread.\n" +
+                             "The one rule that empties itself — once they are all read it stops.\n" +
+                             "Gathering folklore tomes are not detected; tick those below instead.");
+
+        DrawSpendList();
+
+        var reserve = _config.SpendReserve;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("Keep in reserve", ref reserve, 100))
+        {
+            _config.SpendReserve = Math.Max(0, reserve);
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Scrips left untouched, so spending makes room rather than stripping the balance.");
+
+        ImGui.Unindent(18f);
+
+        // The plan is shown before it is run, and it is the same plan the auto trigger would use.
+        var plan = _spending.Plan(_config.SpendOnMasterBooks, _config.SpendList, _config.SpendReserve);
+        ImGui.Spacing();
+        if (OdysseusTheme.IconTextButton(FontAwesomeIcon.ShoppingCart, "Spend",
+                plan.IsEmpty ? OdysseusTheme.NeutralDark : OdysseusTheme.GreenDark,
+                plan.IsEmpty ? plan.Summary : plan.Summary + "\n" + string.Join("\n",
+                    plan.Lines.Select(l => $"  {l.Quantity} × {l.Offer.Name} — {l.Total:N0}")),
+                new Vector2(110, 22)) && !plan.IsEmpty)
+        {
+            _status = "Buying at a scrip vendor is not built yet — this is the plan it would run.";
+        }
+        ImGui.SameLine();
+        ImGui.TextColored(plan.IsEmpty ? OdysseusTheme.TextDisabled : OdysseusTheme.TextSecondary, plan.Summary);
+    }
+
+    private void DrawSpendList()
+    {
+        foreach (var entry in _config.SpendList.ToList())
+        {
+            var offer = _shop.Offers.FirstOrDefault(o => o.ItemId == entry.ItemId);
+            var enabled = entry.Enabled;
+            if (ImGui.Checkbox($"##en{entry.ItemId}", ref enabled)) { entry.Enabled = enabled; _save(); }
+            ImGui.SameLine();
+            ImGui.TextColored(enabled ? OdysseusTheme.TextPrimary : OdysseusTheme.TextDisabled,
+                offer is null ? $"item {entry.ItemId} (not on any vendor)" : $"{offer.Name} — {offer.Cost:N0}");
+
+            ImGui.SameLine();
+            var keep = entry.KeepStocked;
+            ImGui.SetNextItemWidth(90f);
+            if (ImGui.InputInt($"keep##k{entry.ItemId}", ref keep)) { entry.KeepStocked = Math.Max(0, keep); _save(); }
+
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"×##rm{entry.ItemId}")) { _config.SpendList.Remove(entry); _save(); }
+        }
+
+        // Add from what the vendors actually stock, so an id can never be mistyped.
+        ImGui.SetNextItemWidth(260f);
+        if (ImGui.BeginCombo("##addspend", "Add an item…"))
+        {
+            foreach (var offer in _shop.Offers
+                         .Where(o => !o.IsBook && _config.SpendList.All(e => e.ItemId != o.ItemId))
+                         .OrderBy(o => o.Name))
+            {
+                if (!ImGui.Selectable($"{offer.Name} — {offer.Cost:N0}##{offer.ItemId}")) continue;
+                _config.SpendList.Add(new SpendEntry { ItemId = offer.ItemId, Enabled = true });
+                _save();
+            }
+            ImGui.EndCombo();
+        }
     }
 
     private static void Number(int value, Vector4 colour)
