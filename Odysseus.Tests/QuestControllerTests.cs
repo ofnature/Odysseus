@@ -18,6 +18,10 @@ public sealed class FakeQuestStateReader : IQuestStateReader
     public IReadOnlyList<QuestSnapshot> ReadAccepted() => Accepted.Values.ToList();
     public bool IsComplete(ushort questId) => Complete.Contains(questId);
     public bool IsAccepted(ushort questId) => Accepted.ContainsKey(questId);
+    public ushort? ScenarioQuest { get; set; }
+    public ushort? CurrentScenarioQuest() => ScenarioQuest;
+    public CharacterFacts Facts { get; set; }
+    public CharacterFacts Character() => Facts;
 }
 
 public class QuestControllerTests : IDisposable
@@ -40,13 +44,16 @@ public class QuestControllerTests : IDisposable
 
     private readonly Policy _policy = new();
     private readonly Dictionary<ushort, ushort> _chain = new();
+    private readonly Dictionary<ushort, int> _levels = new();
     private readonly RunLog _runLog = new(null);
 
     public QuestControllerTests()
     {
         _store = new PathStore(_dir);
         _controller = new QuestController(_quests, _store, new StepExecutor(_world), _world, _world, _policy,
-            id => _chain.TryGetValue(id, out var n) ? n : null, _runLog, _log.Add);
+            id => _chain.TryGetValue(id, out var n) ? n : null,
+            id => _levels.TryGetValue(id, out var l) ? l : 0,
+            _runLog, _log.Add);
     }
 
     public void Dispose()
@@ -296,6 +303,33 @@ public class QuestControllerTests : IDisposable
         Ticks(3);
         Assert.Equal(RunState.Idle, _controller.State);
         Assert.Contains("level 54", _controller.StatusLine);
+    }
+
+    [Fact]
+    public void Level_gate_stops_before_walking_to_a_quest_the_character_cannot_accept()
+    {
+        _world.Spawned.Add(1);
+        StorePath(new QuestSequence { Sequence = 0, Steps = [Interact(1)] });
+        _levels[1622] = 60;
+        _world.PlayerLevel = 54;
+
+        Assert.False(_controller.Start(1622));
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.Contains("needs level 60", _controller.StatusLine);
+        Assert.DoesNotContain("Interact 1", _world.Calls);
+    }
+
+    [Fact]
+    public void Level_gate_does_not_block_a_quest_already_accepted()
+    {
+        _world.Spawned.Add(1);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+        _levels[1622] = 60;
+        _world.PlayerLevel = 54;
+        _quests.Set(1622, 1); // in the journal already — synced down or level changed since
+        Assert.True(_controller.Start(1622));
+        Ticks(12);
+        Assert.Contains("Interact 1", _world.Calls);
     }
 
     [Fact]

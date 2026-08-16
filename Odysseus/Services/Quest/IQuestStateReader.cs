@@ -26,6 +26,15 @@ public interface IQuestStateReader
 
     /// <summary>The character has this quest in the journal right now.</summary>
     bool IsAccepted(ushort questId);
+
+    /// <summary>
+    /// The game's own idea of the current Main Scenario quest — what the Scenario Guide shows —
+    /// or null when it has none / cannot be read. Current if accepted, next if not.
+    /// </summary>
+    ushort? CurrentScenarioQuest();
+
+    /// <summary>Start town, first class, Grand Company — for the story rules the sheet does not carry.</summary>
+    CharacterFacts Character();
 }
 
 /// <summary>Framework stand-in: nothing readable, ever. Replaced by the real reader in P0.</summary>
@@ -38,4 +47,8 @@ public sealed class NullQuestStateReader : IQuestStateReader
     public bool IsComplete(ushort questId) => false;
 
     public bool IsAccepted(ushort questId) => false;
+
+    public ushort? CurrentScenarioQuest() => null;
+
+    public CharacterFacts Character() => CharacterFacts.Unknown;
 }

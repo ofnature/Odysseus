@@ -235,6 +235,16 @@ public sealed class ConfigWindow : Window
         }
         OdysseusTheme.HelpMarker("0 = never. Parks a trial alt short of its cap, or holds a sync level.");
 
+        var gcNames = new[] { "Not chosen (stop and ask)", "Maelstrom", "Twin Adder", "Immortal Flames" };
+        var gc = (int)_config.PreferredGrandCompany;
+        ImGui.SetNextItemWidth(200f);
+        if (ImGui.Combo("Grand Company", ref gc, gcNames, gcNames.Length))
+        {
+            _config.PreferredGrandCompany = (byte)Math.Clamp(gc, 0, 3);
+            _save();
+        }
+        OdysseusTheme.HelpMarker("Which company to join when the ARR story asks. Ignored once the character has joined one.");
+
         var pickRewards = _config.PickQuestRewards;
         if (ImGui.Checkbox("Pick quest rewards automatically", ref pickRewards))
         {

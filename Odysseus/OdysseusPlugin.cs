@@ -42,6 +42,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly PathStore _pathStore;
     private readonly GameStepWorld _world;
     private readonly QuestController _controller;
+    private readonly StoryFrontier _frontier;
     private readonly RunLog _runLog;
     private readonly FleetPublisher _fleet;
     private readonly OdysseusIpc _ipc;
@@ -89,8 +90,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _runLog = new RunLog(
             System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "runlog.jsonl"),
             message => Log.Warning(message));
+        _frontier = new StoryFrontier(_quests, _catalog, () => _config.PreferredGrandCompany);
         _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world, dialogue), _world, _world, _config,
-            completed => _catalog.NextMainScenario(completed, _quests.IsComplete),
+            _frontier.Next,
+            id => _catalog.ById(id)?.ClassJobLevel ?? 0,
             _runLog, message => Log.Information(message));
 
         // Published once the controller exists, so the gate never reports on a half-built run.
@@ -109,7 +112,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
             () => TargetManager.Target?.BaseId);
         _logWindow = new LogWindow(_runLog);
-        _runWindow = new RunWindow(_config, _presence, _quests, _catalog, _pathStore, _controller, OpenConfig,
+        _runWindow = new RunWindow(_config, _presence, _quests, _catalog, _pathStore, _controller, _frontier, OpenConfig,
             () => _fleetWindow!.IsOpen = true, () => _logWindow.IsOpen = true, questId => _pathEditorWindow!.Open(questId),
             () => TargetManager.Target?.BaseId,
             () => TargetManager.Target?.Position,

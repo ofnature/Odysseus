@@ -26,6 +26,7 @@ public sealed class RunWindow : Window
     private readonly QuestCatalog _catalog;
     private readonly PathStore _paths;
     private readonly QuestController _controller;
+    private readonly StoryFrontier _storyFrontier;
     private readonly Action _openConfig;
     private readonly Action _openFleet;
     private readonly Action _openLog;
@@ -49,6 +50,7 @@ public sealed class RunWindow : Window
         QuestCatalog catalog,
         PathStore paths,
         QuestController controller,
+        StoryFrontier storyFrontier,
         Action openConfig,
         Action openFleet,
         Action openLog,
@@ -66,6 +68,7 @@ public sealed class RunWindow : Window
         _catalog = catalog;
         _paths = paths;
         _controller = controller;
+        _storyFrontier = storyFrontier;
         _openConfig = openConfig;
         _openFleet = openFleet;
         _openLog = openLog;
@@ -188,7 +191,7 @@ public sealed class RunWindow : Window
         if (now - _frontierAt > FrontierRefresh)
         {
             _frontierAt = now;
-            _frontier = _catalog.CurrentMainScenario(_quests.IsComplete);
+            _frontier = _storyFrontier.Current();
         }
 
         // An accepted MSQ quest is the current one; otherwise the story frontier, not yet accepted.
@@ -217,6 +220,8 @@ public sealed class RunWindow : Window
                 ImGui.TextColored(OdysseusTheme.TextPrimary, next.Name);
                 ImGui.SameLine();
                 ImGui.TextColored(OdysseusTheme.TextSecondary, $"· Lv {next.ClassJobLevel} · not yet accepted");
+                ImGui.SameLine();
+                ImGui.TextColored(OdysseusTheme.TextDisabled, $"({_storyFrontier.LastSource})");
                 if (!hasPath)
                 {
                     ImGui.SameLine();

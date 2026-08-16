@@ -49,6 +49,7 @@ public sealed class QuestController
     private readonly IConditionWorld _conditions;
     private readonly IRunPolicy _policy;
     private readonly Func<ushort, ushort?> _nextQuest;
+    private readonly Func<ushort, int> _questLevel;
     private readonly IStepLog _stepLog;
     private readonly Action<string> _log;
 
@@ -68,10 +69,11 @@ public sealed class QuestController
     private QuestSnapshot _lastSnapshot;
 
     /// <param name="nextQuest">Given a completed quest id, the next MSQ quest to run, or null when the story is blocked or over.</param>
+    /// <param name="questLevel">Level a quest requires (0 = unknown, no gate).</param>
     public QuestController(
         IQuestStateReader quests, PathStore paths, StepExecutor executor,
         IStepWorld world, IConditionWorld conditions, IRunPolicy policy,
-        Func<ushort, ushort?> nextQuest, IStepLog stepLog, Action<string> log)
+        Func<ushort, ushort?> nextQuest, Func<ushort, int> questLevel, IStepLog stepLog, Action<string> log)
     {
         _quests = quests;
         _paths = paths;
@@ -80,6 +82,7 @@ public sealed class QuestController
         _conditions = conditions;
         _policy = policy;
         _nextQuest = nextQuest;
+        _questLevel = questLevel;
         _stepLog = stepLog;
         _log = log;
     }
@@ -156,6 +159,18 @@ public sealed class QuestController
 
     private bool Begin(ushort questId, QuestPath path)
     {
+        // The level gate: a quest the character cannot accept yet is a stop with a reason, not a
+        // walk to an NPC who will not talk. (QuestFlow does the same.)
+        var required = _questLevel(questId);
+        var have = _world.PlayerLevel;
+        if (required > 0 && have > 0 && required > have && !_quests.IsAccepted(questId))
+        {
+            Stop();
+            StatusLine = $"{path.Name} needs level {required}; you are {have}. Level up, then Start.";
+            _log(StatusLine);
+            return false;
+        }
+
         _singleStep = null;
         _executor.Cancel();
         _questId = questId;
@@ -423,7 +438,7 @@ public sealed class QuestController
             return;
         }
         _log($"Rolling on to {next} ({path.Name}).");
-        Begin(next.Value, path);
+        Begin(next.Value, path); // a level gate inside leaves us stopped with its own reason
     }
 
     private void EnterSequence(int sequence, QuestSnapshot snap)

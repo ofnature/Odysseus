@@ -122,6 +122,49 @@ public sealed unsafe class QuestStateReader : IQuestStateReader
         }
     }
 
+    /// <summary>
+    /// <c>AgentScenarioTree</c> — the Scenario Guide's own pointer. Verified against the pinned
+    /// ClientStructs 2026-08-15: <c>Data->MainScenarioQuestIds[Data->MSQPathIndex]</c> (slots 0–2
+    /// are the paths, 3 is the last completed when nothing is accepted). This is the primary
+    /// frontier source; the catalog's chain walk is the fallback, as it is in QuestFlow.
+    /// </summary>
+    public ushort? CurrentScenarioQuest()
+    {
+        try
+        {
+            var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentScenarioTree.Instance();
+            if (agent == null || agent->Data == null)
+                return null;
+            var data = agent->Data;
+            var ids = data->MainScenarioQuestIds;
+            var index = data->MSQPathIndex;
+            if (index >= ids.Length || index > 2)
+                index = 0;
+            var id = ids[index];
+            return id == 0 ? null : id;
+        }
+        catch (Exception ex)
+        {
+            Fault($"{ex.GetType().Name}: {ex.Message}");
+            return null;
+        }
+    }
+
+    public CharacterFacts Character()
+    {
+        try
+        {
+            var state = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
+            if (state == null)
+                return CharacterFacts.Unknown;
+            return new CharacterFacts(state->StartTown, state->FirstClass, state->GrandCompany, 0);
+        }
+        catch
+        {
+            return CharacterFacts.Unknown;
+        }
+    }
+
     private QuestSnapshot Fault(string reason)
     {
         if (reason != _lastFault)

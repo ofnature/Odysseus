@@ -44,6 +44,13 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     public int StopAtLevel { get; set; }
 
     /// <summary>
+    /// Which Grand Company to join when the story asks (The Company You Keep). 0 = not chosen —
+    /// the run stops at that fork and says so. 1 Maelstrom, 2 Twin Adder, 3 Immortal Flames.
+    /// Ignored once the character has joined one.
+    /// </summary>
+    public byte PreferredGrandCompany { get; set; }
+
+    /// <summary>
     /// Let TextAdvance choose optional quest rewards (its own priority: gil, vendor value, gear
     /// coffers, gear for the current job). Off means the reward window waits for you — the run
     /// pauses there and says so.
