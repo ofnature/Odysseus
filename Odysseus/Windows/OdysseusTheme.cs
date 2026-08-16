@@ -319,6 +319,20 @@ internal static class OdysseusTheme
         return clicked;
     }
 
+    /// <summary>Wrapped paragraph in a colour — <see cref="ImGui.TextWrapped"/> has no coloured overload.</summary>
+    public static void TextWrappedColored(Vector4 color, string text)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, color);
+        try
+        {
+            ImGui.TextWrapped(text);
+        }
+        finally
+        {
+            ImGui.PopStyleColor();
+        }
+    }
+
     /// <summary>Hover "(?)" tooltip for a non-obvious control.</summary>
     public static void HelpMarker(string text)
     {

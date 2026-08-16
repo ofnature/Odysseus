@@ -158,7 +158,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—"));
 
         var unlockPlanner = new UnlockPlanner(_catalog, _quests, _priority, _pathStore.Has, message => Log.Information(message));
-        _tribesWindow = new TribesWindow(_config, _tribes, _tribeState, _tribeRunner, unlockPlanner,
+        _tribesWindow = new TribesWindow(_config, _tribes, _tribeState, _tribeRunner, unlockPlanner, new GameIcons(TextureProvider),
             id => { if (!_tribeQueue.Contains(id)) _tribeQueue.Enqueue(id); },
             () => { _tribeQueue.Clear(); _tribeRunner.Stop(); });
         _deliveries = new Services.Deliveries.DeliveryCatalog(DataManager, message => Log.Warning(message));

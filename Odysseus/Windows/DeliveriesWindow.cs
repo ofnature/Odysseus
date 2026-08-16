@@ -23,6 +23,9 @@ public sealed class DeliveriesWindow : OdysseusWindow
     private readonly UnlockPlanner _unlock;
     private string _status = string.Empty;
 
+    /// <summary>Widest button label plus padding, so the column never clips.</summary>
+    private static float ActionWidth => ImGui.CalcTextSize("Unlock").X + ImGui.GetFrameHeight() + ImGui.GetStyle().FramePadding.X * 4f;
+
     public DeliveriesWindow(DeliveryCatalog catalog, IDeliveryState state, UnlockPlanner unlock)
         : base("Odysseus Deliveries##OdysseusDeliveries")
     {
@@ -40,13 +43,17 @@ public sealed class DeliveriesWindow : OdysseusWindow
         ImGui.TextColored(OdysseusTheme.TextSecondary, $"Clients unlocked: {unlocked} / {_catalog.All.Count}");
         ImGui.Separator();
 
-        if (!ImGui.BeginTable("##deliveries", 5, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp))
+        var clientWidth = ImGui.CalcTextSize("Nitowikwe______").X;
+        var rankWidth = ImGui.CalcTextSize("Rank").X + 8f;
+        var weekWidth = ImGui.CalcTextSize("Week").X + 8f;
+
+        if (!ImGui.BeginTable("##deliveries", 5, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingFixedFit))
             return;
-        ImGui.TableSetupColumn("Client", ImGuiTableColumnFlags.WidthStretch, 1.2f);
-        ImGui.TableSetupColumn("Unlock quest", ImGuiTableColumnFlags.WidthStretch, 1.6f);
-        ImGui.TableSetupColumn("Rank", ImGuiTableColumnFlags.WidthFixed, 46f);
-        ImGui.TableSetupColumn("Week", ImGuiTableColumnFlags.WidthFixed, 52f);
-        ImGui.TableSetupColumn("##act", ImGuiTableColumnFlags.WidthFixed, 76f);
+        ImGui.TableSetupColumn("Client", ImGuiTableColumnFlags.WidthFixed, clientWidth);
+        ImGui.TableSetupColumn("Unlock quest", ImGuiTableColumnFlags.WidthStretch, 1f);
+        ImGui.TableSetupColumn("Rank", ImGuiTableColumnFlags.WidthFixed, rankWidth);
+        ImGui.TableSetupColumn("Week", ImGuiTableColumnFlags.WidthFixed, weekWidth);
+        ImGui.TableSetupColumn("##act", ImGuiTableColumnFlags.WidthFixed, ActionWidth);
         ImGui.TableHeadersRow();
 
         foreach (var client in _catalog.All)
@@ -55,8 +62,8 @@ public sealed class DeliveriesWindow : OdysseusWindow
         ImGui.EndTable();
         ImGui.Spacing();
         if (_status.Length > 0)
-            ImGui.TextWrapped(_status);
-        ImGui.TextColored(OdysseusTheme.TextDisabled,
+            OdysseusTheme.TextWrappedColored(OdysseusTheme.TextSecondary, _status);
+        OdysseusTheme.TextWrappedColored(OdysseusTheme.TextDisabled,
             "Unlock queues the client's opening quest and everything it needs onto the priority list. " +
             "Running deliveries themselves is not built yet.");
     }
@@ -102,7 +109,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
                     plan is null ? "No unlock quest in the sheet."
                     : plan.IsRunnable ? $"Queue {plan.Summary} (Lv {client.UnlockLevel})."
                     : $"Cannot queue: {plan.Summary}.",
-                    new Vector2(72, 22)))
+                    new Vector2(ActionWidth, 22)))
             {
                 var queued = _unlock.Queue(client.UnlockQuestId, client.Name);
                 _status = $"{client.Name}: queued {queued.Steps.Count} quest(s) — {string.Join(" → ", queued.Steps.Select(x => x.Name))}";

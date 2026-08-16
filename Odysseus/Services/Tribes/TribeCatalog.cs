@@ -26,9 +26,10 @@ public sealed record TribeIssuer(uint ENpcId, uint TerritoryId, Vector3 Position
 /// The society's first non-repeatable quest — completing it (and its prerequisites) opens the
 /// dailies. Amalj'aa's is "Brotherhood of Ash", which itself needs "Peace for Thanalan".
 /// </param>
+/// <param name="IconId">The society's emblem, for the UI. 0 when the sheet has none.</param>
 public sealed record TribeInfo(
     byte Id, string Name, uint ExpansionId, TribeKind Kind, byte MaxRank,
-    IReadOnlyList<TribeIssuer> Issuers, IReadOnlyList<ushort> DailyQuestIds, ushort UnlockQuestId = 0)
+    IReadOnlyList<TribeIssuer> Issuers, IReadOnlyList<ushort> DailyQuestIds, ushort UnlockQuestId = 0, uint IconId = 0)
 {
     /// <summary>The issuer with the most dailies — where to stand. ARR tribes have three (one per rank band); later ones have one.</summary>
     public TribeIssuer? PrimaryIssuer => Issuers.OrderByDescending(i => i.DailyCount).FirstOrDefault();
@@ -90,7 +91,8 @@ public sealed class TribeCatalog
                 unlockByTribe.TryGetValue((byte)tribe.RowId, out var unlock);
                 _byId[(byte)tribe.RowId] = new TribeInfo(
                     (byte)tribe.RowId, Capitalise(name), tribe.Expansion.RowId, kind, tribe.MaxRank,
-                    issuers, dailies.Select(q => (ushort)(q.RowId - 65536)).ToList(), unlock);
+                    issuers, dailies.Select(q => (ushort)(q.RowId - 65536)).ToList(), unlock,
+                    tribe.IconReputation != 0 ? tribe.IconReputation : tribe.Icon);
             }
         }
         catch (Exception ex)

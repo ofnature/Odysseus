@@ -23,12 +23,17 @@ public sealed class TribesWindow : OdysseusWindow
     private readonly Action<byte> _enqueue;
     private readonly Action _stopAll;
     private readonly Odysseus.Services.Quest.UnlockPlanner _unlock;
+    private readonly GameIcons _icons;
     private string _status = string.Empty;
 
+    /// <summary>Widest button label plus its padding — the action column is sized from this, not guessed.</summary>
+    private static float ActionWidth => ImGui.CalcTextSize("Unlock").X + ImGui.GetFrameHeight() + ImGui.GetStyle().FramePadding.X * 4f;
+
     public TribesWindow(OdysseusConfig config, TribeCatalog catalog, ITribeState state, TribeRunner runner,
-        Odysseus.Services.Quest.UnlockPlanner unlock, Action<byte> enqueue, Action stopAll)
+        Odysseus.Services.Quest.UnlockPlanner unlock, GameIcons icons, Action<byte> enqueue, Action stopAll)
         : base("Odysseus Tribes##OdysseusTribes")
     {
+        _icons = icons;
         _config = config;
         _catalog = catalog;
         _state = state;
@@ -59,13 +64,21 @@ public sealed class TribesWindow : OdysseusWindow
         }
         ImGui.Separator();
 
-        if (!ImGui.BeginTable("##tribes", 5, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingStretchProp))
+        // Every column but the name is sized from its own widest content, so nothing clips and the
+        // name takes whatever is left.
+        var iconSize = ImGui.GetTextLineHeight() + 2f;
+        var kindWidth = ImGui.CalcTextSize("Gatherer").X + 8f;
+        var rankWidth = ImGui.CalcTextSize("8/8  360/720").X + 8f;
+        var todayWidth = ImGui.CalcTextSize("Today").X + 8f;
+
+        if (!ImGui.BeginTable("##tribes", 6, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.SizingFixedFit))
             return;
-        ImGui.TableSetupColumn("Society", ImGuiTableColumnFlags.WidthStretch, 1.4f);
-        ImGui.TableSetupColumn("Kind", ImGuiTableColumnFlags.WidthFixed, 70f);
-        ImGui.TableSetupColumn("Rank", ImGuiTableColumnFlags.WidthFixed, 100f);
-        ImGui.TableSetupColumn("Today", ImGuiTableColumnFlags.WidthFixed, 56f);
-        ImGui.TableSetupColumn("##run", ImGuiTableColumnFlags.WidthFixed, 64f);
+        ImGui.TableSetupColumn("##icon", ImGuiTableColumnFlags.WidthFixed, iconSize);
+        ImGui.TableSetupColumn("Society", ImGuiTableColumnFlags.WidthStretch, 1f);
+        ImGui.TableSetupColumn("Kind", ImGuiTableColumnFlags.WidthFixed, kindWidth);
+        ImGui.TableSetupColumn("Rank", ImGuiTableColumnFlags.WidthFixed, rankWidth);
+        ImGui.TableSetupColumn("Today", ImGuiTableColumnFlags.WidthFixed, todayWidth);
+        ImGui.TableSetupColumn("##act", ImGuiTableColumnFlags.WidthFixed, ActionWidth);
         ImGui.TableHeadersRow();
 
         foreach (var tribe in _catalog.All.OrderBy(t => t.ExpansionId).ThenBy(t => t.Id))
@@ -74,8 +87,8 @@ public sealed class TribesWindow : OdysseusWindow
         ImGui.EndTable();
         ImGui.Spacing();
         if (_status.Length > 0)
-            ImGui.TextWrapped(_status);
-        ImGui.TextColored(OdysseusTheme.TextDisabled,
+            OdysseusTheme.TextWrappedColored(OdysseusTheme.TextSecondary, _status);
+        OdysseusTheme.TextWrappedColored(OdysseusTheme.TextDisabled,
             "Combat societies run now. Crafter and gatherer dailies wait for the craft/gather handoffs. " +
             "Unlock adds the society's opening quest chain to the priority list.");
     }
@@ -86,6 +99,9 @@ public sealed class TribesWindow : OdysseusWindow
         var muted = s.Unlocked ? OdysseusTheme.TextSecondary : OdysseusTheme.TextDisabled;
 
         ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        _icons.Draw(tribe.IconId, ImGui.GetTextLineHeight() + 2f);
+
         ImGui.TableNextColumn();
         ImGui.TextColored(s.Unlocked ? OdysseusTheme.TextPrimary : OdysseusTheme.TextDisabled, tribe.Name);
 
@@ -116,7 +132,7 @@ public sealed class TribesWindow : OdysseusWindow
             using (ImRaii.Disabled(plan is null || !plan.IsRunnable))
             {
                 if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Unlock, "Unlock", OdysseusTheme.AccentDim,
-                        plan is null ? "No opening quest in the sheet." : $"Queue the opening chain — {plan.Summary}.", new Vector2(72, 22)))
+                        plan is null ? "No opening quest in the sheet." : $"Queue the opening chain — {plan.Summary}.", new Vector2(ActionWidth, 22)))
                 {
                     var queued = _unlock.Queue(tribe.UnlockQuestId, tribe.Name);
                     _status = $"{tribe.Name}: queued {queued.Steps.Count} quest(s) — {string.Join(" → ", queued.Steps.Select(x => x.Name))}";
@@ -129,7 +145,7 @@ public sealed class TribesWindow : OdysseusWindow
                      && _state.AllowanceLeft > 0 && _runner.State is TribeRunState.Idle or TribeRunState.Done or TribeRunState.Faulted;
         using (ImRaii.Disabled(!canRun))
         {
-            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Play, "Run", OdysseusTheme.GreenDark, RunTip(tribe, s), new Vector2(72, 22)))
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Play, "Run", OdysseusTheme.GreenDark, RunTip(tribe, s), new Vector2(ActionWidth, 22)))
                 _enqueue(tribe.Id);
         }
     }
