@@ -30,6 +30,8 @@ public sealed record MainWindowDeps(
     Action OpenFleet,
     Action OpenLog,
     Action OpenDebug,
+    Action OpenTribes,
+    Action OpenDeliveries,
     Action<ushort> OpenEditor,
     Func<uint?> TargetDataId,
     Func<Vector3?> TargetPosition,
@@ -334,6 +336,15 @@ public sealed class MainWindow : OdysseusWindow
         if (OdysseusTheme.IconTextButton(FontAwesomeIcon.List, "Log", neutral, "Step log.")) _d.OpenLog();
         ImGui.SameLine();
         if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Users, "Fleet", neutral, "Fleet dashboard.")) _d.OpenFleet();
+
+        // Icon-only here so the row still fits a narrow window; the same two are spelled out in
+        // Quick access for anyone who does not want to learn the glyphs.
+        ImGui.SameLine();
+        if (OdysseusTheme.IconButton("societies", FontAwesomeIcon.Handshake,
+                "Allied society dailies, ranks and unlock chains.", sq)) _d.OpenTribes();
+        ImGui.SameLine();
+        if (OdysseusTheme.IconButton("deliveries", FontAwesomeIcon.Box,
+                "Custom deliveries, this week's bonuses and the scrip cap.", sq)) _d.OpenDeliveries();
     }
 
     // ── sections ──
@@ -366,6 +377,15 @@ public sealed class MainWindow : OdysseusWindow
         if (!ImGui.CollapsingHeader("QUICK ACCESS###quick"))
             return;
         var h = new Vector2(0, 22);
+
+        // The recurring content sits on its own row: it is what you open between quests, and it
+        // was previously reachable only by typing the subcommand.
+        if (ImGui.Button("Societies##qa", h)) _d.OpenTribes();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Allied society dailies, ranks and unlock chains.");
+        ImGui.SameLine();
+        if (ImGui.Button("Deliveries##qa", h)) _d.OpenDeliveries();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Custom deliveries, this week's bonuses and the scrip cap.");
+
         if (ImGui.Button("Settings##qa", h)) _d.OpenConfig();
         ImGui.SameLine();
         if (ImGui.Button("Fleet##qa", h)) _d.OpenFleet();

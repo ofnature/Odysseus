@@ -149,18 +149,6 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _logWindow = new LogWindow(_runLog);
         _debugWindow = new DebugWindow(_quests, _catalog);
         _fleetWindow = new FleetWindow(_config, _fleet);
-        _mainWindow = new MainWindow(new MainWindowDeps(
-            _config, SaveConfig, _presence, _quests, _catalog, _pathStore, _controller, _frontier, _fleet, _priority, _priorityWorld,
-            OpenConfig,
-            () => _fleetWindow.IsOpen = true,
-            () => _logWindow.IsOpen = true,
-            () => _debugWindow.IsOpen = true,
-            questId => _pathEditorWindow.Open(questId),
-            () => TargetManager.Target?.BaseId,
-            () => TargetManager.Target?.Position,
-            () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
-            () => ClientState.TerritoryType,
-            () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—"));
 
         var unlockPlanner = new UnlockPlanner(_catalog, _quests, _priority, _pathStore.Has, message => Log.Information(message));
         _tribesWindow = new TribesWindow(_config, _tribes, _tribeState, _tribeRunner, unlockPlanner, new GameIcons(TextureProvider),
@@ -205,6 +193,23 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ClientState.TerritoryType);
 
         _journalWindow = new JournalWindow(_catalog, _quests, unlockPlanner, _pathStore.Has);
+
+        // Built after the windows it can open: the deps record captures them, and the
+        // nullable analysis is right that a field assigned later is null at this point.
+        _mainWindow = new MainWindow(new MainWindowDeps(
+            _config, SaveConfig, _presence, _quests, _catalog, _pathStore, _controller, _frontier, _fleet, _priority, _priorityWorld,
+            OpenConfig,
+            () => _fleetWindow.IsOpen = true,
+            () => _logWindow.IsOpen = true,
+            () => _debugWindow.IsOpen = true,
+            () => _tribesWindow.IsOpen = true,
+            () => _deliveriesWindow.IsOpen = true,
+            questId => _pathEditorWindow.Open(questId),
+            () => TargetManager.Target?.BaseId,
+            () => TargetManager.Target?.Position,
+            () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
+            () => ClientState.TerritoryType,
+            () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—"));
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
