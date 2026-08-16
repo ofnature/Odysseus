@@ -48,6 +48,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly Services.Tribes.TribeState _tribeState;
     private readonly Services.Tribes.TribeRunner _tribeRunner;
     private readonly Services.Deliveries.DeliveryRunner _deliveryRunner;
+    private readonly Services.Deliveries.SpendRunner _spender;
     private readonly System.Collections.Generic.Queue<byte> _tribeQueue = new();
     private readonly TribesWindow _tribesWindow;
     private readonly Services.Deliveries.DeliveryCatalog _deliveries;
@@ -171,7 +172,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var artisan = new ArtisanIpc(PluginInterface, message => Log.Warning(message));
         var gatherBuddy = new GatherBuddyIpc(PluginInterface, message => Log.Warning(message));
         var deliveryRequests = new Services.Deliveries.DeliveryRequests(DataManager, message => Log.Warning(message));
-        var deliveryWorld = new Services.Deliveries.GameDeliveryWorld(message => Log.Warning(message));
+        var deliveryWorld = new Services.Deliveries.GameDeliveryWorld(DataManager, message => Log.Warning(message));
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(
             _world,
             deliveryWorld,
@@ -188,9 +189,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             message => Log.Information(message));
         var scripShop = new Services.Deliveries.ScripShop(DataManager, scrips.Kinds, message => Log.Warning(message));
         var spending = new Services.Deliveries.SpendPlanner(scripShop, scrips, id => deliveryWorld.ItemCount(id));
+        _spender = new Services.Deliveries.SpendRunner(deliveryWorld, message => Log.Information(message));
         _deliveriesWindow = new DeliveriesWindow(_deliveries, deliveryState, deliveryBonus, scrips,
             artisan, unlockPlanner, _deliveryRunner, deliveryRequests, _config, SaveConfig, gatherBuddy,
-            scripShop, spending);
+            scripShop, spending, _spender);
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
@@ -291,6 +293,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 _controller.Stop();
             return;
         }
+
+        // Spending owns the frame while it runs; it is short and never touches the controller.
+        if (!_spender.IsFinished) { _spender.Tick(); return; }
 
         // A delivery run owns the frame outright — it never uses the quest controller.
         if (_deliveryRunner.State is not (Services.Deliveries.DeliveryRunState.Idle or Services.Deliveries.DeliveryRunState.Done

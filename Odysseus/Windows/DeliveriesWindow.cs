@@ -36,6 +36,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
     private readonly IGatherer _gatherer;
     private readonly IScripShop _shop;
     private readonly SpendPlanner _spending;
+    private readonly SpendRunner _spender;
     private readonly Action _save;
 
     /// <summary>
@@ -57,7 +58,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
 
     public DeliveriesWindow(DeliveryCatalog catalog, IDeliveryState state, IDeliveryBonus bonus, ScripLedger scrips,
         ArtisanIpc artisan, UnlockPlanner unlock, DeliveryRunner runner, IDeliveryRequests requests,
-        OdysseusConfig config, Action save, IGatherer gatherer, IScripShop shop, SpendPlanner spending)
+        OdysseusConfig config, Action save, IGatherer gatherer, IScripShop shop, SpendPlanner spending, SpendRunner spender)
         : base("Odysseus Deliveries##OdysseusDeliveries")
     {
         _catalog = catalog;
@@ -73,6 +74,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
         _gatherer = gatherer;
         _shop = shop;
         _spending = spending;
+        _spender = spender;
         Size = new Vector2(760, 620);
         SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(560, 320), MaximumSize = new Vector2(1400, 1400) };
@@ -538,16 +540,31 @@ public sealed class DeliveriesWindow : OdysseusWindow
         // The plan is shown before it is run, and it is the same plan the auto trigger would use.
         var plan = _spending.Plan(_config.SpendOnMasterBooks, _config.SpendList, _config.SpendReserve);
         ImGui.Spacing();
-        if (OdysseusTheme.IconTextButton(FontAwesomeIcon.ShoppingCart, "Spend",
-                plan.IsEmpty ? OdysseusTheme.NeutralDark : OdysseusTheme.GreenDark,
-                plan.IsEmpty ? plan.Summary : plan.Summary + "\n" + string.Join("\n",
-                    plan.Lines.Select(l => $"  {l.Quantity} × {l.Offer.Name} — {l.Total:N0}")),
-                new Vector2(110, 22)) && !plan.IsEmpty)
+
+        if (!_spender.IsFinished)
         {
-            _status = "Buying at a scrip vendor is not built yet — this is the plan it would run.";
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Stop, "Stop", OdysseusTheme.NeutralDark,
+                    "Stop spending.", new Vector2(110, 22)))
+                _spender.Stop();
         }
+        else if (OdysseusTheme.IconTextButton(FontAwesomeIcon.ShoppingCart, "Spend",
+                     plan.IsEmpty ? OdysseusTheme.NeutralDark : OdysseusTheme.GreenDark,
+                     plan.IsEmpty ? plan.Summary : plan.Summary + "\n" + string.Join("\n",
+                         plan.Lines.Select(l => $"  {l.Quantity} × {l.Offer.Name} — {l.Total:N0}")) +
+                     "\nStand at a scrip vendor; Odysseus does not travel to them.",
+                     new Vector2(110, 22)) && !plan.IsEmpty)
+        {
+            if (!_spender.Start(plan))
+            {
+                _blockedReason = _spender.StatusLine;
+                _blockedKind = DeliveryStop.Setup;
+                _openBlockedPopup = true;
+            }
+        }
+
         ImGui.SameLine();
-        ImGui.TextColored(plan.IsEmpty ? OdysseusTheme.TextDisabled : OdysseusTheme.TextSecondary, plan.Summary);
+        var line = _spender.IsFinished ? plan.Summary : _spender.StatusLine;
+        ImGui.TextColored(plan.IsEmpty && _spender.IsFinished ? OdysseusTheme.TextDisabled : OdysseusTheme.TextSecondary, line);
     }
 
     private void DrawSpendList()

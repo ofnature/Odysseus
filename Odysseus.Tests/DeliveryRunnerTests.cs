@@ -140,6 +140,13 @@ public class DeliveryRunnerTests
         public bool ShopBusy(uint shopId) => false;
         public void CloseShop() => OpenShopId = 0;
 
+        // Scrip vendors belong to spending, not deliveries — see SpendRunnerTests.
+        public uint FindSpecialShopVendor(uint shopId) => 0;
+        public bool IsSpecialShopOpen => false;
+        public bool OpenSpecialShop(uint vendorDataId, uint shopId) => false;
+        public bool BuyOneFromSpecialShop(uint itemId) => false;
+        public void CloseSpecialShop() { }
+
         public bool BuyFromShop(uint shopId, uint itemId, int count)
         {
             if (!ShopStocked) return false;

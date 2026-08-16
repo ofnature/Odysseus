@@ -10,7 +10,10 @@ namespace Odysseus.Services.Deliveries;
 /// <param name="Currency">Reward-currency index of the scrip it costs — matches <see cref="ScripKind.RewardCurrency"/>.</param>
 /// <param name="Cost">Scrips per unit.</param>
 /// <param name="IsBook">A master recipe tome or folklore book — learned once and then worthless.</param>
-public sealed record ScripOffer(uint ItemId, string Name, int Currency, int Cost, bool IsBook)
+/// <param name="ShopId">
+/// The <c>SpecialShop</c> row, which is also the event-handler id an NPC exposes it under.
+/// </param>
+public sealed record ScripOffer(uint ItemId, string Name, int Currency, int Cost, bool IsBook, uint ShopId = 0)
 {
     public override string ToString() => $"{Name} ({Cost:N0})";
 }
@@ -89,7 +92,7 @@ public sealed unsafe class ScripShop : IScripShop
                         if (!seen.Add((got.RowId, currency))) continue;
 
                         _offers.Add(new ScripOffer(got.RowId, got.Name.ExtractText(), currency, cost,
-                            _books.ContainsKey(got.RowId)));
+                            _books.ContainsKey(got.RowId), shop.RowId));
                     }
                 }
             }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Odysseus.Services.Deliveries;
 
@@ -52,14 +53,34 @@ public interface IDeliveryWorld
 
     /// <summary>Gil on hand.</summary>
     int Gil { get; }
+
+    /// <summary>A nearby NPC that runs this special shop, or 0.</summary>
+    uint FindSpecialShopVendor(uint shopId);
+
+    /// <summary>The scrip-exchange window is open.</summary>
+    bool IsSpecialShopOpen { get; }
+
+    /// <summary>Interact with the vendor and pick the special shop out of its options.</summary>
+    bool OpenSpecialShop(uint vendorDataId, uint shopId);
+
+    /// <summary>Buy one of an item from the open scrip window. False when it is not listed.</summary>
+    bool BuyOneFromSpecialShop(uint itemId);
+
+    void CloseSpecialShop();
 }
 
 /// <summary>The live implementation, driving <c>AgentSatisfactionSupply</c> and <c>AgentNpcTrade</c>.</summary>
 public sealed unsafe class GameDeliveryWorld : IDeliveryWorld
 {
     private readonly Action<string> _log;
+    private readonly Dalamud.Plugin.Services.IDataManager _data;
+    private readonly Dictionary<uint, HashSet<uint>> _npcShops = new();
 
-    public GameDeliveryWorld(Action<string> log) => _log = log;
+    public GameDeliveryWorld(Dalamud.Plugin.Services.IDataManager data, Action<string> log)
+    {
+        _data = data;
+        _log = log;
+    }
 
     public bool IsSupplyOpen(DeliveryClient client)
     {
@@ -381,6 +402,139 @@ public sealed unsafe class GameDeliveryWorld : IDeliveryWorld
             {
                 return 0;
             }
+        }
+    }
+
+    // ── Scrip vendors ──
+    //
+    // A special shop is not modelled in ClientStructs the way a gil shop is: there is no agent with
+    // a BuyItemIndex to set, only the ShopExchangeCurrency addon. So the purchase goes through the
+    // addon's own callback, and because that shape cannot be checked without the game, the caller
+    // buys one unit at a time and verifies the item actually arrived — see SpendRunner.
+
+    private const string ScripWindow = "ShopExchangeCurrency";
+
+    public uint FindSpecialShopVendor(uint shopId)
+    {
+        try
+        {
+            var objects = FFXIVClientStructs.FFXIV.Client.Game.Object.GameObjectManager.Instance();
+            if (objects == null) return 0;
+            foreach (var obj in objects->Objects.IndexSorted)
+            {
+                if (obj.Value == null) continue;
+                var dataId = obj.Value->BaseId;
+                if (dataId == 0 || !RunsShop(dataId, shopId)) continue;
+                return dataId;
+            }
+            return 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private bool RunsShop(uint dataId, uint shopId)
+    {
+        if (_npcShops.TryGetValue(dataId, out var shops)) return shops.Contains(shopId);
+        try
+        {
+            var npc = _data.GetExcelSheet<Lumina.Excel.Sheets.ENpcBase>().GetRowOrDefault(dataId);
+            var set = new HashSet<uint>();
+            if (npc is { } n)
+                foreach (var handler in n.ENpcData)
+                    if (handler.RowId != 0)
+                        set.Add(handler.RowId);
+            _npcShops[dataId] = set;
+            return set.Contains(shopId);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public bool IsSpecialShopOpen
+    {
+        get
+        {
+            try
+            {
+                var addon = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance()
+                    ->GetAddonByName(ScripWindow);
+                return addon != null && addon->IsVisible && addon->IsReady;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    public bool OpenSpecialShop(uint vendorDataId, uint shopId) => OpenShop(vendorDataId, shopId);
+
+    /// <summary>
+    /// Buys a single unit. The index is the row in the window's own list, which is why the item is
+    /// matched against <c>AtkValues</c> rather than against the sheet — a filtered or reordered list
+    /// would otherwise buy the wrong thing.
+    /// </summary>
+    public bool BuyOneFromSpecialShop(uint itemId)
+    {
+        try
+        {
+            var addon = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance()
+                ->GetAddonByName(ScripWindow);
+            if (addon == null || !addon->IsVisible) return false;
+
+            var index = IndexOf(addon, itemId);
+            if (index < 0)
+            {
+                _log($"{itemId} is not listed in the scrip window.");
+                return false;
+            }
+
+            Span<FFXIVClientStructs.FFXIV.Component.GUI.AtkValue> args =
+                stackalloc FFXIVClientStructs.FFXIV.Component.GUI.AtkValue[4];
+            args[0].SetInt(0);        // buy
+            args[1].SetInt(index);
+            args[2].SetInt(1);        // one at a time, so a mistake costs one
+            args[3].SetInt(0);
+            fixed (FFXIVClientStructs.FFXIV.Component.GUI.AtkValue* p = args)
+                addon->FireCallback(4, p, true);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log($"Buying {itemId} with scrips failed: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>The window publishes its rows as AtkValues; find the one holding this item id.</summary>
+    private static int IndexOf(FFXIVClientStructs.FFXIV.Component.GUI.AtkUnitBase* addon, uint itemId)
+    {
+        for (var i = 0; i < addon->AtkValuesCount; i++)
+        {
+            var value = addon->AtkValues[i];
+            if (value.Type != FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt) continue;
+            if (value.UInt != itemId) continue;
+            return i;
+        }
+        return -1;
+    }
+
+    public void CloseSpecialShop()
+    {
+        try
+        {
+            var addon = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance()
+                ->GetAddonByName(ScripWindow);
+            if (addon != null && addon->IsVisible) addon->Close(false);
+        }
+        catch
+        {
+            // already gone
         }
     }
 
