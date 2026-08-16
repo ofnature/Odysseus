@@ -49,6 +49,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly Services.Tribes.TribeRunner _tribeRunner;
     private readonly System.Collections.Generic.Queue<byte> _tribeQueue = new();
     private readonly TribesWindow _tribesWindow;
+    private readonly Services.Deliveries.DeliveryCatalog _deliveries;
+    private readonly DeliveriesWindow _deliveriesWindow;
     private System.DateTime _lastPrune;
     private readonly RunLog _runLog;
     private readonly FleetPublisher _fleet;
@@ -155,13 +157,18 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ClientState.TerritoryType,
             () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—"));
 
-        _tribesWindow = new TribesWindow(_config, _tribes, _tribeState, _tribeRunner,
+        var unlockPlanner = new UnlockPlanner(_catalog, _quests, _priority, _pathStore.Has, message => Log.Information(message));
+        _tribesWindow = new TribesWindow(_config, _tribes, _tribeState, _tribeRunner, unlockPlanner,
             id => { if (!_tribeQueue.Contains(id)) _tribeQueue.Enqueue(id); },
             () => { _tribeQueue.Clear(); _tribeRunner.Stop(); });
+        _deliveries = new Services.Deliveries.DeliveryCatalog(DataManager, message => Log.Warning(message));
+        _deliveriesWindow = new DeliveriesWindow(_deliveries,
+            new Services.Deliveries.DeliveryState(_quests, message => Log.Warning(message)), unlockPlanner);
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
         _windowSystem.AddWindow(_tribesWindow);
+        _windowSystem.AddWindow(_deliveriesWindow);
         _windowSystem.AddWindow(_debugWindow);
         _windowSystem.AddWindow(_fleetWindow);
         _windowSystem.AddWindow(_pathEditorWindow);
@@ -174,7 +181,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandMain, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open Odysseus. \"/odysseus config\" settings, \"/odysseus tribes\" allied societies, \"/odysseus fleet\" dashboard, \"/odysseus log\" step log, \"/odysseus paths\" step editor, \"/odysseus debug\" quest-state dump, \"/odysseus stop\" stops the run.",
+            HelpMessage = "Open Odysseus. \"/odysseus config\" settings, \"/odysseus tribes\" allied societies, \"/odysseus deliveries\" custom deliveries, \"/odysseus fleet\" dashboard, \"/odysseus log\" step log, \"/odysseus paths\" step editor, \"/odysseus debug\" quest-state dump, \"/odysseus stop\" stops the run.",
         });
         CommandManager.AddHandler(CommandShort, new CommandInfo(OnCommand)
         {
@@ -341,6 +348,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 break;
             case "tribes":
                 _tribesWindow.IsOpen = true;
+                break;
+            case "deliveries":
+                _deliveriesWindow.IsOpen = true;
                 break;
             case "log":
                 _logWindow.IsOpen = true;

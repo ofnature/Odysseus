@@ -22,14 +22,18 @@ public sealed class TribesWindow : OdysseusWindow
     private readonly TribeRunner _runner;
     private readonly Action<byte> _enqueue;
     private readonly Action _stopAll;
+    private readonly Odysseus.Services.Quest.UnlockPlanner _unlock;
+    private string _status = string.Empty;
 
-    public TribesWindow(OdysseusConfig config, TribeCatalog catalog, ITribeState state, TribeRunner runner, Action<byte> enqueue, Action stopAll)
+    public TribesWindow(OdysseusConfig config, TribeCatalog catalog, ITribeState state, TribeRunner runner,
+        Odysseus.Services.Quest.UnlockPlanner unlock, Action<byte> enqueue, Action stopAll)
         : base("Odysseus Tribes##OdysseusTribes")
     {
         _config = config;
         _catalog = catalog;
         _state = state;
         _runner = runner;
+        _unlock = unlock;
         _enqueue = enqueue;
         _stopAll = stopAll;
         Size = new Vector2(560, 520);
@@ -69,7 +73,11 @@ public sealed class TribesWindow : OdysseusWindow
 
         ImGui.EndTable();
         ImGui.Spacing();
-        ImGui.TextColored(OdysseusTheme.TextDisabled, "Combat societies run now. Crafter and gatherer dailies wait for the craft/gather handoffs.");
+        if (_status.Length > 0)
+            ImGui.TextWrapped(_status);
+        ImGui.TextColored(OdysseusTheme.TextDisabled,
+            "Combat societies run now. Crafter and gatherer dailies wait for the craft/gather handoffs. " +
+            "Unlock adds the society's opening quest chain to the priority list.");
     }
 
     private void DrawRow(TribeInfo tribe)
@@ -101,11 +109,27 @@ public sealed class TribesWindow : OdysseusWindow
         ImGui.TextColored(s.SlotsLeft > 0 ? muted : OdysseusTheme.TextDisabled, s.Unlocked ? $"{s.TakenToday}/3" : "—");
 
         ImGui.TableNextColumn();
-        var canRun = _config.Enabled && tribe.IsRunnableKind && s.Unlocked && (s.SlotsLeft > 0 || s.AcceptedDailies.Count > 0)
+        if (!s.Unlocked)
+        {
+            // Locked: the only useful action is opening it, so that is the only button offered.
+            var plan = tribe.UnlockQuestId == 0 ? null : _unlock.Plan(tribe.UnlockQuestId);
+            using (ImRaii.Disabled(plan is null || !plan.IsRunnable))
+            {
+                if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Unlock, "Unlock", OdysseusTheme.AccentDim,
+                        plan is null ? "No opening quest in the sheet." : $"Queue the opening chain — {plan.Summary}.", new Vector2(72, 22)))
+                {
+                    var queued = _unlock.Queue(tribe.UnlockQuestId, tribe.Name);
+                    _status = $"{tribe.Name}: queued {queued.Steps.Count} quest(s) — {string.Join(" → ", queued.Steps.Select(x => x.Name))}";
+                }
+            }
+            return;
+        }
+
+        var canRun = _config.Enabled && tribe.IsRunnableKind && (s.SlotsLeft > 0 || s.AcceptedDailies.Count > 0)
                      && _state.AllowanceLeft > 0 && _runner.State is TribeRunState.Idle or TribeRunState.Done or TribeRunState.Faulted;
         using (ImRaii.Disabled(!canRun))
         {
-            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Play, "Run", OdysseusTheme.GreenDark, RunTip(tribe, s), new Vector2(58, 22)))
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Play, "Run", OdysseusTheme.GreenDark, RunTip(tribe, s), new Vector2(72, 22)))
                 _enqueue(tribe.Id);
         }
     }

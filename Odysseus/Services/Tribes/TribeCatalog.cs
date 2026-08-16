@@ -22,9 +22,13 @@ public enum TribeKind
 public sealed record TribeIssuer(uint ENpcId, uint TerritoryId, Vector3 Position, int DailyCount);
 
 /// <summary>One allied society, as the sheets describe it.</summary>
+/// <param name="UnlockQuestId">
+/// The society's first non-repeatable quest — completing it (and its prerequisites) opens the
+/// dailies. Amalj'aa's is "Brotherhood of Ash", which itself needs "Peace for Thanalan".
+/// </param>
 public sealed record TribeInfo(
     byte Id, string Name, uint ExpansionId, TribeKind Kind, byte MaxRank,
-    IReadOnlyList<TribeIssuer> Issuers, IReadOnlyList<ushort> DailyQuestIds)
+    IReadOnlyList<TribeIssuer> Issuers, IReadOnlyList<ushort> DailyQuestIds, ushort UnlockQuestId = 0)
 {
     /// <summary>The issuer with the most dailies — where to stand. ARR tribes have three (one per rank band); later ones have one.</summary>
     public TribeIssuer? PrimaryIssuer => Issuers.OrderByDescending(i => i.DailyCount).FirstOrDefault();
@@ -57,6 +61,11 @@ public sealed class TribeCatalog
                 .Where(q => q.RowId >= 65536 && q.IsRepeatable && q.BeastTribe.RowId != 0)
                 .GroupBy(q => (byte)q.BeastTribe.RowId)
                 .ToDictionary(g => g.Key, g => g.ToList());
+            // The story/rank quests: same tribe, not repeatable. The lowest id is the one that opens it.
+            var unlockByTribe = quests
+                .Where(q => q.RowId >= 65536 && !q.IsRepeatable && q.BeastTribe.RowId != 0)
+                .GroupBy(q => (byte)q.BeastTribe.RowId)
+                .ToDictionary(g => g.Key, g => (ushort)(g.Min(q => q.RowId) - 65536));
 
             foreach (var tribe in data.GetExcelSheet<BeastTribe>())
             {
@@ -78,9 +87,10 @@ public sealed class TribeCatalog
                     .ToList();
 
                 var kind = KindOf(dailies);
+                unlockByTribe.TryGetValue((byte)tribe.RowId, out var unlock);
                 _byId[(byte)tribe.RowId] = new TribeInfo(
                     (byte)tribe.RowId, Capitalise(name), tribe.Expansion.RowId, kind, tribe.MaxRank,
-                    issuers, dailies.Select(q => (ushort)(q.RowId - 65536)).ToList());
+                    issuers, dailies.Select(q => (ushort)(q.RowId - 65536)).ToList(), unlock);
             }
         }
         catch (Exception ex)

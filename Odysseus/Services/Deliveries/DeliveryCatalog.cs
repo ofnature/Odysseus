@@ -1,0 +1,121 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using Dalamud.Plugin.Services;
+using Lumina.Excel.Sheets;
+
+namespace Odysseus.Services.Deliveries;
+
+/// <summary>One custom-delivery client, as the sheets describe it.</summary>
+/// <param name="Index">SatisfactionNpc row id.</param>
+/// <param name="UnlockQuestId">The quest that opens this client — every one has prerequisites of its own.</param>
+public sealed record DeliveryClient(uint Index, string Name, int DeliveriesPerWeek, ushort UnlockQuestId, ushort UnlockLevel, uint TerritoryId);
+
+/// <summary>Reads the delivery clients' standing from the game.</summary>
+public interface IDeliveryState
+{
+    bool IsUnlocked(DeliveryClient client);
+    /// <summary>Deliveries already used this week, or null when it cannot be read.</summary>
+    int? UsedThisWeek(DeliveryClient client);
+    int Rank(DeliveryClient client);
+}
+
+/// <summary>
+/// The custom-delivery clients, read from <c>SatisfactionNpc</c>.
+///
+/// <para>
+/// Verified 2026-08-16: twelve clients, six deliveries a week each, and each carries
+/// <c>QuestRequired</c> — the quest that unlocks it (Zhloe ← "Arms Wide Open", Kai-Shirr ←
+/// "Oh, Beehive Yourself", …). Every one of those unlock quests has prerequisites of its own, so
+/// an Unlock button has to run a chain, not a quest — see <see cref="Quest.QuestChain"/>.
+/// </para>
+///
+/// <para>Running deliveries (buy → craft → turn in) is P8; this is the unlock half.</para>
+/// </summary>
+public sealed class DeliveryCatalog
+{
+    private readonly List<DeliveryClient> _clients = [];
+
+    public DeliveryCatalog(IDataManager data, Action<string> log)
+    {
+        try
+        {
+            var quests = data.GetExcelSheet<Lumina.Excel.Sheets.Quest>();
+            foreach (var npc in data.GetExcelSheet<SatisfactionNpc>())
+            {
+                if (npc.RowId == 0) continue;
+                var name = npc.Npc.ValueNullable?.Singular.ExtractText() ?? string.Empty;
+                if (name.Length == 0) continue;
+                var questRow = npc.QuestRequired.RowId;
+                var unlock = questRow >= Quest.QuestCatalog.RowIdBase ? (ushort)(questRow - Quest.QuestCatalog.RowIdBase) : (ushort)0;
+                var level = unlock == 0 ? (ushort)0 : quests.GetRowOrDefault(questRow)?.ClassJobLevel[0] ?? 0;
+                _clients.Add(new DeliveryClient(npc.RowId, Capitalise(name), npc.DeliveriesPerWeek, unlock, level,
+                    npc.Level.ValueNullable?.Territory.RowId ?? 0));
+            }
+        }
+        catch (Exception ex)
+        {
+            log($"Delivery catalog failed to load: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>Test constructor.</summary>
+    public DeliveryCatalog(IEnumerable<DeliveryClient> clients) => _clients.AddRange(clients);
+
+    public IReadOnlyList<DeliveryClient> All => _clients;
+
+    public DeliveryClient? ByIndex(uint index) => _clients.FirstOrDefault(c => c.Index == index);
+
+    private static string Capitalise(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
+}
+
+/// <summary>
+/// The real reader: unlock is "the required quest is complete" (the same test vsatisfy uses);
+/// rank and used-this-week come from <c>SatisfactionSupplyManager</c>.
+/// </summary>
+public sealed unsafe class DeliveryState : IDeliveryState
+{
+    private readonly Quest.IQuestStateReader _quests;
+    private readonly Action<string>? _log;
+
+    public DeliveryState(Quest.IQuestStateReader quests, Action<string>? log = null)
+    {
+        _quests = quests;
+        _log = log;
+    }
+
+    public bool IsUnlocked(DeliveryClient client) => client.UnlockQuestId != 0 && _quests.IsComplete(client.UnlockQuestId);
+
+    public int Rank(DeliveryClient client)
+    {
+        try
+        {
+            var manager = FFXIVClientStructs.FFXIV.Client.Game.SatisfactionSupplyManager.Instance();
+            if (manager == null) return 0;
+            var index = (int)client.Index - 1;
+            var ranks = manager->SatisfactionRanks;
+            return index >= 0 && index < ranks.Length ? ranks[index] : 0;
+        }
+        catch (Exception ex)
+        {
+            _log?.Invoke($"Delivery rank read failed: {ex.Message}");
+            return 0;
+        }
+    }
+
+    public int? UsedThisWeek(DeliveryClient client)
+    {
+        try
+        {
+            var manager = FFXIVClientStructs.FFXIV.Client.Game.SatisfactionSupplyManager.Instance();
+            if (manager == null) return null;
+            var index = (int)client.Index - 1;
+            var used = manager->UsedAllowances;
+            return index >= 0 && index < used.Length ? used[index] : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
