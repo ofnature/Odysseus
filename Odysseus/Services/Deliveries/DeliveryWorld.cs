@@ -26,8 +26,12 @@ public interface IDeliveryWorld
     /// <summary>Hand over the first matching item and confirm. Returns false when the agent refused.</summary>
     bool CommitTrade(DeliveryRoute route);
 
-    /// <summary>How many of an item are in the bags, collectables included.</summary>
-    int ItemCount(uint itemId);
+    /// <summary>
+    /// How many of an item are in the bags. <paramref name="minCollectability"/> above zero counts
+    /// only collectables rated at least that high — a delivery will not take anything less, so a
+    /// plain count would report items that cannot actually be handed over.
+    /// </summary>
+    int ItemCount(uint itemId, int minCollectability = 0);
 
     /// <summary>The crafting job the player is on right now, as a <c>CraftType</c> index, or -1.</summary>
     int CurrentCraftType { get; }
@@ -186,7 +190,7 @@ public sealed unsafe class GameDeliveryWorld : IDeliveryWorld
     /// runner asked Artisan to make another. Matching on item id alone has no such trapdoor.
     /// </para>
     /// </summary>
-    public int ItemCount(uint itemId)
+    public int ItemCount(uint itemId, int minCollectability = 0)
     {
         try
         {
@@ -201,8 +205,10 @@ public sealed unsafe class GameDeliveryWorld : IDeliveryWorld
                 for (var slot = 0; slot < container->Size; slot++)
                 {
                     var item = container->GetInventorySlot(slot);
-                    if (item != null && item->ItemId == itemId)
-                        total += (int)item->Quantity;
+                    if (item == null || item->ItemId != itemId) continue;
+                    // Collectability shares a field with spiritbond; for a collectable it is the rating.
+                    if (minCollectability > 0 && item->SpiritbondOrCollectability < minCollectability) continue;
+                    total += (int)item->Quantity;
                 }
             }
             return total;

@@ -6,6 +6,19 @@ using Odysseus.Services.Run;
 
 namespace Odysseus.Services.Deliveries;
 
+/// <summary>The gathering handoff. <c>GatherBuddyIpc</c> satisfies this as it stands.</summary>
+public interface IGatherer
+{
+    bool Available { get; }
+    int Version { get; }
+    bool IsRunning { get; }
+    /// <summary>Running but idle — it cannot reach anything on its list right now.</summary>
+    bool IsWaiting { get; }
+    string Status { get; }
+    bool Start();
+    void Stop();
+}
+
 /// <summary>The crafting handoff. <c>ArtisanIpc</c> satisfies this as it stands.</summary>
 public interface ICrafter
 {
@@ -83,6 +96,8 @@ public sealed class DeliveryRunner
     private static readonly TimeSpan TurnInGap = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ShopGap = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ShopStall = TimeSpan.FromSeconds(30);
+    /// <summary>How long GatherBuddy may sit idle before we take it as stuck. Timed nodes are slow.</summary>
+    private static readonly TimeSpan GatherWait = TimeSpan.FromSeconds(90);
 
     private readonly IStepWorld _world;
     private readonly IDeliveryWorld _game;
@@ -93,6 +108,7 @@ public sealed class DeliveryRunner
     private readonly IRecipeLookup _recipes;
     private readonly IIngredientSource _ingredients;
     private readonly IGatheringSource _gathering;
+    private readonly IGatherer _gatherer;
     private readonly StepExecutor _travel;
     private readonly Func<int> _preferredCraftType;
     private readonly Action<string> _log;
@@ -104,16 +120,19 @@ public sealed class DeliveryRunner
     private int _delivered;
     private int _target;
     private bool _craftStarted;
+    private bool _gatherStarted;
     private RecipeOption? _recipe;
     private DeliveryRoute _route = DeliveryRoute.Craft;
 
     public DeliveryRunner(IStepWorld world, IDeliveryWorld game, IDeliveryState state, IDeliveryRequests requests,
         ScripLedger scrips, ICrafter crafter, IRecipeLookup recipes, IIngredientSource ingredients,
-        IGatheringSource gathering, StepExecutor travel, Func<int> preferredCraftType, Action<string> log)
+        IGatheringSource gathering, IGatherer gatherer, StepExecutor travel, Func<int> preferredCraftType,
+        Action<string> log)
     {
         _preferredCraftType = preferredCraftType;
         _ingredients = ingredients;
         _gathering = gathering;
+        _gatherer = gatherer;
         _world = world;
         _game = game;
         _state = state;
@@ -182,6 +201,7 @@ public sealed class DeliveryRunner
         _delivered = 0;
         _target = limit > 0 ? Math.Min(limit, remaining) : remaining;
         _craftStarted = false;
+        _gatherStarted = false;
         _recipe = null;
         StoppedBecause = DeliveryStop.None;
         // Travel first: the merchant that stocks the ingredients stands beside the client.
@@ -195,6 +215,7 @@ public sealed class DeliveryRunner
     {
         _travel.Cancel();
         if (_crafter.IsCrafting) _crafter.StopCrafting();
+        if (_gatherStarted) _gatherer.Stop();
         _game.CloseShop();
         _client = null;
         State = DeliveryRunState.Idle;
@@ -231,8 +252,13 @@ public sealed class DeliveryRunner
         }
     }
 
-    /// <summary>How many more we still need in the bag to finish the run.</summary>
-    private int Shortfall() => Math.Max(0, _target - _delivered - _game.ItemCount(_request!.ItemId));
+    /// <summary>
+    /// How many more we still need in the bag to finish the run. Counted against the client's
+    /// minimum collectability — anything below it cannot be handed over, so counting it would leave
+    /// the run thinking it was ready and then stalling at the trade window.
+    /// </summary>
+    private int Shortfall()
+        => Math.Max(0, _target - _delivered - _game.ItemCount(_request!.ItemId, _request.CollectabilityLow));
 
     private void TickCraft()
     {
@@ -260,7 +286,7 @@ public sealed class DeliveryRunner
             // been bought, so what is left is something only you can supply.
             var short2 = _recipe is null
                 ? []
-                : _ingredients.Plan(_recipe.RecipeId, short_, _game.ItemCount).Where(n => n.Missing > 0).ToList();
+                : _ingredients.Plan(_recipe.RecipeId, short_, id => _game.ItemCount(id)).Where(n => n.Missing > 0).ToList();
             var missing = short2.Count > 0
                 ? " Still short: " + string.Join(", ", short2.Select(n => $"{n.Missing} × {n.Name}")) + "."
                 : string.Empty;
@@ -331,26 +357,75 @@ public sealed class DeliveryRunner
     }
 
     /// <summary>
-    /// Gather and fish have no sourcing step of their own yet. What they can do is check the bag
-    /// and, when it is short, say exactly what to go and get — item, collectability, job and place —
-    /// rather than a bare "not built".
+    /// Gathering is handed to GatherBuddy, which can only be switched on — it takes no request. So
+    /// this switches it on and watches our own bag until the count is met, rather than asking it
+    /// for progress it cannot report. Fishing has no handoff at all and always stops.
     /// </summary>
     private void TickGather()
     {
         var client = _client!;
         var request = _request!;
         var short_ = Shortfall();
+
         if (short_ <= 0)
         {
+            if (_gatherStarted) _gatherer.Stop();
             Enter(DeliveryRunState.Interact);
             return;
         }
 
+        if (_route == DeliveryRoute.Fish || !_gatherer.Available)
+        {
+            BlockNeedingItems(short_, _gatherer.Available
+                ? "GatherBuddy does not fish"
+                : "GatherBuddy is not installed");
+            return;
+        }
+
+        if (_gatherer.IsRunning)
+        {
+            // It cannot say how far along it is, so the bag is the progress meter. Waiting means it
+            // has nothing to do — a timed node, the wrong job, or the item not on any of its lists.
+            if (_gatherer.IsWaiting)
+            {
+                if (_world.UtcNow - _phaseStart <= GatherWait) return;
+                var why = _gatherer.Status;   // Block switches it off; taking the reason first.
+                BlockNeedingItems(short_,
+                    $"GatherBuddy has been idle for {GatherWait.TotalSeconds:N0}s" + (why.Length > 0 ? $" — \"{why}\"" : "") +
+                    ". Check the item is on one of its auto-gather lists");
+                return;
+            }
+            StatusLine = $"{client.Name}: GatherBuddy is gathering {request.ItemName} ({short_} to go)";
+            _phaseStart = _world.UtcNow;    // it is working; the idle clock only runs while waiting
+            return;
+        }
+
+        if (_gatherStarted)
+        {
+            // It switched itself off with the bag still short — finished its list, or gave up.
+            BlockNeedingItems(short_, "GatherBuddy stopped on its own");
+            return;
+        }
+
+        if (!_gatherer.Start())
+        {
+            BlockNeedingItems(short_, "GatherBuddy would not start");
+            return;
+        }
+        _gatherStarted = true;
+        _phaseStart = _world.UtcNow;
+        StatusLine = $"{client.Name}: asked GatherBuddy for {short_} × {request.ItemName}";
+        _log(StatusLine);
+    }
+
+    /// <summary>Stop, saying what is missing and where it is found — the useful half of "cannot".</summary>
+    private void BlockNeedingItems(int missing, string because)
+    {
+        var request = _request!;
         var where = _gathering.For(request.ItemId) is { } origin ? $" Found at {origin.Describe()}." : string.Empty;
         Block(DeliveryStop.Materials,
-              $"{client.Name}: {short_} × {request.ItemName} needed at collectability {request.CollectabilityHigh}, " +
-              $"and Odysseus does not {(_route == DeliveryRoute.Fish ? "fish" : "gather")} yet.{where} " +
-              "Get them and start it again — the travel and turn-in are handled.");
+              $"{_client!.Name}: {missing} × {request.ItemName} needed at collectability {request.CollectabilityLow} " +
+              $"or better, and {because}.{where} Get them and start it again — the travel and turn-in are handled.");
     }
 
     private void TickShop()
@@ -364,7 +439,7 @@ public sealed class DeliveryRunner
             return;
         }
 
-        var needs = _ingredients.Plan(recipe.RecipeId, short_, _game.ItemCount);
+        var needs = _ingredients.Plan(recipe.RecipeId, short_, id => _game.ItemCount(id));
         var buy = needs.FirstOrDefault(n => n.CanBuy && _world.PositionOfDataId(n.VendorDataId) is not null);
 
         if (buy is null)
@@ -550,6 +625,7 @@ public sealed class DeliveryRunner
     {
         _travel.Cancel();
         if (_crafter.IsCrafting) _crafter.StopCrafting();
+        if (_gatherStarted) { _gatherer.Stop(); _gatherStarted = false; }
         State = DeliveryRunState.Blocked;
         StoppedBecause = kind;
         StatusLine = reason;
@@ -560,6 +636,7 @@ public sealed class DeliveryRunner
     {
         _travel.Cancel();
         if (_crafter.IsCrafting) _crafter.StopCrafting();
+        if (_gatherStarted) { _gatherer.Stop(); _gatherStarted = false; }
         State = DeliveryRunState.Faulted;
         StoppedBecause = DeliveryStop.Fault;
         StatusLine = reason;

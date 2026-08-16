@@ -33,6 +33,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
     private readonly DeliveryRunner _runner;
     private readonly IDeliveryRequests _requests;
     private readonly OdysseusConfig _config;
+    private readonly IGatherer _gatherer;
     private readonly Action _save;
 
     /// <summary>
@@ -47,12 +48,14 @@ public sealed class DeliveriesWindow : OdysseusWindow
     private DeliveryStop _blockedKind = DeliveryStop.ScripCap;
     private bool _openBlockedPopup;
     private DeliveryRunState _lastRunState = DeliveryRunState.Idle;
+    /// <summary>Which client's "everything it can ask for" list is expanded, 0 for none.</summary>
+    private uint _gatherListFor;
 
     private const string BlockedPopup = "Turn-in stopped###OdysseusDeliveryBlocked";
 
     public DeliveriesWindow(DeliveryCatalog catalog, IDeliveryState state, IDeliveryBonus bonus, ScripLedger scrips,
         ArtisanIpc artisan, UnlockPlanner unlock, DeliveryRunner runner, IDeliveryRequests requests,
-        OdysseusConfig config, Action save)
+        OdysseusConfig config, Action save, IGatherer gatherer)
         : base("Odysseus Deliveries##OdysseusDeliveries")
     {
         _catalog = catalog;
@@ -65,6 +68,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
         _requests = requests;
         _config = config;
         _save = save;
+        _gatherer = gatherer;
         Size = new Vector2(760, 620);
         SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(560, 320), MaximumSize = new Vector2(1400, 1400) };
@@ -131,6 +135,23 @@ public sealed class DeliveriesWindow : OdysseusWindow
             OdysseusTheme.StateChip("Artisan ready");
         else
             OdysseusTheme.Chip("Artisan missing", OdysseusTheme.YellowDark, OdysseusTheme.TextPrimary);
+
+        ImGui.SameLine(0f, 6f);
+        if (_gatherer.Available)
+        {
+            OdysseusTheme.StateChip("GatherBuddy ready");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip($"GatherBuddy Reborn, IPC v{_gatherer.Version}.\n" +
+                                 "It takes no request — Odysseus switches auto-gather on and watches\n" +
+                                 "the bag, so the item must be on one of its auto-gather lists.\n" +
+                                 "Use \"Gather list\" on a client to see everything it can ask for.");
+        }
+        else
+        {
+            OdysseusTheme.Chip("GatherBuddy missing", OdysseusTheme.YellowDark, OdysseusTheme.TextPrimary);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Gather deliveries will stop and tell you what to collect.");
+        }
 
         var overcapping = _scrips.WouldOvercap();
         if (overcapping.Count > 0)
@@ -320,6 +341,45 @@ public sealed class DeliveriesWindow : OdysseusWindow
         RouteButton(client, DeliveryRoute.Gather, bonus, remaining, FontAwesomeIcon.Leaf, "Gather", 74f);
         ImGui.SameLine();
         RouteButton(client, DeliveryRoute.Fish, bonus, remaining, FontAwesomeIcon.Fish, "Fish", 62f);
+
+        // GatherBuddy cannot be told what to fetch, so the way to make the handoff work every week
+        // is to seed its list with everything this client can ever ask for. That set is small.
+        ImGui.SameLine();
+        if (OdysseusTheme.IconButton($"##gl{client.Index}", FontAwesomeIcon.ListUl,
+                "Everything this client can ask for on the gather and fish routes —\n" +
+                "add these to a GatherBuddy auto-gather list once and the handoff\n" +
+                "works whatever the week rolls."))
+            _gatherListFor = _gatherListFor == client.Index ? 0 : client.Index;
+
+        if (_gatherListFor == client.Index)
+            DrawGatherList(client);
+    }
+
+    /// <summary>The full set of possible gather and fish requests, with ids to paste into GatherBuddy.</summary>
+    private void DrawGatherList(DeliveryClient client)
+    {
+        var rank = _state.Rank(client);
+        var rows = _requests.Possible(client, rank, DeliveryRoute.Gather)
+            .Concat(_requests.Possible(client, rank, DeliveryRoute.Fish)).ToList();
+
+        ImGui.Indent(12f);
+        if (rows.Count == 0)
+            ImGui.TextColored(OdysseusTheme.TextDisabled, "Nothing listed for this client's rank.");
+        else
+        {
+            ImGui.TextColored(OdysseusTheme.TextSecondary,
+                $"{client.Name} rank {rank} can ask for any of these. Add them to a GatherBuddy auto-gather list:");
+            foreach (var row in rows)
+                ImGui.TextColored(OdysseusTheme.TextDisabled,
+                    $"  [{row.Route}] {row.ItemName}  ·  id {row.ItemId}  ·  collectability {row.CollectabilityLow}+");
+
+            if (ImGui.SmallButton($"Copy ids##ci{client.Index}"))
+            {
+                ImGui.SetClipboardText(string.Join(", ", rows.Select(r => r.ItemId)));
+                _status = $"{client.Name}: copied {rows.Count} item id(s).";
+            }
+        }
+        ImGui.Unindent(12f);
     }
 
     /// <summary>

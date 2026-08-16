@@ -51,10 +51,34 @@ public class DeliveryRunnerTests
     {
         public List<DeliveryRequest> Items { get; } =
         [
-            new(DeliveryRoute.Craft, 0, ItemId, "Rroneek Cheese", 500, false),
-            new(DeliveryRoute.Gather, 1, GatherItemId, "Yak T'el Marlin", 400, false),
+            new(DeliveryRoute.Craft, 0, ItemId, "Rroneek Cheese", 500, 300, false),
+            new(DeliveryRoute.Gather, 1, GatherItemId, "Yak T'el Marlin", 400, 250, false),
         ];
         public IReadOnlyList<DeliveryRequest> For(DeliveryClient c, int rank) => Items;
+        public IReadOnlyList<DeliveryRequest> Possible(DeliveryClient c, int rank, DeliveryRoute route)
+            => Items.Where(i => i.Route == route).ToList();
+    }
+
+    private sealed class Gatherer : IGatherer
+    {
+        public bool Available { get; set; } = true;
+        public int Version => 1;
+        public bool IsRunning { get; set; }
+        public bool IsWaiting { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public int Starts { get; private set; }
+        public int Stops { get; private set; }
+        public bool Refuse { get; set; }
+
+        public bool Start()
+        {
+            if (Refuse) return false;
+            Starts++;
+            IsRunning = true;
+            return true;
+        }
+
+        public void Stop() { Stops++; IsRunning = false; }
     }
 
     private sealed class Gathering : IGatheringSource
@@ -92,10 +116,10 @@ public class DeliveryRunnerTests
         /// <summary>Whatever the open trade is asking for — the route decides which item that is.</summary>
         private uint _pending;
 
+        public int ItemCount(uint itemId, int minCollectability = 0) => Bag.GetValueOrDefault(itemId);
         public bool IsSupplyOpen(DeliveryClient c) => SupplyOpen;
         public void OpenRoute(DeliveryRoute route) => TradeOpen = true;
         public bool IsTradeOpen(uint itemId) { if (TradeOpen) _pending = itemId; return TradeOpen; }
-        public int ItemCount(uint itemId) => Bag.GetValueOrDefault(itemId);
 
         public bool CommitTrade(DeliveryRoute route)
         {
@@ -156,6 +180,7 @@ public class DeliveryRunnerTests
     private readonly Game _game = new();
     private readonly Ingredients _ingredients = new();
     private readonly Gathering _gathering = new();
+    private readonly Gatherer _gatherer = new();
     private readonly ScripLedger _scrips;
     private readonly DeliveryRunner _runner;
     private readonly List<string> _log = [];
@@ -164,7 +189,7 @@ public class DeliveryRunnerTests
     public DeliveryRunnerTests()
     {
         _scrips = new ScripLedger([Purple], _currency, new DeliveryCatalog([Zhloe]), _state, _rewards, new Bonus());
-        _runner = new DeliveryRunner(_world, _game, _state, _requests, _scrips, _crafter, _recipes, _ingredients, _gathering,
+        _runner = new DeliveryRunner(_world, _game, _state, _requests, _scrips, _crafter, _recipes, _ingredients, _gathering, _gatherer,
             new StepExecutor(_world), () => _preferredJob, _log.Add);
         _world.PlayerPosition = Zhloe.Position;   // standing at the client
         _world.Spawned.Add(Zhloe.NpcDataId);
@@ -425,9 +450,59 @@ public class DeliveryRunnerTests
         Assert.Equal(DeliveryRoute.Gather, _runner.Route);
     }
 
+    /// <summary>
+    /// GatherBuddy takes no request and reports no progress, so the handoff is: switch on, watch
+    /// the bag, switch off. Nothing is ever asked of it beyond running or not.
+    /// </summary>
     [Fact]
-    public void A_short_gather_bag_stops_and_says_where_to_find_them()
+    public void Gathering_is_handed_to_gatherbuddy_and_the_bag_is_the_progress_meter()
     {
+        _game.Bag[GatherItemId] = 4;
+        Assert.True(_runner.Start(Zhloe, DeliveryRoute.Gather, limit: 6));
+        RunTo(DeliveryRunState.Gather);
+
+        _runner.Tick();
+        Assert.Equal(1, _gatherer.Starts);
+        Assert.True(_gatherer.IsRunning);
+
+        _runner.Tick();                              // still short: leave it running
+        Assert.Equal(1, _gatherer.Starts);
+        Assert.Equal(0, _gatherer.Stops);
+
+        _game.Bag[GatherItemId] = 6;                 // it delivered
+        Run();
+        Assert.Equal(1, _gatherer.Stops);
+        Assert.Equal(DeliveryRunState.Done, _runner.State);
+        Assert.Equal(6, _game.Committed);
+    }
+
+    /// <summary>Idle means it has nothing it can reach — usually the item is on no list of its own.</summary>
+    [Fact]
+    public void A_gatherbuddy_that_sits_idle_stops_the_run_and_quotes_it()
+    {
+        _game.Bag[GatherItemId] = 0;
+        Assert.True(_runner.Start(Zhloe, DeliveryRoute.Gather, limit: 1));
+        RunTo(DeliveryRunState.Gather);
+        _runner.Tick();                              // starts it
+
+        _gatherer.IsWaiting = true;
+        _gatherer.Status = "No nodes available";
+        _runner.Tick();
+        Assert.Equal(DeliveryRunState.Gather, _runner.State);   // brief idling is tolerated
+
+        _world.UtcNow = _world.UtcNow.AddMinutes(3);
+        _runner.Tick();
+
+        Assert.Equal(DeliveryRunState.Blocked, _runner.State);
+        Assert.Contains("No nodes available", _runner.StatusLine);
+        Assert.Contains("auto-gather lists", _runner.StatusLine);
+        Assert.Equal(1, _gatherer.Stops);
+    }
+
+    [Fact]
+    public void Without_gatherbuddy_it_stops_and_says_where_to_find_them()
+    {
+        _gatherer.Available = false;
         _game.Bag[GatherItemId] = 2;
         Assert.True(_runner.Start(Zhloe, DeliveryRoute.Gather));
         Run();
@@ -435,20 +510,35 @@ public class DeliveryRunnerTests
         Assert.Equal(DeliveryRunState.Blocked, _runner.State);
         Assert.Equal(DeliveryStop.Materials, _runner.StoppedBecause);
         Assert.Contains("4 × Yak T'el Marlin", _runner.StatusLine);
-        Assert.Contains("collectability 400", _runner.StatusLine);
+        Assert.Contains("collectability 250", _runner.StatusLine);   // the minimum, not the high tier
         Assert.Contains("Ok'hanu, Yak T'el — Botanist Lv 100", _runner.StatusLine);
+        Assert.Equal(0, _gatherer.Starts);
         Assert.Equal(0, _game.Committed);
+    }
+
+    /// <summary>GatherBuddy does not fish, so the fish route never hands off however present it is.</summary>
+    [Fact]
+    public void Fishing_is_never_handed_off()
+    {
+        _requests.Items.Add(new DeliveryRequest(DeliveryRoute.Fish, 2, 40002, "Coral Trout", 400, 250, false));
+        Assert.True(_runner.Start(Zhloe, DeliveryRoute.Fish, limit: 1));
+        Run();
+
+        Assert.Equal(DeliveryRunState.Blocked, _runner.State);
+        Assert.Contains("does not fish", _runner.StatusLine);
+        Assert.Equal(0, _gatherer.Starts);
     }
 
     [Fact]
     public void An_item_no_node_lists_still_stops_cleanly()
     {
+        _gatherer.Available = false;
         _gathering.Origin = null;
         Assert.True(_runner.Start(Zhloe, DeliveryRoute.Gather, limit: 1));
         Run();
 
         Assert.Equal(DeliveryRunState.Blocked, _runner.State);
-        Assert.Contains("does not gather yet", _runner.StatusLine);
+        Assert.Contains("GatherBuddy is not installed", _runner.StatusLine);
         Assert.DoesNotContain("Found at", _runner.StatusLine);
     }
 
