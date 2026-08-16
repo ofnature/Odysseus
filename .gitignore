@@ -4,6 +4,9 @@ obj/
 .vs/
 .idea/
 
+# Reference checkouts (QuestFlow etc.) — read for design, never built in, never published.
+.cursor/
+
 # Markdown stays local (working notes) — only the README and changelog are published.
 *.md
 !README.md
