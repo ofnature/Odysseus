@@ -15,10 +15,18 @@ public interface ICrafter
     void StopCrafting();
 }
 
-/// <summary>Finds the recipe that makes an item.</summary>
-public interface IRecipeLookup
+/// <summary>Why a run stopped — decides what the popup is headed, since not every stop is the cap.</summary>
+public enum DeliveryStop
 {
-    ushort? ForItem(uint itemId);
+    None,
+    /// <summary>The next turn-in would spill scrip over the cap.</summary>
+    ScripCap,
+    /// <summary>The item could not be made — no materials, no Artisan, no recipe.</summary>
+    Materials,
+    /// <summary>Something about the client or character is not ready.</summary>
+    Setup,
+    /// <summary>The game did not do what was asked.</summary>
+    Fault,
 }
 
 public enum DeliveryRunState
@@ -75,6 +83,7 @@ public sealed class DeliveryRunner
     private readonly ICrafter _crafter;
     private readonly IRecipeLookup _recipes;
     private readonly StepExecutor _travel;
+    private readonly Func<int> _preferredCraftType;
     private readonly Action<string> _log;
 
     private DeliveryClient? _client;
@@ -86,8 +95,10 @@ public sealed class DeliveryRunner
     private bool _craftStarted;
 
     public DeliveryRunner(IStepWorld world, IDeliveryWorld game, IDeliveryState state, IDeliveryRequests requests,
-        ScripLedger scrips, ICrafter crafter, IRecipeLookup recipes, StepExecutor travel, Action<string> log)
+        ScripLedger scrips, ICrafter crafter, IRecipeLookup recipes, StepExecutor travel,
+        Func<int> preferredCraftType, Action<string> log)
     {
+        _preferredCraftType = preferredCraftType;
         _world = world;
         _game = game;
         _state = state;
@@ -101,6 +112,11 @@ public sealed class DeliveryRunner
 
     public DeliveryRunState State { get; private set; } = DeliveryRunState.Idle;
     public string StatusLine { get; private set; } = string.Empty;
+    /// <summary>Why the last stop happened; <see cref="DeliveryStop.None"/> while running.</summary>
+    public DeliveryStop StoppedBecause { get; private set; } = DeliveryStop.None;
+    /// <summary>The run is over, one way or another — nothing more will happen without a new Start.</summary>
+    public bool IsFinished => State is DeliveryRunState.Idle or DeliveryRunState.Done
+        or DeliveryRunState.Faulted or DeliveryRunState.Blocked;
     public DeliveryClient? Client => _client;
     /// <summary>Deliveries handed over since <see cref="Start"/>.</summary>
     public int Delivered => _delivered;
@@ -119,47 +135,31 @@ public sealed class DeliveryRunner
     public bool Start(DeliveryClient client, int limit = 0)
     {
         if (!_state.IsUnlocked(client))
-        {
-            StatusLine = $"{client.Name} is not unlocked yet.";
-            return false;
-        }
+            return Refuse(DeliveryStop.Setup, $"{client.Name} is not unlocked yet.");
         if (!_state.DataLoaded)
-        {
-            StatusLine = "Delivery data has not loaded — open the game's Custom Deliveries window once, then start.";
-            return false;
-        }
+            return Refuse(DeliveryStop.Setup,
+                "Delivery data has not loaded — open the game's Custom Deliveries window once, then start.");
 
         var remaining = _scrips.RemainingDeliveries(client);
         if (remaining <= 0)
-        {
-            StatusLine = $"{client.Name} has no deliveries left this week.";
-            return false;
-        }
+            return Refuse(DeliveryStop.Setup, $"{client.Name} has no deliveries left this week.");
 
         var (allowed, reason) = _scrips.MayTurnIn(client);
         if (!allowed)
-        {
-            StatusLine = reason!;
-            return false;
-        }
+            return Refuse(DeliveryStop.ScripCap, reason!);
 
         var request = _requests.For(client, _state.Rank(client)).FirstOrDefault(r => r.Route == DeliveryRoute.Craft);
         if (request is null)
-        {
-            StatusLine = $"Could not work out what {client.Name} is asking for.";
-            return false;
-        }
+            return Refuse(DeliveryStop.Setup, $"Could not work out what {client.Name} is asking for.");
         if (client.NpcDataId == 0)
-        {
-            StatusLine = $"{client.Name} has no NPC position in the sheet.";
-            return false;
-        }
+            return Refuse(DeliveryStop.Setup, $"{client.Name} has no NPC position in the sheet.");
 
         _client = client;
         _request = request;
         _delivered = 0;
         _target = limit > 0 ? Math.Min(limit, remaining) : remaining;
         _craftStarted = false;
+        StoppedBecause = DeliveryStop.None;
         Enter(DeliveryRunState.Craft);
         _log($"{client.Name}: {_target} deliver{(_target == 1 ? "y" : "ies")} of {request.ItemName} " +
              $"(collectability {request.CollectabilityHigh}){(limit > 0 ? " — test run" : "")}.");
@@ -172,12 +172,20 @@ public sealed class DeliveryRunner
         if (_crafter.IsCrafting) _crafter.StopCrafting();
         _client = null;
         State = DeliveryRunState.Idle;
+        StoppedBecause = DeliveryStop.None;
+    }
+
+    /// <summary>Refuse to start, recording why so the popup can be headed correctly.</summary>
+    private bool Refuse(DeliveryStop kind, string reason)
+    {
+        StoppedBecause = kind;
+        StatusLine = reason;
+        return false;
     }
 
     public void Tick()
     {
-        if (_client is null || State is DeliveryRunState.Idle or DeliveryRunState.Done
-            or DeliveryRunState.Faulted or DeliveryRunState.Blocked)
+        if (_client is null || IsFinished)
             return;
         try
         {
@@ -221,31 +229,34 @@ public sealed class DeliveryRunner
         if (_craftStarted)
         {
             // Artisan stopped with the bag still short — out of materials, most likely.
-            Block($"{client.Name}: Artisan stopped with {short_} × {request.ItemName} still needed. " +
+            Block(DeliveryStop.Materials,
+                  $"{client.Name}: Artisan stopped with {short_} × {request.ItemName} still needed. " +
                   "Odysseus does not buy ingredients yet, so stock up and start it again.");
             return;
         }
 
         if (!_crafter.Available)
         {
-            Block($"{client.Name}: {short_} × {request.ItemName} needed and Artisan is not installed. " +
+            Block(DeliveryStop.Materials,
+                  $"{client.Name}: {short_} × {request.ItemName} needed and Artisan is not installed. " +
                   "Craft them yourself, or install Artisan and start it again.");
             return;
         }
 
-        if (_recipes.ForItem(request.ItemId) is not { } recipe)
+        var options = _recipes.OptionsFor(request.ItemId);
+        if (RecipePicker.Pick(options, _preferredCraftType(), _game.CurrentCraftType) is not { } recipe)
         {
-            Block($"{client.Name}: no recipe found for {request.ItemName}.");
+            Block(DeliveryStop.Materials, $"{client.Name}: no recipe found for {request.ItemName}.");
             return;
         }
 
-        if (!_crafter.CraftItem(recipe, short_))
+        if (!_crafter.CraftItem(recipe.RecipeId, short_))
         {
-            Block($"{client.Name}: Artisan would not take the craft for {request.ItemName}.");
+            Block(DeliveryStop.Materials, $"{client.Name}: Artisan would not take the craft for {request.ItemName}.");
             return;
         }
         _craftStarted = true;
-        StatusLine = $"{client.Name}: asked Artisan for {short_} × {request.ItemName}";
+        StatusLine = $"{client.Name}: asked Artisan for {short_} × {request.ItemName} as {recipe.JobName}";
 
         if (_world.UtcNow - _phaseStart > CraftStall)
             Fault($"{client.Name}: Artisan never started crafting.");
@@ -306,21 +317,21 @@ public sealed class DeliveryRunner
         var request = _request!;
 
         // Re-ask the cap before every hand-over: each one moves the balance.
-        var (allowed, reason) = _scrips.MayTurnIn(client);
-        if (!allowed)
-        {
-            Block(reason!);
-            return;
-        }
-
         if (_delivered >= _target || _scrips.RemainingDeliveries(client) <= 0)
         {
             Finish();
             return;
         }
+
+        var (allowed, reason) = _scrips.MayTurnIn(client);
+        if (!allowed)
+        {
+            Block(DeliveryStop.ScripCap, reason!);
+            return;
+        }
         if (_game.ItemCount(request.ItemId) <= 0)
         {
-            Block($"{client.Name}: out of {request.ItemName} after {_delivered} deliveries.");
+            Block(DeliveryStop.Materials, $"{client.Name}: out of {request.ItemName} after {_delivered} deliveries.");
             return;
         }
         if (!_game.IsSupplyOpen(client))
@@ -377,11 +388,12 @@ public sealed class DeliveryRunner
     }
 
     /// <summary>A deliberate stop — not an error. The reason is meant to be shown to the player.</summary>
-    private void Block(string reason)
+    private void Block(DeliveryStop kind, string reason)
     {
         _travel.Cancel();
         if (_crafter.IsCrafting) _crafter.StopCrafting();
         State = DeliveryRunState.Blocked;
+        StoppedBecause = kind;
         StatusLine = reason;
         _log($"Stopped: {reason}");
     }
@@ -391,6 +403,7 @@ public sealed class DeliveryRunner
         _travel.Cancel();
         if (_crafter.IsCrafting) _crafter.StopCrafting();
         State = DeliveryRunState.Faulted;
+        StoppedBecause = DeliveryStop.Fault;
         StatusLine = reason;
         _log($"FAULT: {reason}");
     }

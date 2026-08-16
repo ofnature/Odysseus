@@ -179,9 +179,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             artisan,
             new Services.Deliveries.RecipeLookup(DataManager, message => Log.Warning(message)),
             new StepExecutor(_world, dialogue),
+            () => _config.DeliveryCraftJob,
             message => Log.Information(message));
         _deliveriesWindow = new DeliveriesWindow(_deliveries, deliveryState, deliveryBonus, scrips,
-            artisan, unlockPlanner, _deliveryRunner, deliveryRequests);
+            artisan, unlockPlanner, _deliveryRunner, deliveryRequests, _config, SaveConfig);
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);

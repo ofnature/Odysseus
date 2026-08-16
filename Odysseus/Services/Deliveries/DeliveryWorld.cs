@@ -26,8 +26,11 @@ public interface IDeliveryWorld
     /// <summary>Hand over the first matching item and confirm. Returns false when the agent refused.</summary>
     bool CommitTrade(DeliveryRoute route);
 
-    /// <summary>How many of an item are in the inventory, collectables included.</summary>
+    /// <summary>How many of an item are in the bags, collectables included.</summary>
     int ItemCount(uint itemId);
+
+    /// <summary>The crafting job the player is on right now, as a <c>CraftType</c> index, or -1.</summary>
+    int CurrentCraftType { get; }
 }
 
 /// <summary>The live implementation, driving <c>AgentSatisfactionSupply</c> and <c>AgentNpcTrade</c>.</summary>
@@ -148,16 +151,68 @@ public sealed unsafe class GameDeliveryWorld : IDeliveryWorld
         }
     }
 
+    /// <summary>The four bag pages. Collectables sit here like anything else.</summary>
+    private static readonly FFXIVClientStructs.FFXIV.Client.Game.InventoryType[] Bags =
+    [
+        FFXIVClientStructs.FFXIV.Client.Game.InventoryType.Inventory1,
+        FFXIVClientStructs.FFXIV.Client.Game.InventoryType.Inventory2,
+        FFXIVClientStructs.FFXIV.Client.Game.InventoryType.Inventory3,
+        FFXIVClientStructs.FFXIV.Client.Game.InventoryType.Inventory4,
+    ];
+
+    /// <summary>
+    /// Counted by walking the bags rather than through <c>GetInventoryItemCount</c>.
+    ///
+    /// <para>
+    /// A delivery item is a collectable, and the convenience counter treats collectability as a
+    /// filter — a freshly crafted Coerthan Souvenir sitting in the bag counted as zero, so the
+    /// runner asked Artisan to make another. Matching on item id alone has no such trapdoor.
+    /// </para>
+    /// </summary>
     public int ItemCount(uint itemId)
     {
         try
         {
             var manager = FFXIVClientStructs.FFXIV.Client.Game.InventoryManager.Instance();
-            return manager == null ? 0 : manager->GetInventoryItemCount(itemId);
+            if (manager == null) return 0;
+
+            var total = 0;
+            foreach (var bag in Bags)
+            {
+                var container = manager->GetInventoryContainer(bag);
+                if (container == null || !container->IsLoaded) continue;
+                for (var slot = 0; slot < container->Size; slot++)
+                {
+                    var item = container->GetInventorySlot(slot);
+                    if (item != null && item->ItemId == itemId)
+                        total += (int)item->Quantity;
+                }
+            }
+            return total;
         }
-        catch
+        catch (Exception ex)
         {
+            _log($"Counting item {itemId} failed: {ex.Message}");
             return 0;
+        }
+    }
+
+    /// <summary>ClassJob 8..15 are CRP..CUL, in the same order as <c>Recipe.CraftType</c>.</summary>
+    public int CurrentCraftType
+    {
+        get
+        {
+            try
+            {
+                var state = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
+                if (state == null) return -1;
+                var job = state->CurrentClassJobId;
+                return job is >= 8 and <= 15 ? job - 8 : -1;
+            }
+            catch
+            {
+                return -1;
+            }
         }
     }
 

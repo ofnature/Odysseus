@@ -63,6 +63,17 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>The list, in priority order. Only meaningful while <see cref="PersistPriorityList"/> is on.</summary>
     public List<ushort> PriorityQuests { get; set; } = [];
 
+    /// <summary>
+    /// Which crafting job makes delivery items: 0..7 for CRP, BSM, ARM, GSM, LTW, WVR, ALC, CUL,
+    /// or -1 to stay on whatever job you are already on when it can make the item.
+    ///
+    /// <para>
+    /// It matters because Artisan switches the character to the recipe's job. Picking the first
+    /// recipe in the sheet meant being pulled onto Carpenter mid-run with no say in it.
+    /// </para>
+    /// </summary>
+    public int DeliveryCraftJob { get; set; } = -1;
+
     /// <summary>Keep the priority list across sessions. Off = it lasts until the client closes.</summary>
     public bool PersistPriorityList { get; set; } = true;
 

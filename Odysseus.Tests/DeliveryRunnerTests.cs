@@ -62,8 +62,9 @@ public class DeliveryRunnerTests
 
     private sealed class Recipes : IRecipeLookup
     {
-        public ushort? Recipe { get; set; } = 4242;
-        public ushort? ForItem(uint itemId) => Recipe;
+        /// <summary>The same item, makeable by two jobs — CRP first in the sheet, CUL second.</summary>
+        public List<RecipeOption> Options { get; } = [new(4242, 0, 90), new(4343, 7, 90)];
+        public IReadOnlyList<RecipeOption> OptionsFor(uint itemId) => Options;
     }
 
     /// <summary>The supply and trade windows, faked as a two-step handshake per turn-in.</summary>
@@ -74,6 +75,7 @@ public class DeliveryRunnerTests
         public bool TradeOpen { get; set; }
         public bool RefuseCommit { get; set; }
         public int Committed { get; private set; }
+        public int CurrentCraftType { get; set; } = -1;
 
         public bool IsSupplyOpen(DeliveryClient c) => SupplyOpen;
         public void OpenRoute(DeliveryRoute route) => TradeOpen = true;
@@ -101,12 +103,13 @@ public class DeliveryRunnerTests
     private readonly ScripLedger _scrips;
     private readonly DeliveryRunner _runner;
     private readonly List<string> _log = [];
+    private int _preferredJob = -1;
 
     public DeliveryRunnerTests()
     {
         _scrips = new ScripLedger([Purple], _currency, new DeliveryCatalog([Zhloe]), _state, _rewards, new Bonus());
         _runner = new DeliveryRunner(_world, _game, _state, _requests, _scrips, _crafter, _recipes,
-            new StepExecutor(_world), _log.Add);
+            new StepExecutor(_world), () => _preferredJob, _log.Add);
         _world.PlayerPosition = Zhloe.Position;   // standing at the client
         _world.Spawned.Add(Zhloe.NpcDataId);
     }
@@ -116,9 +119,7 @@ public class DeliveryRunnerTests
     {
         for (var i = 0; i < frames; i++)
         {
-            if (_runner.State is DeliveryRunState.Done or DeliveryRunState.Faulted
-                or DeliveryRunState.Blocked or DeliveryRunState.Idle)
-                return;
+            if (_runner.IsFinished) return;
             _runner.Tick();
             _world.UtcNow = _world.UtcNow.AddSeconds(2);   // past the per-turn-in gap
         }
@@ -157,7 +158,7 @@ public class DeliveryRunnerTests
         _game.Bag[ItemId] = 0;
         Assert.True(_runner.Start(Zhloe, limit: 1));
         _runner.Tick();
-        Assert.Equal((4242, 1), _crafter.Asked.Single());
+        Assert.Equal(((ushort)4242, 1), _crafter.Asked.Single());
     }
 
     [Fact]
@@ -168,7 +169,7 @@ public class DeliveryRunnerTests
         Assert.True(_runner.Start(Zhloe));
         _runner.Tick();
 
-        Assert.Equal((4242, 3), _crafter.Asked.Single());
+        Assert.Equal(((ushort)4242, 3), _crafter.Asked.Single());
     }
 
     /// <summary>The cap is a hard stop: refuse before the first turn-in, not after.</summary>
@@ -180,7 +181,48 @@ public class DeliveryRunnerTests
 
         Assert.False(_runner.Start(Zhloe));
         Assert.Contains("50 would be lost", _runner.StatusLine);
+        Assert.Equal(DeliveryStop.ScripCap, _runner.StoppedBecause);
         Assert.Equal(0, _game.Committed);
+    }
+
+    /// <summary>
+    /// Artisan switches the character to the recipe's job, so which recipe is chosen is the whole
+    /// question. Staying put beats moving; an explicit preference beats staying put.
+    /// </summary>
+    [Fact]
+    public void The_recipe_chosen_decides_the_job_and_the_current_one_wins_by_default()
+    {
+        _game.Bag[ItemId] = 0;
+
+        _game.CurrentCraftType = 7;                 // standing there as a Culinarian
+        Assert.True(_runner.Start(Zhloe, limit: 1));
+        _runner.Tick();
+        Assert.Equal((ushort)4343, _crafter.Asked.Single().Recipe);
+
+        _crafter.Asked.Clear();
+        _preferredJob = 0;                          // configured to Carpenter regardless
+        _runner.Stop();
+        Assert.True(_runner.Start(Zhloe, limit: 1));
+        _runner.Tick();
+        Assert.Equal((ushort)4242, _crafter.Asked.Single().Recipe);
+    }
+
+    [Fact]
+    public void A_stopped_run_reports_itself_finished_so_the_button_goes_back()
+    {
+        _game.Bag[ItemId] = 6;
+        Assert.True(_runner.Start(Zhloe));
+        Assert.False(_runner.IsFinished);
+        Run();
+        Assert.True(_runner.IsFinished);
+
+        _crafter.Available = false;
+        _game.Bag[ItemId] = 0;
+        Assert.True(_runner.Start(Zhloe));
+        Run();
+        Assert.Equal(DeliveryRunState.Blocked, _runner.State);
+        Assert.Equal(DeliveryStop.Materials, _runner.StoppedBecause);
+        Assert.True(_runner.IsFinished);
     }
 
     [Fact]

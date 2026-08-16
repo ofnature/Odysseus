@@ -4,6 +4,7 @@ using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
+using Odysseus.Config;
 using Odysseus.Services.Deliveries;
 using Odysseus.Services.Ipc;
 using Odysseus.Services.Quest;
@@ -31,6 +32,8 @@ public sealed class DeliveriesWindow : OdysseusWindow
     private readonly UnlockPlanner _unlock;
     private readonly DeliveryRunner _runner;
     private readonly IDeliveryRequests _requests;
+    private readonly OdysseusConfig _config;
+    private readonly Action _save;
 
     /// <summary>
     /// On, a Craft turn-in runs exactly one delivery and stops. The craft-and-turn-in path has not
@@ -41,13 +44,15 @@ public sealed class DeliveriesWindow : OdysseusWindow
 
     private string _status = string.Empty;
     private string _blockedReason = string.Empty;
+    private DeliveryStop _blockedKind = DeliveryStop.ScripCap;
     private bool _openBlockedPopup;
     private DeliveryRunState _lastRunState = DeliveryRunState.Idle;
 
     private const string BlockedPopup = "Turn-in stopped###OdysseusDeliveryBlocked";
 
     public DeliveriesWindow(DeliveryCatalog catalog, IDeliveryState state, IDeliveryBonus bonus, ScripLedger scrips,
-        ArtisanIpc artisan, UnlockPlanner unlock, DeliveryRunner runner, IDeliveryRequests requests)
+        ArtisanIpc artisan, UnlockPlanner unlock, DeliveryRunner runner, IDeliveryRequests requests,
+        OdysseusConfig config, Action save)
         : base("Odysseus Deliveries##OdysseusDeliveries")
     {
         _catalog = catalog;
@@ -58,6 +63,8 @@ public sealed class DeliveriesWindow : OdysseusWindow
         _unlock = unlock;
         _runner = runner;
         _requests = requests;
+        _config = config;
+        _save = save;
         Size = new Vector2(760, 620);
         SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(560, 320), MaximumSize = new Vector2(1400, 1400) };
@@ -86,6 +93,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
         if (changed && _runner.State is DeliveryRunState.Blocked or DeliveryRunState.Faulted)
         {
             _blockedReason = _runner.StatusLine;
+            _blockedKind = _runner.StoppedBecause;
             _openBlockedPopup = true;
         }
         // Follow the run every frame, not only on state changes — most of what is worth watching
@@ -133,6 +141,25 @@ public sealed class DeliveriesWindow : OdysseusWindow
             ImGui.SetTooltip("Craft turn-in stops after a single delivery so you can watch the whole\n" +
                              "sequence — craft, travel, hand over — before trusting it with a week.\n" +
                              "Turn it off to run the full remaining allowance.");
+
+        // Artisan switches to whatever job the recipe belongs to, so the choice is yours to make.
+        ImGui.SameLine(0f, 12f);
+        ImGui.TextColored(OdysseusTheme.TextSecondary, "Craft as");
+        ImGui.SameLine(0f, 4f);
+        ImGui.SetNextItemWidth(ImGui.CalcTextSize("Current job").X + ImGui.GetFrameHeight() + 12f);
+        var job = _config.DeliveryCraftJob;
+        var label = job >= 0 && job < RecipeOption.JobNames.Length ? RecipeOption.JobNames[job] : "Current job";
+        if (ImGui.BeginCombo("##craftjob", label))
+        {
+            if (ImGui.Selectable("Current job", job < 0)) { _config.DeliveryCraftJob = -1; _save(); }
+            for (var i = 0; i < RecipeOption.JobNames.Length; i++)
+                if (ImGui.Selectable(RecipeOption.JobNames[i], job == i)) { _config.DeliveryCraftJob = i; _save(); }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Which job crafts delivery items. Artisan switches the character to the\n" +
+                             "recipe's job, so this decides what you get pulled onto.\n" +
+                             "\"Current job\" keeps you where you are whenever that job can make it.");
         ImGui.Separator();
     }
 
@@ -257,7 +284,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
         var colour = !allowed ? OdysseusTheme.NeutralDark : bonus.Craft ? OdysseusTheme.AccentDim : OdysseusTheme.GreenDark;
         var payout = string.Join(", ", _scrips.PerDelivery(client).Select(p =>
             $"{p.Value:N0} {_scrips.Kinds.FirstOrDefault(k => k.RewardCurrency == p.Key)?.Name ?? p.Key.ToString()}"));
-        var running = _runner.Client?.Index == client.Index && _runner.State is not (DeliveryRunState.Idle or DeliveryRunState.Done);
+        var running = _runner.Client?.Index == client.Index && !_runner.IsFinished;
 
         // Name what they are actually asking for — it decides whether this client is worth a run.
         var wanted = _requests.For(client, _state.Rank(client)).FirstOrDefault(r => r.Route == DeliveryRoute.Craft);
@@ -285,11 +312,13 @@ public sealed class DeliveriesWindow : OdysseusWindow
             if (!allowed)
             {
                 _blockedReason = reason ?? "At the scrip cap.";
+                _blockedKind = DeliveryStop.ScripCap;
                 _openBlockedPopup = true;
             }
             else if (!_runner.Start(client, _oneShot ? 1 : 0))
             {
                 _blockedReason = _runner.StatusLine;
+                _blockedKind = _runner.StoppedBecause;
                 _openBlockedPopup = true;
             }
             else
@@ -374,7 +403,14 @@ public sealed class DeliveriesWindow : OdysseusWindow
         if (!ImGui.BeginPopupModal(BlockedPopup, ref open, ImGuiWindowFlags.AlwaysAutoResize))
             return;
         ImGui.PushTextWrapPos(420f);
-        ImGui.TextColored(OdysseusTheme.StatusRed, "Stopped before the scrip cap");
+        var (heading, colour) = _blockedKind switch
+        {
+            DeliveryStop.ScripCap => ("Stopped before the scrip cap", OdysseusTheme.StatusRed),
+            DeliveryStop.Materials => ("Nothing left to turn in", OdysseusTheme.StatusYellow),
+            DeliveryStop.Fault => ("The run hit a problem", OdysseusTheme.StatusRed),
+            _ => ("Cannot start", OdysseusTheme.StatusYellow),
+        };
+        ImGui.TextColored(colour, heading);
         ImGui.Spacing();
         ImGui.TextWrapped(_blockedReason);
         ImGui.PopTextWrapPos();
