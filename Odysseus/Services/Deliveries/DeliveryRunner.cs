@@ -105,8 +105,18 @@ public sealed class DeliveryRunner
     /// <summary>Deliveries handed over since <see cref="Start"/>.</summary>
     public int Delivered => _delivered;
 
+    /// <summary>What the run is aiming for — the whole allowance, or fewer on a test run.</summary>
+    public int Target => _target;
+
+    /// <summary>What this client is asking for on the craft route, once a run has started.</summary>
+    public DeliveryRequest? Request => _request;
+
     /// <summary>Begin this client's craft deliveries. False with a reason in <see cref="StatusLine"/>.</summary>
-    public bool Start(DeliveryClient client)
+    /// <param name="limit">
+    /// Cap the run at this many deliveries. 0 means the whole remaining allowance. 1 is the
+    /// one-shot used to check a client end to end before trusting it with the week.
+    /// </param>
+    public bool Start(DeliveryClient client, int limit = 0)
     {
         if (!_state.IsUnlocked(client))
         {
@@ -148,10 +158,11 @@ public sealed class DeliveryRunner
         _client = client;
         _request = request;
         _delivered = 0;
-        _target = remaining;
+        _target = limit > 0 ? Math.Min(limit, remaining) : remaining;
         _craftStarted = false;
         Enter(DeliveryRunState.Craft);
-        _log($"{client.Name}: {remaining} deliveries of {request.ItemName} (collectability {request.CollectabilityHigh}).");
+        _log($"{client.Name}: {_target} deliver{(_target == 1 ? "y" : "ies")} of {request.ItemName} " +
+             $"(collectability {request.CollectabilityHigh}){(limit > 0 ? " — test run" : "")}.");
         return true;
     }
 

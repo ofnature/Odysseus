@@ -137,6 +137,29 @@ public class DeliveryRunnerTests
         Assert.Empty(_crafter.Asked);              // already stocked, so nothing to craft
     }
 
+    /// <summary>The one-shot used to prove a client end to end before trusting it with a week.</summary>
+    [Fact]
+    public void A_test_run_delivers_once_and_stops()
+    {
+        _game.Bag[ItemId] = 6;
+        Assert.True(_runner.Start(Zhloe, limit: 1));
+        Assert.Equal(1, _runner.Target);
+        Run();
+
+        Assert.Equal(DeliveryRunState.Done, _runner.State);
+        Assert.Equal(1, _game.Committed);
+        Assert.Equal(5, _game.Bag[ItemId]);
+    }
+
+    [Fact]
+    public void A_test_run_crafts_only_the_one()
+    {
+        _game.Bag[ItemId] = 0;
+        Assert.True(_runner.Start(Zhloe, limit: 1));
+        _runner.Tick();
+        Assert.Equal((4242, 1), _crafter.Asked.Single());
+    }
+
     [Fact]
     public void A_short_bag_goes_to_artisan_for_exactly_what_is_missing()
     {

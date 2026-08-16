@@ -169,18 +169,19 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var scrips = new Services.Deliveries.ScripLedger(DataManager, new Services.Deliveries.InventoryCurrencyReader(),
             _deliveries, deliveryState, deliveryRewards, deliveryBonus, message => Log.Warning(message));
         var artisan = new ArtisanIpc(PluginInterface, message => Log.Warning(message));
+        var deliveryRequests = new Services.Deliveries.DeliveryRequests(DataManager, message => Log.Warning(message));
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(
             _world,
             new Services.Deliveries.GameDeliveryWorld(message => Log.Warning(message)),
             deliveryState,
-            new Services.Deliveries.DeliveryRequests(DataManager, message => Log.Warning(message)),
+            deliveryRequests,
             scrips,
             artisan,
             new Services.Deliveries.RecipeLookup(DataManager, message => Log.Warning(message)),
             new StepExecutor(_world, dialogue),
             message => Log.Information(message));
         _deliveriesWindow = new DeliveriesWindow(_deliveries, deliveryState, deliveryBonus, scrips,
-            artisan, unlockPlanner, _deliveryRunner);
+            artisan, unlockPlanner, _deliveryRunner, deliveryRequests);
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
