@@ -37,8 +37,25 @@ public sealed class DebugWindow : OdysseusWindow
     public override void Draw()
     {
         DrawOracleLine();
+        OdysseusTheme.SectionHeader("STORY FRONTIER");
+        DrawFrontier();
         OdysseusTheme.SectionHeader("QUEST STATE (LIVE, FROM QUESTMANAGER)");
         DrawQuestTable();
+    }
+
+    private void DrawFrontier()
+    {
+        var agent = _quests.CurrentScenarioQuest();
+        var facts = _quests.Character();
+        ImGui.TextColored(OdysseusTheme.TextSecondary, "Scenario Guide pointer: ");
+        ImGui.SameLine(0f, 0f);
+        ImGui.TextColored(OdysseusTheme.TextPrimary, agent is { } a ? $"{a} ({_catalog.NameOf(a)}){(_quests.IsComplete(a) ? " — complete" : "")}" : "none");
+        var chain = _catalog.CurrentMainScenario(_quests.IsComplete, facts);
+        ImGui.TextColored(OdysseusTheme.TextSecondary, "Chain walk: ");
+        ImGui.SameLine(0f, 0f);
+        ImGui.TextColored(OdysseusTheme.TextPrimary, chain is { } c ? $"{c.QuestId} ({c.Name}, Lv {c.ClassJobLevel})" : "none — finished or nothing unlocked");
+        ImGui.TextColored(OdysseusTheme.TextDisabled,
+            $"character: start town {facts.StartTown} · first class {facts.FirstClass} · grand company {facts.GrandCompany}");
     }
 
     private void DrawOracleLine()

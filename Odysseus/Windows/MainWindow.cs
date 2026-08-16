@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
+using Dalamud.Interface;
 using Dalamud.Interface.Windowing;
 using Odysseus.Config;
 using Odysseus.Services.Fleet;
@@ -113,19 +114,17 @@ public sealed class MainWindow : OdysseusWindow
         }
 
         var right = ImGui.GetWindowContentRegionMax().X;
-        var compactW = 22f;
-        var gearW = 22f;
-        ImGui.SameLine(right - compactW - gearW - 6f);
-        if (ImGui.SmallButton(Cfg.CompactMode ? "▢##compact" : "▣##compact"))
+        var w = 26f;
+        ImGui.SameLine(right - w * 2 - 6f);
+        if (OdysseusTheme.IconButton("compact", Cfg.CompactMode ? FontAwesomeIcon.Expand : FontAwesomeIcon.Compress,
+                Cfg.CompactMode ? "Full view" : "Compact view", new Vector2(w, 22)))
         {
             Cfg.CompactMode = !Cfg.CompactMode;
             _d.SaveConfig();
         }
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip(Cfg.CompactMode ? "Full view" : "Compact view");
         ImGui.SameLine(0f, 4f);
-        if (ImGui.SmallButton("⚙##settings"))
+        if (OdysseusTheme.IconButton("settings", FontAwesomeIcon.Cog, "Settings", new Vector2(w, 22)))
             _d.OpenConfig();
-        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Settings");
     }
 
     private void DrawNotice()
@@ -167,9 +166,8 @@ public sealed class MainWindow : OdysseusWindow
 
         if (questId == 0)
         {
-            ImGui.TextColored(OdysseusTheme.TextDisabled, accepted.Count == 0
-                ? "No Main Scenario quest available — story finished, or nothing unlocked."
-                : "No Main Scenario quest accepted and none offered.");
+            ImGui.TextColored(OdysseusTheme.TextDisabled, "No Main Scenario quest to run — the story is finished, or nothing is unlocked.");
+            ImGui.TextColored(OdysseusTheme.TextDisabled, "Debug shows what the Scenario Guide and the chain say.");
             return;
         }
 
@@ -227,7 +225,7 @@ public sealed class MainWindow : OdysseusWindow
             ImGui.TextColored(Ctl.State == RunState.Faulted ? OdysseusTheme.StatusRed : OdysseusTheme.TextSecondary, Ctl.StatusLine);
         if (Ctl.WakeNote.Length > 0)
         {
-            ImGui.TextColored(OdysseusTheme.WakeFoam, "↺ " + Ctl.WakeNote);
+            ImGui.TextColored(OdysseusTheme.WakeFoam, "Wake: " + Ctl.WakeNote);
             if (Ctl.AwaitingResumeConfirm)
             {
                 if (OdysseusTheme.SolidButton("Resume from there", OdysseusTheme.WakeDim, new Vector2(140, 22)))
@@ -238,7 +236,7 @@ public sealed class MainWindow : OdysseusWindow
             }
         }
         if (Ctl.StopAfterQuest && Running)
-            ImGui.TextColored(OdysseusTheme.StatusYellow, "⚑ Stopping after this quest");
+            ImGui.TextColored(OdysseusTheme.StatusYellow, "Stopping after this quest");
     }
 
     // ── controls ──
@@ -246,85 +244,87 @@ public sealed class MainWindow : OdysseusWindow
     private void DrawPrimaryControls()
     {
         ImGui.Spacing();
-        var h = new Vector2(0, 26);
-        var square = new Vector2(30, 26);
+        var neutral = OdysseusTheme.NeutralDark;
+        var sq = new Vector2(30, 26);
 
         if (Running)
         {
-            if (OdysseusTheme.StopButton("■##stop", square)) Ctl.Stop();
-            Tip("Stop. Nothing is lost — Start resumes from the game's own quest state.");
+            if (OdysseusTheme.IconButton("stop", FontAwesomeIcon.Stop, "Stop. Nothing is lost — Start resumes from the game's own quest state.", sq)) Ctl.Stop();
             ImGui.SameLine();
             var pausing = Ctl.PauseAfterStep;
-            if (OdysseusTheme.ArmedButton(pausing ? "Step ▶| armed##step" : "Step ▶|##step", pausing, h)) Ctl.PauseAfterStep = !pausing;
-            Tip("Finish the current step, then stop.");
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.StepForward, pausing ? "Step armed" : "Step",
+                    pausing ? OdysseusTheme.YellowDark : neutral, "Finish the current step, then stop.", darkText: pausing))
+                Ctl.PauseAfterStep = !pausing;
             ImGui.SameLine();
             var armed = Ctl.StopAfterQuest;
-            if (OdysseusTheme.ArmedButton("⚑ Stop after##armq", armed, h)) Ctl.StopAfterQuest = !armed;
-            Tip(armed ? "Armed — hands in this quest, then stops. Click to keep going." : "Hand in this quest, then stop before the next.");
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Flag, "Stop after", armed ? OdysseusTheme.YellowDark : neutral,
+                    armed ? "Armed — hands in this quest, then stops. Click to keep going." : "Hand in this quest, then stop before the next.", darkText: armed))
+                Ctl.StopAfterQuest = !armed;
             ImGui.SameLine();
-            if (ImGui.Button("Stuck?##retry", h)) Ctl.RetryStep();
-            Tip("Run the current step again from the top.");
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Redo, "Stuck?", neutral, "Run the current step again from the top."))
+                Ctl.RetryStep();
         }
         else if (Ctl.State == RunState.Faulted)
         {
             using (ImRaii.Disabled(!CanStart))
             {
-                if (OdysseusTheme.StartButton("▶ Retry##retry", new Vector2(90, 26))) Ctl.Start(_selectedQuest);
+                if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Play, "Retry", OdysseusTheme.GreenDark, "Re-reads the quest state and picks up from there."))
+                    Ctl.Start(_selectedQuest);
             }
-            Tip("Re-reads the quest state and picks up from there.");
             ImGui.SameLine();
-            if (ImGui.Button("Stuck?##retrystep", h)) Ctl.RetryStep();
-            Tip("Run the failed step again.");
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Redo, "Stuck?", neutral, "Run the failed step again.")) Ctl.RetryStep();
             ImGui.SameLine();
-            if (ImGui.Button("⏭ Skip##skipf", h)) Ctl.SkipStep();
-            Tip("Skip the failed step and continue.");
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.FastForward, "Skip", neutral, "Skip the failed step and continue.")) Ctl.SkipStep();
             ImGui.SameLine();
-            if (OdysseusTheme.SolidButton("Clear##clear", OdysseusTheme.RedDark, h)) Ctl.Stop();
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Times, "Clear", OdysseusTheme.RedDark, "Clear the fault and go idle.")) Ctl.Stop();
         }
         else
         {
             using (ImRaii.Disabled(!CanStart))
             {
-                if (OdysseusTheme.StartButton("▶ Start##start", new Vector2(90, 26))) Ctl.Start(_selectedQuest);
+                if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Play, "Start", OdysseusTheme.GreenDark, StartTooltip()))
+                    Ctl.Start(_selectedQuest);
             }
-            if (!CanStart && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-                ImGui.SetTooltip(!Cfg.Enabled ? "Enable Odysseus in Settings." : !_d.Presence.CoreReady ? _d.Presence.MissingSummary()
-                    : _selectedQuest == 0 ? "No Main Scenario quest to start." : "No stored path for this quest — import in Settings › Paths.");
             ImGui.SameLine();
             using (ImRaii.Disabled(!CanStart))
             {
                 // Start resets the flag, so arm it after.
-                if (ImGui.Button("Step ▶|##stepidle", h) && Ctl.Start(_selectedQuest)) Ctl.PauseAfterStep = true;
+                if (OdysseusTheme.IconTextButton(FontAwesomeIcon.StepForward, "Step", neutral, "Run exactly one step, then stop.") && Ctl.Start(_selectedQuest))
+                    Ctl.PauseAfterStep = true;
             }
-            Tip("Run exactly one step, then stop.");
         }
     }
 
+    private string StartTooltip()
+        => CanStart ? "Start the quest. Picks up wherever the game says it is."
+            : !Cfg.Enabled ? "Enable Odysseus in Settings."
+            : !_d.Presence.CoreReady ? _d.Presence.MissingSummary()
+            : _selectedQuest == 0 ? "No Main Scenario quest to start."
+            : "No stored path for this quest — import in Settings › Paths.";
+
     private void DrawSecondaryControls()
     {
-        var h = new Vector2(0, 24);
+        var neutral = OdysseusTheme.NeutralDark;
+        var sq = new Vector2(30, 24);
         using (ImRaii.Disabled(!Running))
         {
-            if (ImGui.Button("⏭ Skip##skip", h)) Ctl.SkipStep();
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.FastForward, "Skip", neutral, "Skip the current step and move on.")) Ctl.SkipStep();
         }
-        Tip("Skip the current step and move on.");
         ImGui.SameLine();
         using (ImRaii.Disabled(_selectedQuest == 0 || !_d.Paths.Has(_selectedQuest)))
         {
-            if (ImGui.Button("✎##edit", new Vector2(28, 24))) _d.OpenEditor(_selectedQuest);
+            if (OdysseusTheme.IconButton("edit", FontAwesomeIcon.Edit, "Edit this quest's path.", sq)) _d.OpenEditor(_selectedQuest);
         }
-        Tip("Edit this quest's path.");
         ImGui.SameLine();
         using (ImRaii.Disabled(!Running || Ctl.CurrentStep?.Position is null))
         {
-            if (ImGui.Button("⌖##locate", new Vector2(28, 24)) && Ctl.CurrentStep is { Position: { } p })
+            if (OdysseusTheme.IconButton("locate", FontAwesomeIcon.MapMarkerAlt, "Walk to the current step's position on its own.", sq) && Ctl.CurrentStep is { Position: { } p })
                 _d.Controller.StepOnce(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", Position = p, TerritoryId = _d.Territory(), Comment = "walk to current step" });
         }
-        Tip("Walk to the current step's position on its own.");
         ImGui.SameLine();
-        if (ImGui.Button("☰ Log##log", h)) _d.OpenLog();
+        if (OdysseusTheme.IconTextButton(FontAwesomeIcon.List, "Log", neutral, "Step log.")) _d.OpenLog();
         ImGui.SameLine();
-        if (ImGui.Button("Fleet##fleet", h)) _d.OpenFleet();
+        if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Users, "Fleet", neutral, "Fleet dashboard.")) _d.OpenFleet();
     }
 
     // ── sections ──
@@ -420,11 +420,11 @@ public sealed class MainWindow : OdysseusWindow
         var i = 0;
         foreach (var s in remaining.Take(12))
         {
-            ImGui.TextColored(i == 0 ? OdysseusTheme.TextPrimary : OdysseusTheme.TextDisabled, $"{(i == 0 ? "▸" : "·")} {s}");
+            ImGui.TextColored(i == 0 ? OdysseusTheme.TextPrimary : OdysseusTheme.TextDisabled, $"{(i == 0 ? ">" : "-")} {s}");
             i++;
         }
         if (remaining.Count > 12)
-            ImGui.TextColored(OdysseusTheme.TextDisabled, $"… {remaining.Count - 12} more");
+            ImGui.TextColored(OdysseusTheme.TextDisabled, $"... {remaining.Count - 12} more");
     }
 
     // ── helpers ──

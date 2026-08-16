@@ -289,6 +289,36 @@ internal static class OdysseusTheme
     public static bool AccentButton(string label, float height = 30f)
         => SolidButton(label, AccentDim, new Vector2(-1f, height));
 
+    // ── icon buttons (FontAwesome via Dalamud — the game font has no ▶ ■ ⏭ ✎ ⚙; those render as tofu) ──
+
+    /// <summary>Icon-only button in the palette's neutral colour, with an id suffix for uniqueness.</summary>
+    public static bool IconButton(string id, Dalamud.Interface.FontAwesomeIcon icon, string tooltip, Vector2? size = null)
+    {
+        var clicked = Dalamud.Interface.Components.ImGuiComponents.IconButton(id, icon, NeutralDark,
+            Scale(NeutralDark, Mode == ThemeMode.Day ? 0.88f : 1.35f), Scale(NeutralDark, Mode == ThemeMode.Day ? 0.94f : 1.2f), size);
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(tooltip);
+        return clicked;
+    }
+
+    /// <summary>Icon + text button in a solid colour (green go, red stop, yellow armed, neutral).</summary>
+    public static bool IconTextButton(Dalamud.Interface.FontAwesomeIcon icon, string text, Vector4 baseColor, string tooltip, Vector2? size = null, bool darkText = false)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, darkText ? C(0x2B2200) : baseColor == NeutralDark ? TextPrimary : _p.ButtonText);
+        bool clicked;
+        try
+        {
+            clicked = Dalamud.Interface.Components.ImGuiComponents.IconButtonWithText(icon, text, baseColor, Scale(baseColor, 0.85f), Scale(baseColor, 1.15f), size);
+        }
+        finally
+        {
+            ImGui.PopStyleColor();
+        }
+        if (tooltip.Length > 0 && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            ImGui.SetTooltip(tooltip);
+        return clicked;
+    }
+
     /// <summary>Hover "(?)" tooltip for a non-obvious control.</summary>
     public static void HelpMarker(string text)
     {
