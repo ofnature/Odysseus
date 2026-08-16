@@ -38,6 +38,12 @@ public interface IStepWorld
     /// <summary>Paths to within a tolerance of a point, for standing next to something.</summary>
     bool MoveCloseTo(Vector3 destination, float tolerance, bool fly);
 
+    /// <summary>
+    /// Walks straight at a point with no pathfinding — for steps marked <c>DisableNavmesh</c>,
+    /// where the path author found the mesh gets it wrong.
+    /// </summary>
+    bool MoveDirectTo(Vector3 destination, bool fly);
+
     void StopMoving();
 
     /// <summary>Mounted right now.</summary>

@@ -76,6 +76,16 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     // ── Navigation ──
 
+    // ── Pathing ──
+    //
+    // Everything that knows the pathing plugin is vnavmesh lives here and in VnavIpc; the engine
+    // only ever sees IStepWorld. Ariadne replaces vnavmesh by adding its own IPC wrapper and
+    // repointing these seven members — nothing in StepExecutor, QuestController or the runners
+    // needs to change. The two that would need thought are IsMoving (we report "busy", which folds
+    // pathfinding and following together) and PathWaypointCount, which the executor reads as
+    // "zero after a pathfind means unreachable" — a different pathfinder may signal that
+    // differently.
+
     public bool NavmeshReady => _vnav.IsReady;
 
     public bool IsMoving => _vnav.IsBusy;
@@ -85,6 +95,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
     public bool MoveTo(Vector3 destination, bool fly) => _vnav.MoveTo(destination, fly);
 
     public bool MoveCloseTo(Vector3 destination, float tolerance, bool fly) => _vnav.MoveCloseTo(destination, tolerance, fly);
+
+    public bool MoveDirectTo(Vector3 destination, bool fly) => _vnav.MoveDirect(destination, fly);
 
     public void StopMoving() => _vnav.Stop();
 

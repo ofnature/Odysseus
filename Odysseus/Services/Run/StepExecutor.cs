@@ -590,7 +590,11 @@ public sealed class StepExecutor
             return;
         }
 
-        if (!_world.NavmeshReady)
+        // A step that disables the mesh must not wait on it, and must not be judged by it: the
+        // waypoint count below belongs to a pathfind that never happens on this route.
+        var direct = step.DisableNavmesh;
+
+        if (!direct && !_world.NavmeshReady)
         {
             if (now - _phaseStart > MoveStall)
                 Fail("navmesh not ready");
@@ -607,7 +611,7 @@ public sealed class StepExecutor
         if (_lastMoveIssue != default && now - _lastMoveIssue < TimeSpan.FromSeconds(1))
             return; // give the pathfinder a beat before judging it
 
-        if (_lastMoveIssue != default && _world.PathWaypointCount == 0)
+        if (!direct && _lastMoveIssue != default && _world.PathWaypointCount == 0)
         {
             Fail($"no path to {Fmt(target)}");
             return;
@@ -620,13 +624,15 @@ public sealed class StepExecutor
         }
 
         var fly = step.Fly && _world.CanFlyHere;
-        var ok = tolerance > WalkToStopDistance
-            ? _world.MoveCloseTo(target, tolerance, fly)
-            : _world.MoveTo(target, fly);
+        var ok = direct
+            ? _world.MoveDirectTo(target, fly)
+            : tolerance > WalkToStopDistance
+                ? _world.MoveCloseTo(target, tolerance, fly)
+                : _world.MoveTo(target, fly);
         _lastMoveIssue = now;
         _moveRetries++;
         if (!ok)
-            _world.Log($"move to {Fmt(target)} refused (attempt {_moveRetries})");
+            _world.Log($"move{(direct ? " direct" : "")} to {Fmt(target)} refused (attempt {_moveRetries})");
     }
 
     private void TickInteract(QuestStep step, DateTime now)

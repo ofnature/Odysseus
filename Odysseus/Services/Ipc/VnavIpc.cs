@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
@@ -19,6 +20,7 @@ public sealed class VnavIpc
     private ICallGateSubscriber<bool>? _pathfindInProgress;
     private ICallGateSubscriber<Vector3, bool, bool>? _moveTo;
     private ICallGateSubscriber<Vector3, bool, float, bool>? _moveCloseTo;
+    private ICallGateSubscriber<List<Vector3>, bool, object>? _pathMoveTo;
     private ICallGateSubscriber<int>? _numWaypoints;
     private ICallGateSubscriber<object>? _stop;
     private ICallGateSubscriber<float, object>? _setTolerance;
@@ -83,6 +85,23 @@ public sealed class VnavIpc
     public bool MoveTo(Vector3 destination, bool fly = false) => Try(() =>
         (_moveTo ??= _pluginInterface.GetIpcSubscriber<Vector3, bool, bool>("vnavmesh.SimpleMove.PathfindAndMoveTo"))
         .InvokeFunc(destination, fly));
+
+    /// <summary>
+    /// Walks straight at a point, with no pathfinding at all.
+    ///
+    /// <para>
+    /// <c>Path.MoveTo</c> takes a literal waypoint list and follows it; only <c>SimpleMove.*</c>
+    /// consults the mesh. That is what a step marked <c>DisableNavmesh</c> needs — those are the
+    /// places the path authors found the mesh gets it wrong, so asking it again is the one thing
+    /// that cannot work.
+    /// </para>
+    /// </summary>
+    public bool MoveDirect(Vector3 destination, bool fly = false) => Try(() =>
+    {
+        (_pathMoveTo ??= _pluginInterface.GetIpcSubscriber<List<Vector3>, bool, object>("vnavmesh.Path.MoveTo"))
+            .InvokeAction([destination], fly);
+        return true;
+    });
 
     /// <summary>Paths to within <paramref name="tolerance"/> of a point — for standing next to things.</summary>
     public bool MoveCloseTo(Vector3 destination, float tolerance, bool fly = false) => Try(() =>

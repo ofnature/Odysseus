@@ -23,6 +23,36 @@ public class StepExecutorTests
         return ex.Status;
     }
 
+    /// <summary>
+    /// DisableNavmesh marks the places the path author found the mesh gets wrong, so the step must
+    /// walk straight there — and must not be gated on, or judged by, a pathfind that never runs.
+    /// </summary>
+    [Fact]
+    public void DisableNavmesh_walks_straight_and_ignores_the_mesh()
+    {
+        var world = new FakeStepWorld { ArriveOnMove = true, NavmeshReady = false, PathWaypointCount = 0 };
+        var ex = new StepExecutor(world);
+        var step = Step(StepKind.WalkTo, new Vector3(10, 0, 10));
+        step.DisableNavmesh = true;
+        ex.Begin(step);
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Contains(world.Calls, c => c.StartsWith("MoveDirect 10,0,10"));
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Move 10,0,10"));
+    }
+
+    [Fact]
+    public void An_ordinary_step_still_waits_for_the_mesh()
+    {
+        var world = new FakeStepWorld { ArriveOnMove = true, NavmeshReady = false };
+        var ex = new StepExecutor(world);
+        ex.Begin(Step(StepKind.WalkTo, new Vector3(10, 0, 10)));
+
+        Assert.Equal(StepStatus.Failed, Run(ex, world));
+        Assert.Contains("navmesh not ready", ex.FailReason);
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Move"));
+    }
+
     [Fact]
     public void WalkTo_moves_and_is_done_on_arrival()
     {

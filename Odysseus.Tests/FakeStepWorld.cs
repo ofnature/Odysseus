@@ -44,10 +44,11 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
 
     public bool MoveTo(Vector3 destination, bool fly) => Move(destination, fly);
     public bool MoveCloseTo(Vector3 destination, float tolerance, bool fly) => Move(destination, fly);
+    public bool MoveDirectTo(Vector3 destination, bool fly) => Move(destination, fly, direct: true);
 
-    private bool Move(Vector3 destination, bool fly)
+    private bool Move(Vector3 destination, bool fly, bool direct = false)
     {
-        Calls.Add($"Move {destination.X:F0},{destination.Y:F0},{destination.Z:F0} fly={fly}");
+        Calls.Add($"Move{(direct ? "Direct" : "")} {destination.X:F0},{destination.Y:F0},{destination.Z:F0} fly={fly}");
         LastMoveTarget = destination;
         if (!MoveAccepted) return false;
         IsMoving = true;
