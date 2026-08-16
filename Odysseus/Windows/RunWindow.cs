@@ -28,6 +28,7 @@ public sealed class RunWindow : Window
     private readonly QuestController _controller;
     private readonly Action _openConfig;
     private readonly Action _openFleet;
+    private readonly Action _openLog;
     private readonly Action<ushort> _openEditor;
     private readonly Func<uint?> _targetDataId;
     private readonly Func<Vector3?> _targetPosition;
@@ -50,6 +51,7 @@ public sealed class RunWindow : Window
         QuestController controller,
         Action openConfig,
         Action openFleet,
+        Action openLog,
         Action<ushort> openEditor,
         Func<uint?> targetDataId,
         Func<Vector3?> targetPosition,
@@ -66,6 +68,7 @@ public sealed class RunWindow : Window
         _controller = controller;
         _openConfig = openConfig;
         _openFleet = openFleet;
+        _openLog = openLog;
         _openEditor = openEditor;
         _targetDataId = targetDataId;
         _targetPosition = targetPosition;
@@ -136,8 +139,9 @@ public sealed class RunWindow : Window
         const float buttonWidth = 64f;
         const float gap = 6f;
         var fleetWidth = ImGui.CalcTextSize("Fleet").X + style.FramePadding.X * 2f + 8f;
+        var logWidth = ImGui.CalcTextSize("Log").X + style.FramePadding.X * 2f + 8f;
         var settingsWidth = ImGui.CalcTextSize("Settings").X + style.FramePadding.X * 2f + 8f;
-        var total = buttonWidth + fleetWidth + settingsWidth + gap * 2f;
+        var total = buttonWidth + fleetWidth + logWidth + settingsWidth + gap * 3f;
         var anchor = ImGui.GetWindowContentRegionMax().X - total;
         if (anchor > ImGui.GetCursorPosX() + 8f)
             ImGui.SameLine(anchor);
@@ -160,6 +164,9 @@ public sealed class RunWindow : Window
         ImGui.SameLine(0f, gap);
         if (ImGui.Button("Fleet", new Vector2(fleetWidth, 22)))
             _openFleet();
+        ImGui.SameLine(0f, gap);
+        if (ImGui.Button("Log", new Vector2(logWidth, 22)))
+            _openLog();
         ImGui.SameLine(0f, gap);
         if (ImGui.Button("Settings", new Vector2(settingsWidth, 22)))
             _openConfig();
@@ -247,6 +254,14 @@ public sealed class RunWindow : Window
         {
             OdysseusTheme.SectionHeader("THE WAKE", OdysseusTheme.WakeFoam);
             ImGui.TextColored(OdysseusTheme.WakeFoam, _controller.WakeNote);
+            if (_controller.AwaitingResumeConfirm)
+            {
+                if (OdysseusTheme.SolidButton("Resume from there", OdysseusTheme.WakeDim, new Vector2(150, 24)))
+                    _controller.ConfirmResume();
+                ImGui.SameLine();
+                if (ImGui.Button("Cancel", new Vector2(80, 24)))
+                    _controller.Stop();
+            }
         }
     }
 

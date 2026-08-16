@@ -42,6 +42,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly PathStore _pathStore;
     private readonly GameStepWorld _world;
     private readonly QuestController _controller;
+    private readonly RunLog _runLog;
     private readonly FleetPublisher _fleet;
     private readonly OdysseusIpc _ipc;
     private readonly ConfigWindow _configWindow;
@@ -49,6 +50,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly DebugWindow _debugWindow;
     private readonly FleetWindow _fleetWindow;
     private readonly PathEditorWindow _pathEditorWindow;
+    private readonly LogWindow _logWindow;
     private readonly PathRecorder _recorder = new();
     private readonly RecorderFeed _recorderFeed;
 
@@ -84,9 +86,12 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             _quests, message => Log.Information(message));
         _recorderFeed = new RecorderFeed(_world, _quests, aetherytes, duties);
         var dialogue = new DialogueCatalog(DataManager, message => Log.Warning(message));
+        _runLog = new RunLog(
+            System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "runlog.jsonl"),
+            message => Log.Warning(message));
         _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world, dialogue), _world, _world, _config,
             completed => _catalog.NextMainScenario(completed, _quests.IsComplete),
-            message => Log.Information(message));
+            _runLog, message => Log.Information(message));
 
         // Published once the controller exists, so the gate never reports on a half-built run.
         _ipc = new OdysseusIpc(PluginInterface, () => _config.Enabled && _controller.State.IsDriving());
@@ -103,8 +108,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ClientState.TerritoryType,
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
             () => TargetManager.Target?.BaseId);
+        _logWindow = new LogWindow(_runLog);
         _runWindow = new RunWindow(_config, _presence, _quests, _catalog, _pathStore, _controller, OpenConfig,
-            () => _fleetWindow!.IsOpen = true, questId => _pathEditorWindow!.Open(questId),
+            () => _fleetWindow!.IsOpen = true, () => _logWindow.IsOpen = true, questId => _pathEditorWindow!.Open(questId),
             () => TargetManager.Target?.BaseId,
             () => TargetManager.Target?.Position,
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
@@ -117,6 +123,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _windowSystem.AddWindow(_debugWindow);
         _windowSystem.AddWindow(_fleetWindow);
         _windowSystem.AddWindow(_pathEditorWindow);
+        _windowSystem.AddWindow(_logWindow);
 
         PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += OpenConfig;
@@ -125,7 +132,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         CommandManager.AddHandler(CommandMain, new CommandInfo(OnCommand)
         {
-            HelpMessage = "Open Odysseus. \"/odysseus config\" settings, \"/odysseus fleet\" dashboard, \"/odysseus paths\" step editor, \"/odysseus debug\" quest-state dump, \"/odysseus stop\" stops the run.",
+            HelpMessage = "Open Odysseus. \"/odysseus config\" settings, \"/odysseus fleet\" dashboard, \"/odysseus log\" step log, \"/odysseus paths\" step editor, \"/odysseus debug\" quest-state dump, \"/odysseus stop\" stops the run.",
         });
         CommandManager.AddHandler(CommandShort, new CommandInfo(OnCommand)
         {
@@ -216,6 +223,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 break;
             case "fleet":
                 _fleetWindow.IsOpen = true;
+                break;
+            case "log":
+                _logWindow.IsOpen = true;
                 break;
             case "paths":
             case "edit":

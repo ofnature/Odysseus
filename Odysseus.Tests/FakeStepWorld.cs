@@ -97,6 +97,9 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public void SendChatCommand(string command) => Calls.Add($"Chat {command}");
     public bool UseItemAccepted { get; set; } = true;
     public bool UseItem(uint itemId) { Calls.Add($"UseItem {itemId}"); return UseItemAccepted; }
+    public bool RecommendedGearReady { get; set; } = true;
+    public bool PrepareRecommendedGear() { Calls.Add("PrepareGear"); return true; }
+    public void EquipRecommendedGear() => Calls.Add("EquipGear");
 
     public bool IsAddonVisible(string name) => VisibleAddons.Contains(name);
     public void SelectYesNo(bool yes) => Calls.Add($"YesNo {yes}");

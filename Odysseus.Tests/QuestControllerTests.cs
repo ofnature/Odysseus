@@ -35,16 +35,18 @@ public class QuestControllerTests : IDisposable
         public bool HandOffDuties { get; set; } = true;
         public bool ContinueToNextQuest { get; set; }
         public int StopAtLevel { get; set; }
+        public bool ConfirmBeforeResume { get; set; }
     }
 
     private readonly Policy _policy = new();
     private readonly Dictionary<ushort, ushort> _chain = new();
+    private readonly RunLog _runLog = new(null);
 
     public QuestControllerTests()
     {
         _store = new PathStore(_dir);
         _controller = new QuestController(_quests, _store, new StepExecutor(_world), _world, _world, _policy,
-            id => _chain.TryGetValue(id, out var n) ? n : null, _log.Add);
+            id => _chain.TryGetValue(id, out var n) ? n : null, _runLog, _log.Add);
     }
 
     public void Dispose()
@@ -308,6 +310,52 @@ public class QuestControllerTests : IDisposable
         Ticks(3);
         Assert.Equal(RunState.Idle, _controller.State);
         Assert.Contains("No next MSQ quest", _controller.StatusLine);
+    }
+
+    [Fact]
+    public void Confirm_before_resume_parks_a_mid_quest_start_until_answered()
+    {
+        _world.Spawned.Add(1);
+        StorePath(new QuestSequence { Sequence = 3, Steps = [Interact(1)] });
+        _quests.Set(1622, 3);
+        _policy.ConfirmBeforeResume = true;
+
+        _controller.Start(1622);
+        Assert.True(_controller.AwaitingResumeConfirm);
+        Assert.Equal(RunState.Reconcile, _controller.State);
+        Ticks(6);
+        Assert.DoesNotContain("Interact 1", _world.Calls); // parked
+
+        _controller.ConfirmResume();
+        Ticks(12);
+        Assert.Contains("Interact 1", _world.Calls);
+    }
+
+    [Fact]
+    public void Confirm_is_not_asked_for_a_fresh_quest()
+    {
+        _world.Spawned.Add(1);
+        StorePath(new QuestSequence { Sequence = 0, Steps = [Interact(1)] });
+        _policy.ConfirmBeforeResume = true;
+        _controller.Start(1622); // not accepted → sequence 0 → nothing to resume
+        Assert.False(_controller.AwaitingResumeConfirm);
+    }
+
+    [Fact]
+    public void Every_step_outcome_lands_in_the_log()
+    {
+        _world.Spawned.Add(1);
+        var skipped = Interact(2);
+        skipped.SkipConditions = new SkipConditions { StepIf = new StepCondition { InTerritory = [400] } };
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1), skipped, Interact(404)] });
+        _quests.Set(1622, 1);
+        _controller.Start(1622);
+        Ticks(120, seconds: 1);
+
+        var outcomes = _runLog.Recent.Reverse().Select(r => r.Outcome).ToList();
+        Assert.Equal(new[] { "Done", "Skipped", "Failed" }, outcomes);
+        Assert.Contains("404 never appeared", _runLog.Recent.First().Reason);
+        Assert.All(_runLog.Recent, r => Assert.Equal("Mogwin's Trial", r.QuestName));
     }
 
     [Fact]

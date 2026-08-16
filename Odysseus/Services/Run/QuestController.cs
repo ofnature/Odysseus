@@ -32,6 +32,8 @@ public interface IRunPolicy
     bool ContinueToNextQuest { get; }
     /// <summary>Stop rolling on once the character reaches this level; 0 = never.</summary>
     int StopAtLevel { get; }
+    /// <summary>Ask before picking a quest up mid-way rather than just doing it.</summary>
+    bool ConfirmBeforeResume { get; }
 }
 
 public sealed class QuestController
@@ -47,11 +49,14 @@ public sealed class QuestController
     private readonly IConditionWorld _conditions;
     private readonly IRunPolicy _policy;
     private readonly Func<ushort, ushort?> _nextQuest;
+    private readonly IStepLog _stepLog;
     private readonly Action<string> _log;
 
     private ushort _questId;
     private DateTime _runStarted;
     private int _questsThisRun;
+    private DateTime _stepStarted;
+    private bool _awaitingResumeConfirm;
     private QuestPath? _path;
     private int _currentSequence = -1;
     private QuestSequence? _block;
@@ -66,7 +71,7 @@ public sealed class QuestController
     public QuestController(
         IQuestStateReader quests, PathStore paths, StepExecutor executor,
         IStepWorld world, IConditionWorld conditions, IRunPolicy policy,
-        Func<ushort, ushort?> nextQuest, Action<string> log)
+        Func<ushort, ushort?> nextQuest, IStepLog stepLog, Action<string> log)
     {
         _quests = quests;
         _paths = paths;
@@ -75,7 +80,20 @@ public sealed class QuestController
         _conditions = conditions;
         _policy = policy;
         _nextQuest = nextQuest;
+        _stepLog = stepLog;
         _log = log;
+    }
+
+    /// <summary>The run is paused on the Wake's question: pick up mid-quest, or not.</summary>
+    public bool AwaitingResumeConfirm => _awaitingResumeConfirm;
+
+    /// <summary>Answer the Wake's question with yes.</summary>
+    public void ConfirmResume()
+    {
+        if (!_awaitingResumeConfirm) return;
+        _awaitingResumeConfirm = false;
+        StatusLine = "Resuming.";
+        _log("Resume confirmed.");
     }
 
     /// <summary>Armed: finish the current quest, then stop instead of rolling into the next.</summary>
@@ -148,12 +166,25 @@ public sealed class QuestController
         State = RunState.Select;
         StatusLine = $"Starting {path.Name}";
         _log($"Start quest {questId} ({path.Name}), {path.Sequences.Count} sequences / {path.StepCount} steps.");
+
+        // The Wake's question: this quest is already under way. Ask, if asked to.
+        var snap = _quests.Read(questId);
+        _awaitingResumeConfirm = _policy.ConfirmBeforeResume && snap.IsAvailable && snap.Sequence > 0;
+        if (_awaitingResumeConfirm)
+        {
+            State = RunState.Reconcile;
+            WakeNote = $"{path.Name} is at sequence {snap.Sequence} — the game says so. Resume from there?";
+            StatusLine = "Waiting for you: resume?";
+        }
         return true;
     }
 
     public void Stop()
     {
         _singleStep = null;
+        _awaitingResumeConfirm = false;
+        if (_executor.Status == StepStatus.Running && _executor.Current is { } running && _block is not null)
+            LogStep(running, "Cancelled", null);
         _executor.Cancel();
         _world.StopMoving();
         _world.ReleaseDialogue();
@@ -173,6 +204,8 @@ public sealed class QuestController
 
         try
         {
+            if (_awaitingResumeConfirm)
+                return; // parked on the Wake's question
             if (_singleStep is not null)
             {
                 TickSingleStep();
@@ -274,12 +307,16 @@ public sealed class QuestController
             if (StepConditions.ShouldSkipStep(step, _conditions, snap))
             {
                 _log($"Skip step {_stepIndex} ({step}) — condition holds.");
+                _stepStarted = _world.UtcNow;
+                LogStep(step, "Skipped", "condition holds");
                 _stepIndex++;
                 return;
             }
             if (!step.IsReplaySafe && _replays > 0)
             {
                 _log($"Not replaying step {_stepIndex} ({step}) — not replay-safe; skipping.");
+                _stepStarted = _world.UtcNow;
+                LogStep(step, "Skipped", "not replay-safe");
                 _stepIndex++;
                 return;
             }
@@ -294,6 +331,7 @@ public sealed class QuestController
                 return;
             }
             var skipTeleport = StepConditions.ShouldSkipAetheryte(step, _conditions, snap);
+            _stepStarted = _world.UtcNow;
             _executor.Begin(step, skipTeleport, _questId);
             _log($"Step {_stepIndex + 1}/{_block.Steps.Count} in seq {sequence}: {step}" +
                  (step.AetheryteShortcut is { } a ? $" via {a}{(skipTeleport ? " (skipped)" : "")}" : ""));
@@ -309,12 +347,39 @@ public sealed class QuestController
         switch (_executor.Tick())
         {
             case StepStatus.Done:
+                LogStep(step, "Done", null);
                 _stepIndex++;
                 _waitingSince = null;
                 break;
             case StepStatus.Failed:
+                LogStep(step, "Failed", _executor.FailReason);
                 Fault($"step {_stepIndex + 1} ({step}) failed: {_executor.FailReason}");
                 break;
+        }
+    }
+
+    private void LogStep(QuestStep step, string outcome, string? reason)
+    {
+        try
+        {
+            _stepLog.Record(new StepRecord
+            {
+                UtcStart = _stepStarted,
+                Seconds = Math.Max(0, (_world.UtcNow - _stepStarted).TotalSeconds),
+                QuestId = _questId,
+                QuestName = _path?.Name ?? string.Empty,
+                Sequence = _currentSequence,
+                StepIndex = _stepIndex,
+                Kind = step.KindName ?? step.Kind.ToString(),
+                DataId = step.DataId,
+                Outcome = outcome,
+                Reason = reason,
+                Phase = _executor.PhaseName,
+            });
+        }
+        catch
+        {
+            // Telemetry must never fault a run.
         }
     }
 

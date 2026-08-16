@@ -124,6 +124,14 @@ public interface IStepWorld
     /// <summary>Uses an inventory item by id, on the current target if it needs one.</summary>
     bool UseItem(uint itemId);
 
+    /// <summary>Ask the game to compute recommended gear for the current job. Async; poll <see cref="RecommendedGearReady"/>.</summary>
+    bool PrepareRecommendedGear();
+
+    bool RecommendedGearReady { get; }
+
+    /// <summary>Equip what was computed.</summary>
+    void EquipRecommendedGear();
+
     // ── UI ──
 
     bool IsAddonVisible(string name);

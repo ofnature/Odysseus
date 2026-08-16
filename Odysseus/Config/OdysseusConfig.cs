@@ -15,6 +15,7 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     bool Services.Run.IRunPolicy.HandOffDuties => HandOffDutiesToTheseus;
     bool Services.Run.IRunPolicy.ContinueToNextQuest => ContinueToNextQuest;
     int Services.Run.IRunPolicy.StopAtLevel => StopAtLevel;
+    bool Services.Run.IRunPolicy.ConfirmBeforeResume => EnableResume && ConfirmBeforeResume;
 
     /// <summary>Bumped when a migration is needed; migrations live in <c>OdysseusPlugin</c>.</summary>
     public int Version { get; set; } = 1;

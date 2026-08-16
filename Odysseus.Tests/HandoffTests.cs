@@ -213,6 +213,21 @@ public class HandoffTests
     }
 
     [Fact]
+    public void EquipRecommended_prepares_waits_and_equips()
+    {
+        var w = new FakeStepWorld { RecommendedGearReady = false };
+        var ex = new StepExecutor(w);
+        ex.Begin(Step(StepKind.EquipRecommended));
+        Ticks(ex, w, 3);
+        Assert.Contains("PrepareGear", w.Calls);
+        Assert.DoesNotContain("EquipGear", w.Calls);
+        w.RecommendedGearReady = true;
+        Ticks(ex, w, 5);
+        Assert.Contains("EquipGear", w.Calls);
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    [Fact]
     public void UseItem_with_a_missing_target_fails_naming_it()
     {
         var w = new FakeStepWorld();

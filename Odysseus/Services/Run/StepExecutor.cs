@@ -155,7 +155,8 @@ public sealed class StepExecutor
     public static bool IsSupported(StepKind kind) => kind is
         StepKind.WalkTo or StepKind.Interact or StepKind.AcceptQuest or StepKind.CompleteQuest or StepKind.Combat
         or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent or StepKind.None
-        or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem or StepKind.Say;
+        or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem or StepKind.Say
+        or StepKind.EquipRecommended;
 
     /// <summary>The step hands the character to another plugin for a whole instance.</summary>
     public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
@@ -289,6 +290,18 @@ public sealed class StepExecutor
                 break;
 
             case Phase.ActionSettle:
+                if (step.Kind == StepKind.EquipRecommended)
+                {
+                    // The module computes asynchronously; equip once it has, then let the swap settle.
+                    if (_world.RecommendedGearReady && now - _phaseStart > TimeSpan.FromSeconds(0.5))
+                    {
+                        _world.EquipRecommendedGear();
+                        Enter(Phase.Finish);
+                    }
+                    else if (now - _phaseStart > ReadyWait)
+                        Fail("recommended gear never finished computing");
+                    break;
+                }
                 if (step.Kind == StepKind.UseItem && _world.IsOccupied)
                 {
                     // An item that opens a dialogue behaves like an interact from here.
@@ -458,6 +471,14 @@ public sealed class StepExecutor
 
             case StepKind.Jump:
                 _world.SendChatCommand("/generalaction Jump");
+                return Phase.ActionSettle;
+
+            case StepKind.EquipRecommended:
+                if (!_world.PrepareRecommendedGear())
+                {
+                    Fail("recommended gear could not be computed");
+                    return Phase.None;
+                }
                 return Phase.ActionSettle;
 
             case StepKind.Say:

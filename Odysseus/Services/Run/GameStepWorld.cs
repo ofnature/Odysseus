@@ -289,6 +289,51 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         }
     }
 
+    public bool PrepareRecommendedGear()
+    {
+        try
+        {
+            var module = FFXIVClientStructs.FFXIV.Client.UI.Misc.RecommendEquipModule.Instance();
+            var job = _objectTable.LocalPlayer?.ClassJob.RowId ?? 0;
+            return module != null && job != 0 && module->SetupForClassJob((byte)job);
+        }
+        catch (Exception ex)
+        {
+            _log($"Recommended gear setup failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public bool RecommendedGearReady
+    {
+        get
+        {
+            try
+            {
+                var module = FFXIVClientStructs.FFXIV.Client.UI.Misc.RecommendEquipModule.Instance();
+                return module != null && !module->IsUpdating;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    public void EquipRecommendedGear()
+    {
+        try
+        {
+            var module = FFXIVClientStructs.FFXIV.Client.UI.Misc.RecommendEquipModule.Instance();
+            if (module != null)
+                module->EquipRecommendedGear();
+        }
+        catch (Exception ex)
+        {
+            _log($"Equip recommended failed: {ex.Message}");
+        }
+    }
+
     // ── UI ──
 
     public bool IsAddonVisible(string name)
