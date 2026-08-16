@@ -90,6 +90,17 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>A peer unheard from for this long is drawn as stale in the fleet window.</summary>
     public float PeerStaleSeconds { get; set; } = 10f;
 
+    // ── Look ──
+
+    /// <summary>Day (light blue) or Dusk (slate). Applied to every Odysseus window.</summary>
+    public Windows.ThemeMode Theme { get; set; } = Windows.ThemeMode.Day;
+
+    /// <summary>
+    /// Main window shows only the essentials — state, quest, step, progress, one control row — and
+    /// folds everything else away. For running in the corner of the screen.
+    /// </summary>
+    public bool CompactMode { get; set; }
+
     // ── Diagnostics ──
 
     /// <summary>Show the debug section and verbose step logging.</summary>

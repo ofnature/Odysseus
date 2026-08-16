@@ -25,7 +25,7 @@ internal enum ConfigSection
 /// left sidebar with dim small-cap group headers and an accent bar on the selected row, bordered
 /// content pane, footer status line — carrying the wine-dark accent.
 /// </summary>
-public sealed class ConfigWindow : Window
+public sealed class ConfigWindow : OdysseusWindow
 {
     private const float SidebarWidth = 150f;
 
@@ -406,6 +406,25 @@ public sealed class ConfigWindow : Window
 
     private void DrawDebugSection()
     {
+        OdysseusTheme.SectionHeader("LOOK");
+
+        var themeNames = new[] { "Day — light blue", "Dusk — slate" };
+        var theme = (int)_config.Theme;
+        ImGui.SetNextItemWidth(180f);
+        if (ImGui.Combo("Theme", ref theme, themeNames, themeNames.Length))
+        {
+            _config.Theme = (ThemeMode)theme;
+            _save();
+        }
+
+        var compact = _config.CompactMode;
+        if (ImGui.Checkbox("Compact main window", ref compact))
+        {
+            _config.CompactMode = compact;
+            _save();
+        }
+        OdysseusTheme.HelpMarker("State, quest, step, progress and one control row — nothing else. The ▣/▢ button on the main window toggles it too.");
+
         OdysseusTheme.SectionHeader("DEBUG");
 
         var debug = _config.DebugMode;

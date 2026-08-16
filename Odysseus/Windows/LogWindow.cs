@@ -11,7 +11,7 @@ namespace Odysseus.Windows;
 /// The step log: what ran, how long it took, and what failed — with the repeat offenders on top.
 /// This is how a run's problems become a list to work through in the editor.
 /// </summary>
-public sealed class LogWindow : Window
+public sealed class LogWindow : OdysseusWindow
 {
     private readonly RunLog _log;
     private bool _failuresOnly;

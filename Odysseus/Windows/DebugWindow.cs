@@ -16,7 +16,7 @@ namespace Odysseus.Windows;
 /// found here in seconds instead of mid-run.
 /// </para>
 /// </summary>
-public sealed class DebugWindow : Window
+public sealed class DebugWindow : OdysseusWindow
 {
     private readonly IQuestStateReader _quests;
     private readonly QuestCatalog _catalog;

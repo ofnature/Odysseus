@@ -12,7 +12,7 @@ namespace Odysseus.Windows;
 /// Read-only — there is nothing to click because there is nothing this window can make another
 /// box do.
 /// </summary>
-public sealed class FleetWindow : Window
+public sealed class FleetWindow : OdysseusWindow
 {
     private readonly OdysseusConfig _config;
     private readonly FleetPublisher _fleet;

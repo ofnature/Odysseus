@@ -393,6 +393,56 @@ public class QuestControllerTests : IDisposable
     }
 
     [Fact]
+    public void Skip_moves_past_the_current_step_and_logs_it()
+    {
+        _world.Spawned.UnionWith([2u]);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(404), Interact(2)] }); // 404 never spawns
+        _quests.Set(1622, 1);
+        _controller.Start(1622);
+        Ticks(3);
+        Assert.True(_controller.SkipStep());
+        Ticks(12);
+        Assert.Contains("Interact 2", _world.Calls);
+        Assert.Contains(_runLog.Recent, r => r.Outcome == "Skipped" && r.Reason == "skipped by user");
+    }
+
+    [Fact]
+    public void Skip_and_retry_clear_a_fault_on_that_step()
+    {
+        _world.Spawned.UnionWith([2u]);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(404), Interact(2)] });
+        _quests.Set(1622, 1);
+        _controller.Start(1622);
+        Ticks(100, seconds: 1);
+        Assert.Equal(RunState.Faulted, _controller.State);
+
+        Assert.True(_controller.RetryStep());
+        Assert.NotEqual(RunState.Faulted, _controller.State);
+        Ticks(100, seconds: 1);
+        Assert.Equal(RunState.Faulted, _controller.State); // still no 404 — faults again
+
+        Assert.True(_controller.SkipStep());
+        Ticks(12);
+        Assert.Contains("Interact 2", _world.Calls);
+    }
+
+    [Fact]
+    public void Pause_after_step_stops_once_the_current_step_is_done()
+    {
+        _world.Spawned.UnionWith([1u, 2u]);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1), Interact(2)] });
+        _quests.Set(1622, 1);
+        _controller.PauseAfterStep = true;
+        _controller.Start(1622);
+        _controller.PauseAfterStep = true; // Start clears it; the idle "Step" button sets it after Start
+        Ticks(12);
+        Assert.Contains("Interact 1", _world.Calls);
+        Assert.DoesNotContain("Interact 2", _world.Calls);
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.Contains("Paused after step 1", _controller.StatusLine);
+    }
+
+    [Fact]
     public void Step_once_runs_one_step_and_returns_to_idle_without_a_quest()
     {
         _world.Spawned.Add(77);

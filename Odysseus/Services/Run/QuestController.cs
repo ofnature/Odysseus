@@ -102,6 +102,51 @@ public sealed class QuestController
     /// <summary>Armed: finish the current quest, then stop instead of rolling into the next.</summary>
     public bool StopAfterQuest { get; set; }
 
+    /// <summary>Armed: finish the current step, then stop — the "Step" button.</summary>
+    public bool PauseAfterStep { get; set; }
+
+    /// <summary>The step the run is on, or null.</summary>
+    public QuestStep? CurrentStep => _block is not null && _stepIndex >= 0 && _stepIndex < _block.Steps.Count ? _block.Steps[_stepIndex] : null;
+
+    /// <summary>The steps still ahead in the current block (the current one first).</summary>
+    public IReadOnlyList<QuestStep> RemainingSteps
+        => _block is null || _stepIndex >= _block.Steps.Count ? Array.Empty<QuestStep>() : _block.Steps.GetRange(_stepIndex, _block.Steps.Count - _stepIndex);
+
+    /// <summary>Give up on the current step and move to the next — the "Skip" button. Logged as Skipped.</summary>
+    public bool SkipStep()
+    {
+        if (_block is null || _path is null || State is RunState.Idle or RunState.Faulted && _block is null)
+            return false;
+        if (_stepIndex >= _block.Steps.Count)
+            return false;
+        var step = _block.Steps[_stepIndex];
+        _executor.Cancel();
+        _activeStepIndex = -1;
+        LogStep(step, "Skipped", "skipped by user");
+        _log($"Skipped step {_stepIndex + 1} ({step}) by request.");
+        _stepIndex++;
+        _waitingSince = null;
+        if (State == RunState.Faulted)
+            State = RunState.Step; // a skip is also how you get out of a fault
+        StatusLine = $"Skipped step {_stepIndex}.";
+        return true;
+    }
+
+    /// <summary>Run the current step again from the top — the "Stuck?" button. Also clears a fault on that step.</summary>
+    public bool RetryStep()
+    {
+        if (_block is null || _path is null || _stepIndex >= _block.Steps.Count)
+            return false;
+        _executor.Cancel();
+        _activeStepIndex = -1;
+        _waitingSince = null;
+        if (State == RunState.Faulted)
+            State = RunState.Step;
+        StatusLine = $"Retrying step {_stepIndex + 1}.";
+        _log(StatusLine);
+        return true;
+    }
+
     /// <summary>How long the current run has been going; zero when idle.</summary>
     public TimeSpan Elapsed => State is RunState.Idle or RunState.Faulted ? TimeSpan.Zero : _world.UtcNow - _runStarted;
 
@@ -198,6 +243,7 @@ public sealed class QuestController
     {
         _singleStep = null;
         _awaitingResumeConfirm = false;
+        PauseAfterStep = false;
         if (_executor.Status == StepStatus.Running && _executor.Current is { } running && _block is not null)
             LogStep(running, "Cancelled", null);
         _executor.Cancel();
@@ -365,6 +411,15 @@ public sealed class QuestController
                 LogStep(step, "Done", null);
                 _stepIndex++;
                 _waitingSince = null;
+                if (PauseAfterStep)
+                {
+                    PauseAfterStep = false;
+                    _executor.Cancel();
+                    _activeStepIndex = -1;
+                    var line = $"Paused after step {_stepIndex} of sequence {sequence}. Start resumes from the game's state.";
+                    Stop();
+                    StatusLine = line;
+                }
                 break;
             case StepStatus.Failed:
                 LogStep(step, "Failed", _executor.FailReason);

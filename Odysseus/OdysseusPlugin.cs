@@ -47,7 +47,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly FleetPublisher _fleet;
     private readonly OdysseusIpc _ipc;
     private readonly ConfigWindow _configWindow;
-    private readonly RunWindow _runWindow;
+    private readonly MainWindow _mainWindow;
     private readonly DebugWindow _debugWindow;
     private readonly FleetWindow _fleetWindow;
     private readonly PathEditorWindow _pathEditorWindow;
@@ -62,6 +62,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         pluginInterface.Create<Service>();
 
         _config = PluginInterface.GetPluginConfig() as OdysseusConfig ?? new OdysseusConfig();
+        OdysseusTheme.SetMode(_config.Theme);
         _presence = new PluginPresence(PluginInterface);
         _quests = new QuestStateReader(fault => Log.Warning($"Quest state read failed. {fault}"));
         _catalog = new QuestCatalog(DataManager, message => Log.Warning(message));
@@ -112,17 +113,23 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
             () => TargetManager.Target?.BaseId);
         _logWindow = new LogWindow(_runLog);
-        _runWindow = new RunWindow(_config, _presence, _quests, _catalog, _pathStore, _controller, _frontier, OpenConfig,
-            () => _fleetWindow!.IsOpen = true, () => _logWindow.IsOpen = true, questId => _pathEditorWindow!.Open(questId),
+        _debugWindow = new DebugWindow(_quests, _catalog, _oracle, _presence);
+        _fleetWindow = new FleetWindow(_config, _fleet);
+        _mainWindow = new MainWindow(new MainWindowDeps(
+            _config, SaveConfig, _presence, _quests, _catalog, _pathStore, _controller, _frontier, _fleet,
+            OpenConfig,
+            () => _fleetWindow.IsOpen = true,
+            () => _logWindow.IsOpen = true,
+            () => _debugWindow.IsOpen = true,
+            questId => _pathEditorWindow.Open(questId),
             () => TargetManager.Target?.BaseId,
             () => TargetManager.Target?.Position,
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
-            () => ClientState.TerritoryType);
-        _debugWindow = new DebugWindow(_quests, _catalog, _oracle, _presence);
-        _fleetWindow = new FleetWindow(_config, _fleet);
+            () => ClientState.TerritoryType,
+            () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—"));
 
         _windowSystem.AddWindow(_configWindow);
-        _windowSystem.AddWindow(_runWindow);
+        _windowSystem.AddWindow(_mainWindow);
         _windowSystem.AddWindow(_debugWindow);
         _windowSystem.AddWindow(_fleetWindow);
         _windowSystem.AddWindow(_pathEditorWindow);
@@ -244,9 +251,13 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         }
     }
 
-    private void OpenMain() => _runWindow.IsOpen = true;
+    private void OpenMain() => _mainWindow.IsOpen = true;
 
     private void OpenConfig() => _configWindow.IsOpen = true;
 
-    private void SaveConfig() => PluginInterface.SavePluginConfig(_config);
+    private void SaveConfig()
+    {
+        OdysseusTheme.SetMode(_config.Theme);
+        PluginInterface.SavePluginConfig(_config);
+    }
 }

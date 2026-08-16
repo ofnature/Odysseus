@@ -15,7 +15,7 @@ namespace Odysseus.Windows;
 /// work, save. This is how a broken path gets repaired without waiting on anyone; the saved file
 /// is ours and never touches the bundle it came from.
 /// </summary>
-public sealed class PathEditorWindow : Window
+public sealed class PathEditorWindow : OdysseusWindow
 {
     private static readonly string[] KindNames = Enum.GetNames<StepKind>();
 
