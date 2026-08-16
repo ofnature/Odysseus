@@ -9,7 +9,10 @@ namespace Odysseus.Services.Deliveries;
 /// <summary>One custom-delivery client, as the sheets describe it.</summary>
 /// <param name="Index">SatisfactionNpc row id.</param>
 /// <param name="UnlockQuestId">The quest that opens this client — every one has prerequisites of its own.</param>
-public sealed record DeliveryClient(uint Index, string Name, int DeliveriesPerWeek, ushort UnlockQuestId, ushort UnlockLevel, uint TerritoryId);
+/// <param name="NpcDataId">The ENpcResident id to walk up to and interact with.</param>
+public sealed record DeliveryClient(
+    uint Index, string Name, int DeliveriesPerWeek, ushort UnlockQuestId, ushort UnlockLevel,
+    uint TerritoryId, uint NpcDataId = 0, System.Numerics.Vector3 Position = default);
 
 /// <summary>Reads the delivery clients' standing from the game.</summary>
 public interface IDeliveryState
@@ -61,9 +64,12 @@ public sealed class DeliveryCatalog
                 if (name.Length == 0) continue;
                 var questRow = npc.QuestRequired.RowId;
                 var unlock = questRow >= Quest.QuestCatalog.RowIdBase ? (ushort)(questRow - Quest.QuestCatalog.RowIdBase) : (ushort)0;
-                var level = unlock == 0 ? (ushort)0 : quests.GetRowOrDefault(questRow)?.ClassJobLevel[0] ?? 0;
-                _clients.Add(new DeliveryClient(npc.RowId, Capitalise(name), npc.DeliveriesPerWeek, unlock, level,
-                    npc.Level.ValueNullable?.Territory.RowId ?? 0));
+                var questLevel = unlock == 0 ? (ushort)0 : quests.GetRowOrDefault(questRow)?.ClassJobLevel[0] ?? 0;
+                var level = npc.Level.ValueNullable;
+                _clients.Add(new DeliveryClient(npc.RowId, Capitalise(name), npc.DeliveriesPerWeek, unlock, questLevel,
+                    level?.Territory.RowId ?? 0,
+                    npc.Npc.RowId,
+                    level is { } l ? new System.Numerics.Vector3(l.X, l.Y, l.Z) : default));
             }
         }
         catch (Exception ex)

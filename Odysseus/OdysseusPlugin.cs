@@ -47,6 +47,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly Services.Tribes.TribeCatalog _tribes;
     private readonly Services.Tribes.TribeState _tribeState;
     private readonly Services.Tribes.TribeRunner _tribeRunner;
+    private readonly Services.Deliveries.DeliveryRunner _deliveryRunner;
     private readonly System.Collections.Generic.Queue<byte> _tribeQueue = new();
     private readonly TribesWindow _tribesWindow;
     private readonly Services.Deliveries.DeliveryCatalog _deliveries;
@@ -167,8 +168,19 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var deliveryRewards = new Services.Deliveries.DeliveryRewards(DataManager, message => Log.Warning(message));
         var scrips = new Services.Deliveries.ScripLedger(DataManager, new Services.Deliveries.InventoryCurrencyReader(),
             _deliveries, deliveryState, deliveryRewards, deliveryBonus, message => Log.Warning(message));
+        var artisan = new ArtisanIpc(PluginInterface, message => Log.Warning(message));
+        _deliveryRunner = new Services.Deliveries.DeliveryRunner(
+            _world,
+            new Services.Deliveries.GameDeliveryWorld(message => Log.Warning(message)),
+            deliveryState,
+            new Services.Deliveries.DeliveryRequests(DataManager, message => Log.Warning(message)),
+            scrips,
+            artisan,
+            new Services.Deliveries.RecipeLookup(DataManager, message => Log.Warning(message)),
+            new StepExecutor(_world, dialogue),
+            message => Log.Information(message));
         _deliveriesWindow = new DeliveriesWindow(_deliveries, deliveryState, deliveryBonus, scrips,
-            new ArtisanIpc(PluginInterface, message => Log.Warning(message)), unlockPlanner);
+            artisan, unlockPlanner, _deliveryRunner);
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
@@ -267,6 +279,14 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         {
             if (_controller.State.IsDriving())
                 _controller.Stop();
+            return;
+        }
+
+        // A delivery run owns the frame outright — it never uses the quest controller.
+        if (_deliveryRunner.State is not (Services.Deliveries.DeliveryRunState.Idle or Services.Deliveries.DeliveryRunState.Done
+            or Services.Deliveries.DeliveryRunState.Faulted or Services.Deliveries.DeliveryRunState.Blocked))
+        {
+            _deliveryRunner.Tick();
             return;
         }
 

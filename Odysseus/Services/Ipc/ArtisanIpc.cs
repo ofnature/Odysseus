@@ -20,7 +20,7 @@ namespace Odysseus.Services.Ipc;
 /// stopped.
 /// </para>
 /// </summary>
-public sealed class ArtisanIpc
+public sealed class ArtisanIpc : Deliveries.ICrafter
 {
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly Action<string>? _log;

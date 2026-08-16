@@ -16,7 +16,10 @@ namespace Odysseus.Windows;
 /// table underneath is the point of the window: what you hold, what the remaining deliveries would
 /// pay, and how much of that would be thrown away at the cap.
 ///
-/// <para>Running a delivery — buy, craft, turn in — is the next stage; the guard and the UI are here.</para>
+/// <para>
+/// The craft route runs through <see cref="DeliveryRunner"/>. Buying ingredients does not exist
+/// yet, so a run that comes up short stops and says what is missing.
+/// </para>
 /// </summary>
 public sealed class DeliveriesWindow : OdysseusWindow
 {
@@ -26,15 +29,17 @@ public sealed class DeliveriesWindow : OdysseusWindow
     private readonly ScripLedger _scrips;
     private readonly ArtisanIpc _artisan;
     private readonly UnlockPlanner _unlock;
+    private readonly DeliveryRunner _runner;
 
     private string _status = string.Empty;
     private string _blockedReason = string.Empty;
     private bool _openBlockedPopup;
+    private DeliveryRunState _lastRunState = DeliveryRunState.Idle;
 
     private const string BlockedPopup = "Turn-in stopped###OdysseusDeliveryBlocked";
 
     public DeliveriesWindow(DeliveryCatalog catalog, IDeliveryState state, IDeliveryBonus bonus, ScripLedger scrips,
-        ArtisanIpc artisan, UnlockPlanner unlock)
+        ArtisanIpc artisan, UnlockPlanner unlock, DeliveryRunner runner)
         : base("Odysseus Deliveries##OdysseusDeliveries")
     {
         _catalog = catalog;
@@ -43,6 +48,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
         _scrips = scrips;
         _artisan = artisan;
         _unlock = unlock;
+        _runner = runner;
         Size = new Vector2(760, 620);
         SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(560, 320), MaximumSize = new Vector2(1400, 1400) };
@@ -52,10 +58,28 @@ public sealed class DeliveriesWindow : OdysseusWindow
 
     public override void Draw()
     {
+        TrackRunner();
         DrawHeader();
         DrawClients();
         DrawScrips();
         DrawBlockedPopup();
+    }
+
+    /// <summary>
+    /// A run that stops itself — at the cap, out of materials — raises the same modal the button
+    /// does, once, so the reason is not left sitting in a status line nobody is watching.
+    /// </summary>
+    private void TrackRunner()
+    {
+        if (_runner.State == _lastRunState) return;
+        _lastRunState = _runner.State;
+        if (_runner.State is DeliveryRunState.Blocked or DeliveryRunState.Faulted)
+        {
+            _blockedReason = _runner.StatusLine;
+            _openBlockedPopup = true;
+        }
+        else if (_runner.State != DeliveryRunState.Idle)
+            _status = _runner.StatusLine;
     }
 
     private void DrawHeader()
@@ -211,20 +235,35 @@ public sealed class DeliveriesWindow : OdysseusWindow
         var colour = !allowed ? OdysseusTheme.NeutralDark : bonus.Craft ? OdysseusTheme.AccentDim : OdysseusTheme.GreenDark;
         var payout = string.Join(", ", _scrips.PerDelivery(client).Select(p =>
             $"{p.Value:N0} {_scrips.Kinds.FirstOrDefault(k => k.RewardCurrency == p.Key)?.Name ?? p.Key.ToString()}"));
+        var running = _runner.Client?.Index == client.Index && _runner.State is not (DeliveryRunState.Idle or DeliveryRunState.Done);
         var tip = allowed
-            ? $"Craft turn-in{(bonus.Craft ? " (bonus week)" : "")} — pays {payout}. Buying, crafting and turning in is not built yet."
+            ? $"Craft turn-in{(bonus.Craft ? " (bonus week)" : "")} — pays {payout}. Crafts through Artisan; ingredients must already be stocked."
             : reason;
 
-        if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Hammer, "Craft turn-in", colour, tip ?? string.Empty, new Vector2(ActionWidth, 22)))
+        if (running)
+        {
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Stop, "Stop", OdysseusTheme.NeutralDark,
+                    "Stop the run.", new Vector2(ActionWidth, 22)))
+            {
+                _runner.Stop();
+                _status = $"{client.Name}: stopped.";
+            }
+        }
+        else if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Hammer, "Craft turn-in", colour, tip ?? string.Empty, new Vector2(ActionWidth, 22)))
         {
             if (!allowed)
             {
                 _blockedReason = reason ?? "At the scrip cap.";
                 _openBlockedPopup = true;
             }
+            else if (!_runner.Start(client))
+            {
+                _blockedReason = _runner.StatusLine;
+                _openBlockedPopup = true;
+            }
             else
             {
-                _status = $"{client.Name}: the delivery runner is not built yet — buy, craft and turn in by hand for now.";
+                _status = _runner.StatusLine;
             }
         }
         ImGui.SameLine();
