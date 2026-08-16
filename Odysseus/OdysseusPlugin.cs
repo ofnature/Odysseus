@@ -51,6 +51,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly Services.Deliveries.SpendRunner _spender;
     private readonly Services.Flight.CurrentCollector _collector;
     private readonly FlightWindow _flightWindow;
+    private readonly JournalWindow _journalWindow;
     private readonly System.Collections.Generic.Queue<byte> _tribeQueue = new();
     private readonly TribesWindow _tribesWindow;
     private readonly Services.Deliveries.DeliveryCatalog _deliveries;
@@ -203,11 +204,14 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _flightWindow = new FlightWindow(currents, flightState, _collector, _priority, _catalog, unlockPlanner,
             () => ClientState.TerritoryType);
 
+        _journalWindow = new JournalWindow(_catalog, _quests, unlockPlanner, _pathStore.Has);
+
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
         _windowSystem.AddWindow(_tribesWindow);
         _windowSystem.AddWindow(_deliveriesWindow);
         _windowSystem.AddWindow(_flightWindow);
+        _windowSystem.AddWindow(_journalWindow);
         _windowSystem.AddWindow(_debugWindow);
         _windowSystem.AddWindow(_fleetWindow);
         _windowSystem.AddWindow(_pathEditorWindow);
@@ -408,6 +412,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             case "flight":
             case "currents":
                 _flightWindow.IsOpen = true;
+                break;
+            case "journal":
+            case "quests":
+                _journalWindow.IsOpen = true;
                 break;
             case "log":
                 _logWindow.IsOpen = true;

@@ -17,6 +17,16 @@ public sealed record QuestListing(ushort QuestId, string Name, ushort ClassJobLe
     public QuestListing(ushort questId, string name, ushort classJobLevel, uint expansionId, bool isMainScenario, ushort[] previous, byte previousJoin)
         : this(questId, name, classJobLevel, expansionId, isMainScenario, previous, previousJoin, [], 0) { }
 
+    /// <summary>
+    /// The journal grouping this quest sits under — "Chronicles of a New Era", "Sidequests" and so
+    /// on. Kept because it is the only thing that identifies a raid or trial unlock chain as such;
+    /// the engine runs any quest, but nothing could <i>find</i> them without this.
+    /// </summary>
+    public string Section { get; init; } = string.Empty;
+
+    /// <summary>The category within the section — an alliance raid series, a job's quest line.</summary>
+    public string Category { get; init; } = string.Empty;
+
     /// <summary>The prerequisites are met, given a completion oracle.</summary>
     public bool IsUnlockedBy(Func<ushort, bool> isComplete) => PreviousJoin switch
     {
@@ -99,12 +109,16 @@ public sealed class QuestCatalog
                     continue;
 
                 var isMsq = false;
+                var sectionName = string.Empty;
+                var categoryName = string.Empty;
                 if (row.JournalGenre.ValueNullable is { } genre
                     && genre.JournalCategory.ValueNullable is { } category
                     && category.JournalSection.ValueNullable is { } section)
                 {
+                    sectionName = section.Name.ExtractText();
+                    categoryName = category.Name.ExtractText();
                     isMsq = section.RowId <= LastMainScenarioSection
-                            || section.Name.ExtractText().Contains("Main Scenario", StringComparison.OrdinalIgnoreCase);
+                            || sectionName.Contains("Main Scenario", StringComparison.OrdinalIgnoreCase);
                 }
 
                 var previous = row.PreviousQuest
@@ -117,7 +131,12 @@ public sealed class QuestCatalog
                     .ToArray();
 
                 var id = (ushort)(row.RowId - RowIdBase);
-                rows.Add(new QuestListing(id, name, row.ClassJobLevel[0], row.Expansion.RowId, isMsq, previous, row.PreviousQuestJoin, locks, row.QuestLockJoin));
+                rows.Add(new QuestListing(id, name, row.ClassJobLevel[0], row.Expansion.RowId, isMsq, previous,
+                    row.PreviousQuestJoin, locks, row.QuestLockJoin)
+                {
+                    Section = sectionName,
+                    Category = categoryName,
+                });
             }
             Load(rows);
         }
@@ -149,6 +168,9 @@ public sealed class QuestCatalog
     public int Count => _byId.Count;
 
     /// <summary>Name search, case-insensitive contains; MSQ and lower ids first, capped.</summary>
+    /// <summary>Every quest the sheets know, for grouping by journal section.</summary>
+    public IEnumerable<QuestListing> All => _byId.Values;
+
     public IEnumerable<QuestListing> Search(string text, int max)
     {
         if (string.IsNullOrWhiteSpace(text))

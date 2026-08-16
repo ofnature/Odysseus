@@ -98,3 +98,49 @@ public class QuestCatalogTests
         Assert.True(none.IsUnlockedBy(_ => false));
     }
 }
+
+/// <summary>
+/// The journal grouping is what makes a raid or trial unlock chain findable. The engine runs any
+/// quest; without the section and category nothing could locate them among four thousand.
+/// </summary>
+public class JournalGroupingTests
+{
+    private static readonly QuestCatalog Catalog = new(
+    [
+        new QuestListing(3000, "Alexander's Heart", 60, 1, false, [], 0)
+            { Section = "Chronicles of a New Era", Category = "Alexander" },
+        new QuestListing(3001, "Heart of the Creator", 70, 1, false, [3000], 1)
+            { Section = "Chronicles of a New Era", Category = "Alexander" },
+        new QuestListing(3002, "Bloody Reprisal", 60, 1, false, [], 0)
+            { Section = "Chronicles of a New Era", Category = "Warring Triad" },
+        new QuestListing(1619, "Mountaintop Diplomacy", 54, 1, true, [], 0)
+            { Section = "Main Scenario (A Realm Reborn through Endwalker)", Category = "Heavensward" },
+        new QuestListing(4000, "A Hingan Tale", 61, 2, false, [], 0),
+    ]);
+
+    [Fact]
+    public void Quests_group_by_section_and_category()
+    {
+        var chronicles = Catalog.All.Where(q => q.Section == "Chronicles of a New Era").ToList();
+        Assert.Equal(3, chronicles.Count);
+        Assert.Equal(["Alexander", "Warring Triad"],
+            chronicles.Select(q => q.Category).Distinct().OrderBy(x => x));
+    }
+
+    [Fact]
+    public void A_quest_with_no_journal_row_still_lists_rather_than_vanishing()
+    {
+        var loose = Catalog.All.Single(q => q.QuestId == 4000);
+        Assert.Equal(string.Empty, loose.Section);
+        Assert.Equal(string.Empty, loose.Category);
+        Assert.Equal(5, Catalog.All.Count());
+    }
+
+    /// <summary>Grouping must not disturb what the section is actually used for.</summary>
+    [Fact]
+    public void The_msq_test_is_unchanged_by_carrying_the_category()
+    {
+        Assert.True(Catalog.ById(1619)!.IsMainScenario);
+        Assert.False(Catalog.ById(3000)!.IsMainScenario);
+    }
+}
