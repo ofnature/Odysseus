@@ -70,6 +70,8 @@ public interface IStepWorld
 
     int PlayerLevel { get; }
 
+    bool IsCasting { get; }
+
     bool InCombat { get; }
 
     /// <summary>Not occupied, casting, zoning or otherwise mid-something.</summary>
@@ -123,6 +125,12 @@ public interface IStepWorld
 
     /// <summary>Uses an inventory item by id, on the current target if it needs one.</summary>
     bool UseItem(uint itemId);
+
+    /// <summary>Action row id for a name as the path data spells it, or null when unknown.</summary>
+    uint? ResolveAction(string name);
+
+    /// <summary>Use an action on the current target (or at a ground point). False when refused.</summary>
+    bool UseAction(uint actionId, Vector3? groundTarget);
 
     /// <summary>Ask the game to compute recommended gear for the current job. Async; poll <see cref="RecommendedGearReady"/>.</summary>
     bool PrepareRecommendedGear();

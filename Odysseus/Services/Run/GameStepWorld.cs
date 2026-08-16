@@ -289,6 +289,54 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         }
     }
 
+    private Dictionary<string, uint>? _actionsByName;
+
+    /// <summary>
+    /// The path data names quest actions ("Big Sneeze", "Fiery Breath"); the Action sheet has
+    /// them by name. Built once, case-insensitive; a name with several rows takes the lowest id
+    /// that is not a PvP action.
+    /// </summary>
+    public uint? ResolveAction(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        if (_actionsByName is null)
+        {
+            _actionsByName = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var row in _data.GetExcelSheet<Lumina.Excel.Sheets.Action>())
+                {
+                    var n = row.Name.ExtractText();
+                    if (n.Length == 0 || row.IsPvP) continue;
+                    _actionsByName.TryAdd(n, row.RowId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log($"Action sheet unavailable: {ex.Message}");
+            }
+        }
+        return _actionsByName.TryGetValue(name.Trim(), out var id) ? id : null;
+    }
+
+    public bool UseAction(uint actionId, Vector3? groundTarget)
+    {
+        try
+        {
+            var manager = ActionManager.Instance();
+            if (manager == null) return false;
+            if (groundTarget is { } g)
+                return manager->UseActionLocation(ActionType.Action, actionId, 0xE0000000, &g);
+            var target = _targets.Target;
+            return manager->UseAction(ActionType.Action, actionId, target?.GameObjectId ?? 0xE0000000);
+        }
+        catch (Exception ex)
+        {
+            _log($"UseAction {actionId} failed: {ex.Message}");
+            return false;
+        }
+    }
+
     public bool PrepareRecommendedGear()
     {
         try

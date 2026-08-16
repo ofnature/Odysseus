@@ -164,7 +164,7 @@ public sealed class StepExecutor
         StepKind.WalkTo or StepKind.Interact or StepKind.AcceptQuest or StepKind.CompleteQuest or StepKind.Combat
         or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent or StepKind.None
         or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem or StepKind.Say
-        or StepKind.EquipRecommended;
+        or StepKind.EquipRecommended or StepKind.Action or StepKind.Instruction or StepKind.StatusOff;
 
     /// <summary>The step hands the character to another plugin for a whole instance.</summary>
     public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
@@ -310,6 +310,15 @@ public sealed class StepExecutor
                         Fail("recommended gear never finished computing");
                     break;
                 }
+                if (step.Kind == StepKind.Action)
+                {
+                    // Cast/animation, then a moment for the game to register it.
+                    if (_world.IsCasting)
+                        break;
+                    if (now - _phaseStart > TimeSpan.FromSeconds(3))
+                        Enter(Phase.Finish);
+                    break;
+                }
                 if (step.Kind == StepKind.UseItem && _world.IsOccupied)
                 {
                     // An item that opens a dialogue behaves like an interact from here.
@@ -424,6 +433,33 @@ public sealed class StepExecutor
         {
             case StepKind.WalkTo or StepKind.None:
                 return Phase.Finish;
+
+            // A note in the path, and "drop status X" (used for a disguise/transparency the quest
+            // gave you — the game clears it on the next relevant interaction). Nothing to do.
+            case StepKind.Instruction or StepKind.StatusOff:
+                if (step.Comment is { } note && step.Kind == StepKind.Instruction)
+                    _world.Log($"Path note: {note}");
+                return Phase.Finish;
+
+            case StepKind.Action:
+            {
+                if (step.ActionName is not { } actionName || _world.ResolveAction(actionName) is not { } actionId)
+                {
+                    Fail($"action \"{step.ActionName ?? "?"}\" is not in the Action sheet");
+                    return Phase.None;
+                }
+                if (!step.GroundTarget && step.DataId is { } actionTarget && !_world.TryTargetDataId(actionTarget))
+                {
+                    Fail($"action target {actionTarget} is not here");
+                    return Phase.None;
+                }
+                if (!_world.UseAction(actionId, step.GroundTarget ? step.Position : null))
+                {
+                    Fail($"action \"{actionName}\" was refused");
+                    return Phase.None;
+                }
+                return Phase.ActionSettle;
+            }
 
             case StepKind.Combat:
                 return step.EnemySpawnType == EnemySpawnType.AfterInteraction && step.DataId is not null

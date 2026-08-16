@@ -390,6 +390,14 @@ public sealed class QuestController
                 _stepIndex++;
                 return;
             }
+            if (snap.IsAvailable && !step.RequiredVariablesMet(snap.Variables.Span))
+            {
+                _log($"Skip step {_stepIndex} ({step}) — quest variables do not select it ({snap}).");
+                _stepStarted = _world.UtcNow;
+                LogStep(step, "Skipped", "not selected by quest variables");
+                _stepIndex++;
+                return;
+            }
             if (!step.IsReplaySafe && _replays > 0)
             {
                 _log($"Not replaying step {_stepIndex} ({step}) — not replay-safe; skipping.");

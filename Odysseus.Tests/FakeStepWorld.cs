@@ -15,6 +15,7 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool IsMounted { get; set; }
     public bool CanFlyHere { get; set; }
     public int PlayerLevel { get; set; } = 54;
+    public bool IsCasting { get; set; }
     public bool InCombat { get; set; }
     public bool IsReady { get; set; } = true;
     public bool IsOccupied { get; set; }
@@ -97,6 +98,10 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public void SendChatCommand(string command) => Calls.Add($"Chat {command}");
     public bool UseItemAccepted { get; set; } = true;
     public bool UseItem(uint itemId) { Calls.Add($"UseItem {itemId}"); return UseItemAccepted; }
+    public Dictionary<string, uint> Actions { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public uint? ResolveAction(string name) => Actions.TryGetValue(name, out var id) ? id : null;
+    public bool UseActionAccepted { get; set; } = true;
+    public bool UseAction(uint actionId, Vector3? ground) { Calls.Add($"UseAction {actionId}{(ground is { } g ? $" @({g.X:F0},{g.Y:F0},{g.Z:F0})" : "")}"); return UseActionAccepted; }
     public bool RecommendedGearReady { get; set; } = true;
     public bool PrepareRecommendedGear() { Calls.Add("PrepareGear"); return true; }
     public void EquipRecommendedGear() => Calls.Add("EquipGear");

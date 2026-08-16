@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Numerics;
 
@@ -67,6 +68,21 @@ public enum EnemySpawnType
 public sealed record DialogueChoice(string Type, string? Prompt, string? Answer, bool? Yes);
 
 /// <summary>
+/// One acceptable value for a quest variable slot: the whole byte, or just its high or low nibble.
+/// The data writes <c>32</c>, <c>{"High": 3}</c> or <c>{"Low": 1}</c>.
+/// </summary>
+public sealed record VariableMatch(byte? Exact, byte? High, byte? Low)
+{
+    public bool Matches(byte value)
+    {
+        if (Exact is { } e) return value == e;
+        if (High is { } h && (value >> 4) != h) return false;
+        if (Low is { } l && (value & 0x0F) != l) return false;
+        return High is not null || Low is not null;
+    }
+}
+
+/// <summary>
 /// A predicate over game state. Every field is optional; a null field is "don't care" and an
 /// empty condition is always true. Evaluated by <c>Run.StepConditions</c>.
 /// </summary>
@@ -115,6 +131,31 @@ public sealed class QuestStep
     public string[]? AethernetShortcut { get; set; }
     /// <summary>Six-slot bitmask this step's completion sets in the quest variables; null when unknown.</summary>
     public byte?[]? CompletionQuestVariablesFlags { get; set; }
+    /// <summary>
+    /// Six slots; a non-null slot lists the values that variable must have for this step to apply.
+    /// This is how "use the item on three of these five objects" paths pick the three: each object's
+    /// step is gated on the variables the game set when the quest was taken.
+    /// </summary>
+    public List<VariableMatch>?[]? RequiredQuestVariables { get; set; }
+    /// <summary>For <see cref="StepKind.Action"/>: the action's name as the game spells it (resolved to an id at run time).</summary>
+    public string? ActionName { get; set; }
+    /// <summary>The action is placed on the ground at <see cref="Position"/> rather than cast on <see cref="DataId"/>.</summary>
+    public bool GroundTarget { get; set; }
+
+    /// <summary>The variables allow this step (true when the step has no requirement).</summary>
+    public bool RequiredVariablesMet(ReadOnlySpan<byte> variables)
+    {
+        if (RequiredQuestVariables is null) return true;
+        for (var i = 0; i < RequiredQuestVariables.Length && i < variables.Length; i++)
+        {
+            var allowed = RequiredQuestVariables[i];
+            if (allowed is null || allowed.Count == 0) continue;
+            var ok = false;
+            foreach (var m in allowed) if (m.Matches(variables[i])) { ok = true; break; }
+            if (!ok) return false;
+        }
+        return true;
+    }
     public List<DialogueChoice>? DialogueChoices { get; set; }
     public SkipConditions? SkipConditions { get; set; }
     public EnemySpawnType? EnemySpawnType { get; set; }
@@ -140,7 +181,8 @@ public sealed class QuestStep
     /// </summary>
     public bool IsReplaySafe => Kind is StepKind.Interact or StepKind.AcceptQuest or StepKind.CompleteQuest
         or StepKind.WalkTo or StepKind.Combat or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard
-        or StepKind.AttuneAetherCurrent or StepKind.None or StepKind.Say or StepKind.Emote or StepKind.EquipRecommended;
+        or StepKind.AttuneAetherCurrent or StepKind.None or StepKind.Say or StepKind.Emote or StepKind.EquipRecommended
+        or StepKind.Action or StepKind.Instruction or StepKind.StatusOff;
 
     public override string ToString()
         => $"{Kind}{(DataId is { } d ? $" {d}" : "")}{(Position is { } p ? $" @({p.X:F0},{p.Y:F0},{p.Z:F0})" : "")} in {TerritoryId}";

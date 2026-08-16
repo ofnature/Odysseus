@@ -205,6 +205,11 @@ public static class QuestionableImporter
         if (e.TryGetProperty("ChatMessage", out var chat) && chat.ValueKind == JsonValueKind.Object)
             step.ChatMessageKey = Str(chat, "Key");
 
+        step.ActionName = Str(e, "Action");
+        step.GroundTarget = Bool(e, "GroundTarget") ?? false;
+        if (e.TryGetProperty("RequiredQuestVariables", out var required) && required.ValueKind == JsonValueKind.Array)
+            step.RequiredQuestVariables = ParseRequired(required);
+
         if (e.TryGetProperty("DialogueChoices", out var choices) && choices.ValueKind == JsonValueKind.Array)
         {
             step.DialogueChoices = [];
@@ -296,6 +301,41 @@ public static class QuestionableImporter
             };
         }
         return result;
+    }
+
+    /// <summary>
+    /// Six slots; each is null, a number (exact byte), an object <c>{High}/{Low}</c> (nibble), or an
+    /// array of those (any-of). Normalised to a list per slot.
+    /// </summary>
+    private static List<VariableMatch>?[]? ParseRequired(JsonElement required)
+    {
+        var result = new List<VariableMatch>?[Quest.QuestSnapshot.VariableCount];
+        var i = 0;
+        var any = false;
+        foreach (var slot in required.EnumerateArray())
+        {
+            if (i >= result.Length) break;
+            List<VariableMatch>? list = null;
+            void AddOne(JsonElement v)
+            {
+                var m = v.ValueKind switch
+                {
+                    JsonValueKind.Number => new VariableMatch((byte)(v.GetInt32() & 0xFF), null, null),
+                    JsonValueKind.Object => new VariableMatch(null, I32(v, "High") is { } h ? (byte)h : null, I32(v, "Low") is { } l ? (byte)l : null),
+                    _ => null,
+                };
+                if (m is null) return;
+                list ??= [];
+                list.Add(m);
+            }
+            if (slot.ValueKind == JsonValueKind.Array)
+                foreach (var v in slot.EnumerateArray()) AddOne(v);
+            else
+                AddOne(slot);
+            result[i++] = list;
+            any |= list is not null;
+        }
+        return any ? result : null;
     }
 
     // ── JSON helpers ──

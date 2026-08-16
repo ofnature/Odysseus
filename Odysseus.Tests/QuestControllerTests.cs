@@ -203,6 +203,21 @@ public class QuestControllerTests : IDisposable
     }
 
     [Fact]
+    public void Steps_not_selected_by_the_quest_variables_are_skipped()
+    {
+        _world.Spawned.UnionWith([1u, 2u]);
+        var gated = Interact(1);
+        gated.RequiredQuestVariables = [null, null, null, [new VariableMatch(null, 3, null)], null, null];
+        StorePath(new QuestSequence { Sequence = 1, Steps = [gated, Interact(2)] });
+        _quests.Set(1622, 1, 0, 0, 0, 0x40, 0, 0); // slot 3 high nibble is 4, not 3
+        _controller.Start(1622);
+        Ticks(12);
+        Assert.DoesNotContain("Interact 1", _world.Calls);
+        Assert.Contains("Interact 2", _world.Calls);
+        Assert.Contains(_runLog.Recent, r => r.Outcome == "Skipped" && r.Reason!.Contains("variables"));
+    }
+
+    [Fact]
     public void A_failed_step_faults_the_run_with_the_reason()
     {
         StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(404)] }); // never spawned
