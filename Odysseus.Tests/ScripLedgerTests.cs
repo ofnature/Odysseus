@@ -23,6 +23,7 @@ public class ScripLedgerTests
         public bool IsUnlocked(DeliveryClient c) => Unlocked.Contains(c.Index);
         public int? UsedThisWeek(DeliveryClient c) => Used.GetValueOrDefault(c.Index);
         public int Rank(DeliveryClient c) => 1;
+        public bool DataLoaded => true;
     }
 
     private sealed class Rewards : IDeliveryRewards
@@ -37,6 +38,7 @@ public class ScripLedgerTests
     {
         public HashSet<uint> CraftBonus { get; } = [];
         public int WeekRow => 3;
+        public string WeekSource => "test";
         public BonusFlags For(DeliveryClient c) => new(CraftBonus.Contains(c.Index), false, false);
     }
 
@@ -105,6 +107,23 @@ public class ScripLedgerTests
 
         cur.Amounts[PurpleCrafters.ItemId] = 3899; // + 100 fits exactly
         Assert.True(ledger.MayTurnIn(Zhloe).Allowed);
+    }
+
+    /// <summary>
+    /// The bonus rotation is anchored to a weekly reset, so the row must only change on Tuesdays at
+    /// 08:00 UTC. If the anchor constant drifts this test catches it without needing the game.
+    /// </summary>
+    [Fact]
+    public void The_bonus_week_advances_on_the_tuesday_reset()
+    {
+        static int Row(string utc) => DeliveryBonus.ComputeRow(
+            DateTimeOffset.Parse(utc, null, System.Globalization.DateTimeStyles.AdjustToUniversal).ToUnixTimeSeconds(), 12);
+
+        Assert.Equal(0, Row("2022-07-05T08:00:00Z"));   // the anchor reset itself
+        Assert.Equal(0, Row("2022-07-12T07:59:59Z"));   // one second before the next
+        Assert.Equal(1, Row("2022-07-12T08:00:00Z"));
+        Assert.Equal(0, Row("2022-09-27T08:00:00Z"));   // wraps after twelve weeks
+        Assert.Equal(10, Row("2026-08-16T13:31:00Z"));  // matches the live client
     }
 
     [Fact]

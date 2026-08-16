@@ -18,6 +18,13 @@ public interface IDeliveryState
     /// <summary>Deliveries already used this week, or null when it cannot be read.</summary>
     int? UsedThisWeek(DeliveryClient client);
     int Rank(DeliveryClient client);
+
+    /// <summary>
+    /// The client has fetched delivery data from the server. Ranks and weekly allowances read as
+    /// zero until it has — opening the game's Custom Deliveries window once is what loads them —
+    /// so the UI can say "not loaded yet" instead of showing zeros as though they were facts.
+    /// </summary>
+    bool DataLoaded { get; }
 }
 
 /// <summary>
@@ -85,6 +92,30 @@ public sealed unsafe class DeliveryState : IDeliveryState
     }
 
     public bool IsUnlocked(DeliveryClient client) => client.UnlockQuestId != 0 && _quests.IsComplete(client.UnlockQuestId);
+
+    /// <summary>
+    /// True once any rank is non-zero. A character with a client unlocked always has rank ≥ 1 for
+    /// it, so all-zero ranks means the arrays have not been filled rather than "everyone is rank 0".
+    /// </summary>
+    public bool DataLoaded
+    {
+        get
+        {
+            try
+            {
+                var manager = FFXIVClientStructs.FFXIV.Client.Game.SatisfactionSupplyManager.Instance();
+                if (manager == null) return false;
+                foreach (var rank in manager->SatisfactionRanks)
+                    if (rank > 0)
+                        return true;
+                return false;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
 
     public int Rank(DeliveryClient client)
     {

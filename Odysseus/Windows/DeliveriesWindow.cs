@@ -74,6 +74,19 @@ public sealed class DeliveriesWindow : OdysseusWindow
             ImGui.SameLine(0f, 8f);
             ImGui.TextColored(OdysseusTheme.StatusRed, $"{overcapping.Count} scrip(s) would overcap");
         }
+
+        // Ranks and used-allowances stay zero until the client has fetched delivery data; say so
+        // rather than presenting the zeros as facts. The bonus ticks do not need it — the week is
+        // computed from the clock.
+        if (!_state.DataLoaded)
+        {
+            ImGui.SameLine(0f, 8f);
+            OdysseusTheme.Chip("Ranks not loaded", OdysseusTheme.YellowDark, OdysseusTheme.TextPrimary);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Rank and deliveries-used come from the server and read zero until the game's\n" +
+                                 "Custom Deliveries window has been opened once this session.\n" +
+                                 "Bonus ticks are unaffected.");
+        }
         ImGui.Separator();
     }
 
