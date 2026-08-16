@@ -1,7 +1,7 @@
 # Changelog
 
 <!-- LATEST-START -->
-## v0.1.0 — unreleased
+## v0.1.0 — 2026-08-16
 
 First cut. Everything below is built and unit-tested; in-game verification is in progress.
 
