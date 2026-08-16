@@ -49,6 +49,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly Services.Tribes.TribeRunner _tribeRunner;
     private readonly Services.Deliveries.DeliveryRunner _deliveryRunner;
     private readonly Services.Deliveries.SpendRunner _spender;
+    private readonly Services.Flight.CurrentCollector _collector;
+    private readonly FlightWindow _flightWindow;
     private readonly System.Collections.Generic.Queue<byte> _tribeQueue = new();
     private readonly TribesWindow _tribesWindow;
     private readonly Services.Deliveries.DeliveryCatalog _deliveries;
@@ -194,10 +196,18 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             artisan, unlockPlanner, _deliveryRunner, deliveryRequests, _config, SaveConfig, gatherBuddy,
             scripShop, spending, _spender);
 
+        var currents = new Services.Flight.AetherCurrentCatalog(DataManager, _pathStore, message => Log.Warning(message));
+        var flightState = new Services.Flight.FlightState(message => Log.Warning(message));
+        _collector = new Services.Flight.CurrentCollector(_world, flightState,
+            new StepExecutor(_world, dialogue), message => Log.Information(message));
+        _flightWindow = new FlightWindow(currents, flightState, _collector, _priority, _catalog, unlockPlanner,
+            () => ClientState.TerritoryType);
+
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
         _windowSystem.AddWindow(_tribesWindow);
         _windowSystem.AddWindow(_deliveriesWindow);
+        _windowSystem.AddWindow(_flightWindow);
         _windowSystem.AddWindow(_debugWindow);
         _windowSystem.AddWindow(_fleetWindow);
         _windowSystem.AddWindow(_pathEditorWindow);
@@ -293,6 +303,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 _controller.Stop();
             return;
         }
+
+        // Collecting currents owns the frame; it drives its own executor, not the controller.
+        if (!_collector.IsFinished) { _collector.Tick(); return; }
 
         // Spending owns the frame while it runs; it is short and never touches the controller.
         if (!_spender.IsFinished) { _spender.Tick(); return; }
@@ -391,6 +404,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 break;
             case "deliveries":
                 _deliveriesWindow.IsOpen = true;
+                break;
+            case "flight":
+            case "currents":
+                _flightWindow.IsOpen = true;
                 break;
             case "log":
                 _logWindow.IsOpen = true;
