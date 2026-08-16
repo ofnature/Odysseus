@@ -79,6 +79,10 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool IsQuestAccepted(ushort questId) => AcceptedQuests.Contains(questId);
     public bool IsDataIdSpawned(uint dataId) => Spawned.Contains(dataId);
     public float? DistanceToDataId(uint dataId) => Spawned.Contains(dataId) ? 1f : null;
+    /// <summary>Spawned objects sit on the player unless a test places them somewhere.</summary>
+    public Dictionary<uint, Vector3> Positions { get; } = new();
+    public Vector3? PositionOfDataId(uint dataId)
+        => Spawned.Contains(dataId) ? Positions.GetValueOrDefault(dataId, PlayerPosition) : null;
     public bool TryInteractWithDataId(uint dataId)
     {
         Calls.Add($"Interact {dataId}");

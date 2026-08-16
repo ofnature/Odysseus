@@ -36,6 +36,8 @@ public enum DeliveryRunState
     Craft,
     /// <summary>Travelling to the client.</summary>
     Travel,
+    /// <summary>Buying ingredients from the merchant standing near the client.</summary>
+    Shop,
     /// <summary>Talking to the client to open the supply window.</summary>
     Interact,
     /// <summary>Handing items over.</summary>
@@ -63,8 +65,10 @@ public enum DeliveryRunState
 /// </para>
 ///
 /// <para>
-/// <b>Ingredients are not bought yet.</b> If the requested item is not already in the inventory the
-/// run stops and says what is missing — buying from vendors and the market board is the next piece.
+/// Travel comes before shopping and crafting on purpose: every client has a merchant beside them
+/// stocking exactly what their craft needs, so getting there first is what makes vendor-only
+/// sourcing enough. Anything no nearby vendor sells is named and the run stops — nothing is bought
+/// off the market board.
 /// </para>
 /// </summary>
 public sealed class DeliveryRunner
@@ -74,6 +78,8 @@ public sealed class DeliveryRunner
     private static readonly TimeSpan CraftStall = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan ReinteractGap = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan TurnInGap = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ShopGap = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ShopStall = TimeSpan.FromSeconds(30);
 
     private readonly IStepWorld _world;
     private readonly IDeliveryWorld _game;
@@ -82,6 +88,7 @@ public sealed class DeliveryRunner
     private readonly ScripLedger _scrips;
     private readonly ICrafter _crafter;
     private readonly IRecipeLookup _recipes;
+    private readonly IIngredientSource _ingredients;
     private readonly StepExecutor _travel;
     private readonly Func<int> _preferredCraftType;
     private readonly Action<string> _log;
@@ -93,12 +100,14 @@ public sealed class DeliveryRunner
     private int _delivered;
     private int _target;
     private bool _craftStarted;
+    private RecipeOption? _recipe;
 
     public DeliveryRunner(IStepWorld world, IDeliveryWorld game, IDeliveryState state, IDeliveryRequests requests,
-        ScripLedger scrips, ICrafter crafter, IRecipeLookup recipes, StepExecutor travel,
-        Func<int> preferredCraftType, Action<string> log)
+        ScripLedger scrips, ICrafter crafter, IRecipeLookup recipes, IIngredientSource ingredients,
+        StepExecutor travel, Func<int> preferredCraftType, Action<string> log)
     {
         _preferredCraftType = preferredCraftType;
+        _ingredients = ingredients;
         _world = world;
         _game = game;
         _state = state;
@@ -162,8 +171,10 @@ public sealed class DeliveryRunner
         _delivered = 0;
         _target = limit > 0 ? Math.Min(limit, remaining) : remaining;
         _craftStarted = false;
+        _recipe = null;
         StoppedBecause = DeliveryStop.None;
-        Enter(DeliveryRunState.Craft);
+        // Travel first: the merchant that stocks the ingredients stands beside the client.
+        Enter(DeliveryRunState.Travel);
         _log($"{client.Name}: {_target} deliver{(_target == 1 ? "y" : "ies")} of {request.ItemName} " +
              $"(collectability {request.CollectabilityHigh}){(limit > 0 ? " — test run" : "")}.");
         return true;
@@ -173,6 +184,7 @@ public sealed class DeliveryRunner
     {
         _travel.Cancel();
         if (_crafter.IsCrafting) _crafter.StopCrafting();
+        _game.CloseShop();
         _client = null;
         State = DeliveryRunState.Idle;
         StoppedBecause = DeliveryStop.None;
@@ -194,8 +206,9 @@ public sealed class DeliveryRunner
         {
             switch (State)
             {
-                case DeliveryRunState.Craft: TickCraft(); break;
                 case DeliveryRunState.Travel: TickTravel(); break;
+                case DeliveryRunState.Shop: TickShop(); break;
+                case DeliveryRunState.Craft: TickCraft(); break;
                 case DeliveryRunState.Interact: TickInteract(); break;
                 case DeliveryRunState.TurnIn: TickTurnIn(); break;
             }
@@ -218,7 +231,7 @@ public sealed class DeliveryRunner
         if (short_ <= 0)
         {
             if (_craftStarted && _crafter.IsCrafting) _crafter.StopCrafting();
-            Enter(DeliveryRunState.Travel);
+            Enter(DeliveryRunState.Interact);
             return;
         }
 
@@ -231,10 +244,17 @@ public sealed class DeliveryRunner
 
         if (_craftStarted)
         {
-            // Artisan stopped with the bag still short — out of materials, most likely.
+            // Artisan stopped with the bag still short. Anything a nearby vendor sells has already
+            // been bought, so what is left is something only you can supply.
+            var short2 = _recipe is null
+                ? []
+                : _ingredients.Plan(_recipe.RecipeId, short_, _game.ItemCount).Where(n => n.Missing > 0).ToList();
+            var missing = short2.Count > 0
+                ? " Still short: " + string.Join(", ", short2.Select(n => $"{n.Missing} × {n.Name}")) + "."
+                : string.Empty;
             Block(DeliveryStop.Materials,
-                  $"{client.Name}: Artisan stopped with {short_} × {request.ItemName} still needed. " +
-                  "Odysseus does not buy ingredients yet, so stock up and start it again.");
+                  $"{client.Name}: Artisan stopped with {short_} × {request.ItemName} still needed.{missing} " +
+                  "Nothing nearby sells the rest, so stock up and start it again.");
             return;
         }
 
@@ -246,8 +266,7 @@ public sealed class DeliveryRunner
             return;
         }
 
-        var options = _recipes.OptionsFor(request.ItemId);
-        if (RecipePicker.Pick(options, _preferredCraftType(), _game.CurrentCraftType) is not { } recipe)
+        if (Recipe() is not { } recipe)
         {
             Block(DeliveryStop.Materials, $"{client.Name}: no recipe found for {request.ItemName}.");
             return;
@@ -272,7 +291,7 @@ public sealed class DeliveryRunner
             && Vector3.Distance(_world.PlayerPosition, client.Position) <= StepExecutor.DefaultStopDistance + StepExecutor.ArrivalSlack)
         {
             _travel.Cancel();
-            Enter(DeliveryRunState.Interact);
+            Enter(DeliveryRunState.Shop);
             return;
         }
 
@@ -289,6 +308,91 @@ public sealed class DeliveryRunner
         StatusLine = $"{client.Name}: on the way";
         if (_travel.Tick() == StepStatus.Failed)
             Fault($"{client.Name}: could not get there — {_travel.FailReason}");
+    }
+
+    /// <summary>The recipe chosen for this run, resolved once so shopping and crafting agree.</summary>
+    private RecipeOption? Recipe()
+    {
+        if (_recipe is not null) return _recipe;
+        return _recipe = RecipePicker.Pick(_recipes.OptionsFor(_request!.ItemId), _preferredCraftType(), _game.CurrentCraftType);
+    }
+
+    private void TickShop()
+    {
+        var client = _client!;
+        var short_ = Shortfall();
+        if (short_ <= 0 || Recipe() is not { } recipe)
+        {
+            _game.CloseShop();
+            Enter(DeliveryRunState.Craft);
+            return;
+        }
+
+        var needs = _ingredients.Plan(recipe.RecipeId, short_, _game.ItemCount);
+        var buy = needs.FirstOrDefault(n => n.CanBuy && _world.PositionOfDataId(n.VendorDataId) is not null);
+
+        if (buy is null)
+        {
+            // Either nothing is missing, or nobody in reach sells what is.
+            var stuck = needs.Where(n => n.Missing > 0).ToList();
+            _game.CloseShop();
+            if (stuck.Count > 0)
+                _log($"{client.Name}: no nearby vendor for {string.Join(", ", stuck.Select(n => $"{n.Missing} × {n.Name}"))} — leaving it to Artisan.");
+            Enter(DeliveryRunState.Craft);
+            return;
+        }
+
+        if (_game.ShopBusy(buy.ShopId))
+        {
+            _phaseStart = _world.UtcNow;  // a purchase is going through; that is progress
+            return;
+        }
+
+        if (_game.Gil < buy.GilForMissing)
+        {
+            Block(DeliveryStop.Materials,
+                  $"{client.Name}: {buy.Missing} × {buy.Name} costs {buy.GilForMissing:N0} gil and you have {_game.Gil:N0}.");
+            return;
+        }
+
+        var vendorPosition = _world.PositionOfDataId(buy.VendorDataId)!.Value;
+        if (Vector3.Distance(_world.PlayerPosition, vendorPosition) > StepExecutor.DefaultStopDistance + StepExecutor.ArrivalSlack)
+        {
+            if (_travel.Status != StepStatus.Running)
+                _travel.Begin(new QuestStep
+                {
+                    Kind = StepKind.WalkTo, KindName = "WalkTo",
+                    Position = vendorPosition, TerritoryId = client.TerritoryId,
+                });
+            StatusLine = $"{client.Name}: walking to {buy.VendorName}";
+            if (_travel.Tick() == StepStatus.Failed)
+                Fault($"{client.Name}: could not reach {buy.VendorName} — {_travel.FailReason}");
+            return;
+        }
+        _travel.Cancel();
+
+        StatusLine = $"{client.Name}: buying {buy.Missing} × {buy.Name} from {buy.VendorName}";
+        if (_world.UtcNow - _lastAction < ShopGap) return;
+        _lastAction = _world.UtcNow;
+
+        if (!_game.IsShopOpen(buy.ShopId))
+        {
+            if (!_game.OpenShop(buy.VendorDataId, buy.ShopId))
+                _log($"{client.Name}: could not open {buy.VendorName}'s shop yet.");
+        }
+        else if (!_game.BuyFromShop(buy.ShopId, buy.ItemId, buy.Missing))
+        {
+            Block(DeliveryStop.Materials, $"{client.Name}: {buy.VendorName} does not stock {buy.Name}.");
+            return;
+        }
+        else
+        {
+            _phaseStart = _world.UtcNow;
+            _log($"{client.Name}: bought {buy.Missing} × {buy.Name} for {buy.GilForMissing:N0} gil.");
+        }
+
+        if (_world.UtcNow - _phaseStart > ShopStall)
+            Fault($"{client.Name}: shopping at {buy.VendorName} stalled.");
     }
 
     private void TickInteract()

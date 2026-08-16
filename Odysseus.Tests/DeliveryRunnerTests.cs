@@ -91,6 +91,45 @@ public class DeliveryRunnerTests
             Bag[ItemId] = Math.Max(0, Bag.GetValueOrDefault(ItemId) - 1);
             return true;
         }
+
+        // ── Vendor ──
+        public int Gil { get; set; } = 1_000_000;
+        public uint OpenShopId { get; set; }
+        public bool ShopStocked { get; set; } = true;
+        public List<(uint Item, int Count)> Bought { get; } = [];
+        public bool IsShopOpen(uint shopId) => OpenShopId == shopId && shopId != 0;
+        public bool OpenShop(uint vendorDataId, uint shopId) { OpenShopId = shopId; return true; }
+        public bool ShopBusy(uint shopId) => false;
+        public void CloseShop() => OpenShopId = 0;
+
+        public bool BuyFromShop(uint shopId, uint itemId, int count)
+        {
+            if (!ShopStocked) return false;
+            Bought.Add((itemId, count));
+            Bag[itemId] = Bag.GetValueOrDefault(itemId) + count;
+            Gil -= count * 100;
+            return true;
+        }
+    }
+
+    private const uint IngredientId = 5000;
+    private const uint VendorId = 1000001;
+
+    private sealed class Ingredients : IIngredientSource
+    {
+        public bool HasVendor { get; set; } = true;
+        public uint Cost { get; set; } = 100;
+        public Func<uint, int>? LastHeld { get; private set; }
+
+        public IReadOnlyList<IngredientNeed> Plan(ushort recipeId, int crafts, Func<uint, int> held)
+        {
+            LastHeld = held;
+            return
+            [
+                new IngredientNeed(IngredientId, "Rroneek Chuck", 2, 2 * crafts, held(IngredientId),
+                    HasVendor ? 262144u : 0u, HasVendor ? VendorId : 0u, "Trader", Cost),
+            ];
+        }
     }
 
     private readonly FakeStepWorld _world = new() { ArriveOnMove = true, TerritoryId = 478 };
@@ -101,6 +140,7 @@ public class DeliveryRunnerTests
     private readonly Crafter _crafter = new();
     private readonly Recipes _recipes = new();
     private readonly Game _game = new();
+    private readonly Ingredients _ingredients = new();
     private readonly ScripLedger _scrips;
     private readonly DeliveryRunner _runner;
     private readonly List<string> _log = [];
@@ -109,10 +149,22 @@ public class DeliveryRunnerTests
     public DeliveryRunnerTests()
     {
         _scrips = new ScripLedger([Purple], _currency, new DeliveryCatalog([Zhloe]), _state, _rewards, new Bonus());
-        _runner = new DeliveryRunner(_world, _game, _state, _requests, _scrips, _crafter, _recipes,
+        _runner = new DeliveryRunner(_world, _game, _state, _requests, _scrips, _crafter, _recipes, _ingredients,
             new StepExecutor(_world), () => _preferredJob, _log.Add);
         _world.PlayerPosition = Zhloe.Position;   // standing at the client
         _world.Spawned.Add(Zhloe.NpcDataId);
+        _world.Spawned.Add(VendorId);             // ...with the merchant beside them
+    }
+
+    /// <summary>Tick until the runner reaches a phase, so tests need not count frames.</summary>
+    private void RunTo(DeliveryRunState state, int frames = 40)
+    {
+        for (var i = 0; i < frames && _runner.State != state && !_runner.IsFinished; i++)
+        {
+            _runner.Tick();
+            _world.UtcNow = _world.UtcNow.AddSeconds(2);
+        }
+        Assert.Equal(state, _runner.State);
     }
 
     /// <summary>Run frames until the state settles or the budget runs out.</summary>
@@ -158,6 +210,7 @@ public class DeliveryRunnerTests
     {
         _game.Bag[ItemId] = 0;
         Assert.True(_runner.Start(Zhloe, limit: 1));
+        RunTo(DeliveryRunState.Craft);
         _runner.Tick();
         Assert.Equal(((ushort)4242, 1), _crafter.Asked.Single());
     }
@@ -167,7 +220,9 @@ public class DeliveryRunnerTests
     {
         _game.Bag[ItemId] = 2;
         _state.Used = 1;                            // 5 to do, 2 in hand
+        _state.WeeklyAllowanceUsed = 1;
         Assert.True(_runner.Start(Zhloe));
+        RunTo(DeliveryRunState.Craft);
         _runner.Tick();
 
         Assert.Equal(((ushort)4242, 3), _crafter.Asked.Single());
@@ -197,6 +252,7 @@ public class DeliveryRunnerTests
 
         _game.CurrentCraftType = 7;                 // standing there as a Culinarian
         Assert.True(_runner.Start(Zhloe, limit: 1));
+        RunTo(DeliveryRunState.Craft);
         _runner.Tick();
         Assert.Equal((ushort)4343, _crafter.Asked.Single().Recipe);
 
@@ -204,6 +260,7 @@ public class DeliveryRunnerTests
         _preferredJob = 0;                          // configured to Carpenter regardless
         _runner.Stop();
         Assert.True(_runner.Start(Zhloe, limit: 1));
+        RunTo(DeliveryRunState.Craft);
         _runner.Tick();
         Assert.Equal((ushort)4242, _crafter.Asked.Single().Recipe);
     }
@@ -267,13 +324,71 @@ public class DeliveryRunnerTests
     {
         _game.Bag[ItemId] = 0;
         Assert.True(_runner.Start(Zhloe));
+        RunTo(DeliveryRunState.Craft);
         _runner.Tick();                             // asks Artisan for six
         Assert.Single(_crafter.Asked);
         _runner.Tick();                             // Artisan is not running and the bag is still empty
 
         Assert.Equal(DeliveryRunState.Blocked, _runner.State);
-        Assert.Contains("does not buy ingredients yet", _runner.StatusLine);
+        Assert.Contains("Nothing nearby sells the rest", _runner.StatusLine);
         Assert.Single(_crafter.Asked);              // and it did not ask again
+    }
+
+    /// <summary>
+    /// Travel comes before shopping so the merchant beside the client is in reach. Two crafts need
+    /// four of an ingredient; the bag has one, so three get bought and Artisan is asked afterwards.
+    /// </summary>
+    [Fact]
+    public void Ingredients_are_bought_from_the_merchant_beside_the_client()
+    {
+        _game.Bag[ItemId] = 4;                      // four made, two still to make
+        _game.Bag[IngredientId] = 1;
+        _state.WeeklyAllowanceUsed = 6;             // six left for the week, six for the client
+        Assert.True(_runner.Start(Zhloe));
+        Assert.Equal(6, _runner.Target);
+
+        Run();
+        Assert.Equal((IngredientId, 3), _game.Bought.Single());   // 2 crafts × 2 each, minus the one held
+        Assert.Equal(((ushort)4242, 2), _crafter.Asked.Single());
+    }
+
+    [Fact]
+    public void Shopping_is_skipped_when_the_bag_already_has_enough()
+    {
+        _game.Bag[ItemId] = 6;
+        Assert.True(_runner.Start(Zhloe));
+        Run();
+
+        Assert.Empty(_game.Bought);
+        Assert.Empty(_crafter.Asked);
+        Assert.Equal(DeliveryRunState.Done, _runner.State);
+    }
+
+    /// <summary>Nothing nearby sells it, so hand it to Artisan and let it say what is missing.</summary>
+    [Fact]
+    public void An_ingredient_with_no_nearby_vendor_falls_through_to_artisan()
+    {
+        _ingredients.HasVendor = false;
+        _game.Bag[ItemId] = 5;
+        Assert.True(_runner.Start(Zhloe, limit: 6));
+        Run();
+
+        Assert.Empty(_game.Bought);
+        Assert.Equal(((ushort)4242, 1), _crafter.Asked.Single());
+    }
+
+    [Fact]
+    public void Not_enough_gil_stops_before_buying_anything()
+    {
+        _game.Bag[ItemId] = 0;
+        _game.Gil = 50;                             // 12 ingredients at 100 each is well past it
+        Assert.True(_runner.Start(Zhloe, limit: 1));
+        Run();
+
+        Assert.Equal(DeliveryRunState.Blocked, _runner.State);
+        Assert.Equal(DeliveryStop.Materials, _runner.StoppedBecause);
+        Assert.Contains("gil", _runner.StatusLine);
+        Assert.Empty(_game.Bought);
     }
 
     /// <summary>Two different limits, two different reasons — "done this week" is not specific enough.</summary>

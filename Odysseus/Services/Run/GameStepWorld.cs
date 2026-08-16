@@ -254,6 +254,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         return obj is null ? null : Vector3.Distance(obj.Position, PlayerPosition);
     }
 
+    public Vector3? PositionOfDataId(uint dataId) => NearestWithDataId(dataId)?.Position;
+
     public bool TryInteractWithDataId(uint dataId)
     {
         var target = NearestWithDataId(dataId);

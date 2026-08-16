@@ -178,6 +178,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             scrips,
             artisan,
             new Services.Deliveries.RecipeLookup(DataManager, message => Log.Warning(message)),
+            new Services.Deliveries.IngredientSource(DataManager, message => Log.Warning(message)),
             new StepExecutor(_world, dialogue),
             () => _config.DeliveryCraftJob,
             message => Log.Information(message));

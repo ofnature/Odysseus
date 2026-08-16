@@ -99,6 +99,9 @@ public interface IStepWorld
     float? DistanceToDataId(uint dataId);
 
     /// <summary>Targets and interacts with the nearest object with this data id. False when it is not there.</summary>
+    /// <summary>Where a spawned object is, or null when it is not loaded.</summary>
+    Vector3? PositionOfDataId(uint dataId);
+
     bool TryInteractWithDataId(uint dataId);
 
     /// <summary>Targets and engages the nearest attackable object whose data id is in <paramref name="dataIds"/> (any, if empty). False when none within radius.</summary>

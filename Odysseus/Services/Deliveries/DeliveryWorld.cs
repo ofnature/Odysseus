@@ -31,6 +31,23 @@ public interface IDeliveryWorld
 
     /// <summary>The crafting job the player is on right now, as a <c>CraftType</c> index, or -1.</summary>
     int CurrentCraftType { get; }
+
+    /// <summary>This shop's window is open.</summary>
+    bool IsShopOpen(uint shopId);
+
+    /// <summary>Interact with a vendor and pick its shop. False when the NPC or the shop is not there.</summary>
+    bool OpenShop(uint vendorDataId, uint shopId);
+
+    /// <summary>Buy from an open shop. False when the item is not on its shelves.</summary>
+    bool BuyFromShop(uint shopId, uint itemId, int count);
+
+    /// <summary>A purchase is still going through.</summary>
+    bool ShopBusy(uint shopId);
+
+    void CloseShop();
+
+    /// <summary>Gil on hand.</summary>
+    int Gil { get; }
 }
 
 /// <summary>The live implementation, driving <c>AgentSatisfactionSupply</c> and <c>AgentNpcTrade</c>.</summary>
@@ -217,4 +234,167 @@ public sealed unsafe class GameDeliveryWorld : IDeliveryWorld
     }
 
     private static int SlotOf(DeliveryRoute route) => (int)route - 1;
+
+    // ── Vendors ──
+    //
+    // A shop is an event handler, not an addon: opening one means interacting with the NPC and, if
+    // it offers more than one thing, choosing the shop out of the event selector. Buying then goes
+    // through the handler directly, which is how quantity is set without touching the numeric
+    // stepper in the window.
+
+    public bool IsShopOpen(uint shopId)
+    {
+        try
+        {
+            var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentShop.Instance();
+            if (agent == null || !agent->IsAgentActive() || agent->EventReceiver == null || !agent->IsAddonReady())
+                return false;
+            if (shopId == 0) return true;
+            if (!Handler(shopId, out var handler)) return false;
+            var proxy = (FFXIVClientStructs.FFXIV.Client.Game.Event.ShopEventHandler.AgentProxy*)agent->EventReceiver;
+            return proxy->Handler == handler;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public bool OpenShop(uint vendorDataId, uint shopId)
+    {
+        try
+        {
+            var vendor = FindObject(vendorDataId);
+            if (vendor == null)
+            {
+                _log($"Vendor {vendorDataId} is not nearby.");
+                return false;
+            }
+
+            FFXIVClientStructs.FFXIV.Client.Game.Control.TargetSystem.Instance()->InteractWithObject(vendor);
+
+            // An NPC with one purpose opens straight away; one with several puts up a selector.
+            var selector = FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandlerSelector.Instance();
+            if (selector->Target == null) return true;
+            if (selector->Target != vendor)
+            {
+                _log("The event selector is pointed at a different object.");
+                return false;
+            }
+
+            for (var i = 0; i < selector->OptionsCount; i++)
+            {
+                if (selector->Options[i].Handler->Info.EventId.Id != shopId) continue;
+                FFXIVClientStructs.FFXIV.Client.Game.Event.EventFramework.Instance()->InteractWithHandlerFromSelector(i);
+                return true;
+            }
+            _log($"Shop {shopId:X} is not among what that NPC offers.");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _log($"Opening shop {shopId:X} failed: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public bool BuyFromShop(uint shopId, uint itemId, int count)
+    {
+        try
+        {
+            if (!Handler(shopId, out var handler)) return false;
+            if (handler->Info.EventId.ContentId != FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandlerContent.Shop)
+            {
+                _log($"{shopId:X} is not a shop.");
+                return false;
+            }
+
+            var shop = (FFXIVClientStructs.FFXIV.Client.Game.Event.ShopEventHandler*)handler;
+            for (var i = 0; i < shop->VisibleItemsCount; i++)
+            {
+                var index = shop->VisibleItems[i];
+                if (shop->Items[index].ItemId != itemId) continue;
+                shop->BuyItemIndex = index;
+                shop->ExecuteBuy(count);
+                return true;
+            }
+            _log($"Shop {shopId:X} does not stock item {itemId}.");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _log($"Buying {count} × {itemId} failed: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public bool ShopBusy(uint shopId)
+    {
+        try
+        {
+            if (!Handler(shopId, out var handler)) return false;
+            var shop = (FFXIVClientStructs.FFXIV.Client.Game.Event.ShopEventHandler*)handler;
+            return shop->WaitingForTransactionToFinish;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public void CloseShop()
+    {
+        try
+        {
+            var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentShop.Instance();
+            if (agent == null || agent->EventReceiver == null) return;
+            var proxy = (FFXIVClientStructs.FFXIV.Client.Game.Event.ShopEventHandler.AgentProxy*)agent->EventReceiver;
+            proxy->Handler->CancelInteraction();
+            var result = default(FFXIVClientStructs.FFXIV.Component.GUI.AtkValue);
+            var arg = default(FFXIVClientStructs.FFXIV.Component.GUI.AtkValue);
+            arg.SetInt(-1);
+            agent->ReceiveEvent(&result, &arg, 1, 0);
+        }
+        catch (Exception ex)
+        {
+            _log($"Closing the shop failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>Gil lives in the currency container, not the bags, so the plain counter is right here.</summary>
+    public int Gil
+    {
+        get
+        {
+            try
+            {
+                var manager = FFXIVClientStructs.FFXIV.Client.Game.InventoryManager.Instance();
+                return manager == null ? 0 : manager->GetInventoryItemCount(1);
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+    }
+
+    private static bool Handler(uint shopId, out FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandler* handler)
+    {
+        handler = null;
+        var map = FFXIVClientStructs.FFXIV.Client.Game.Event.EventFramework.Instance()->EventHandlerModule.EventHandlerMap;
+        if (!map.TryGetValuePointer(shopId, out var entry) || entry == null || entry->Value == null)
+            return false;
+        handler = entry->Value;
+        return true;
+    }
+
+    private static FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject* FindObject(uint dataId)
+    {
+        var objects = FFXIVClientStructs.FFXIV.Client.Game.Object.GameObjectManager.Instance();
+        if (objects == null) return null;
+        foreach (var obj in objects->Objects.IndexSorted)
+            if (obj.Value != null && obj.Value->BaseId == dataId)
+                return obj.Value;
+        return null;
+    }
 }
