@@ -26,6 +26,7 @@ public class DeliveryRunnerTests
         public int? UsedThisWeek(DeliveryClient c) => Used;
         public int Rank(DeliveryClient c) => 1;
         public bool DataLoaded { get; set; } = true;
+        public int WeeklyAllowanceUsed { get; set; }
         public (int Current, int Max) Satisfaction(DeliveryClient c) => (0, 0);
     }
 
@@ -275,6 +276,31 @@ public class DeliveryRunnerTests
         Assert.Single(_crafter.Asked);              // and it did not ask again
     }
 
+    /// <summary>Two different limits, two different reasons — "done this week" is not specific enough.</summary>
+    [Fact]
+    public void The_weekly_limit_and_the_client_limit_give_different_reasons()
+    {
+        _state.Used = 6;                            // this client is finished, the week is not
+        _state.WeeklyAllowanceUsed = 6;
+        Assert.False(_runner.Start(Zhloe));
+        Assert.Contains("all 6 of its own deliveries", _runner.StatusLine);
+
+        _state.Used = 2;                            // the client has room; the week does not
+        _state.WeeklyAllowanceUsed = 12;
+        Assert.False(_runner.Start(Zhloe));
+        Assert.Contains("weekly allowance is spent", _runner.StatusLine);
+        Assert.Contains("Tuesday 08:00 UTC", _runner.StatusLine);
+    }
+
+    [Fact]
+    public void A_run_is_capped_by_what_the_week_has_left()
+    {
+        _game.Bag[ItemId] = 6;
+        _state.WeeklyAllowanceUsed = 10;            // two left for the week, six for the client
+        Assert.True(_runner.Start(Zhloe));
+        Assert.Equal(2, _runner.Target);
+    }
+
     [Fact]
     public void A_locked_client_or_unloaded_data_is_refused_before_anything_moves()
     {
@@ -289,14 +315,68 @@ public class DeliveryRunnerTests
     }
 
     [Fact]
-    public void A_refused_turn_in_faults_instead_of_retrying_forever()
+    public void A_refused_turn_in_retries_and_eventually_faults()
     {
         _game.Bag[ItemId] = 6;
         _game.RefuseCommit = true;
         Assert.True(_runner.Start(Zhloe));
-        Run();
+        Run(frames: 200);
 
         Assert.Equal(DeliveryRunState.Faulted, _runner.State);
+        Assert.Equal(0, _game.Committed);
+    }
+
+    /// <summary>
+    /// Picking a route closes the supply window and opens the trade one. Reading "supply window
+    /// gone" as a failure mid-transition faulted a run that had just delivered successfully.
+    /// </summary>
+    [Fact]
+    public void The_gap_between_the_two_windows_is_not_a_failure()
+    {
+        _game.Bag[ItemId] = 6;
+        Assert.True(_runner.Start(Zhloe, limit: 1));
+
+        // Craft is skipped (stocked), travel is instant, then: supply open, route picked, and the
+        // client shuts the supply window before the trade window is acknowledged.
+        for (var i = 0; i < 10 && _runner.State != DeliveryRunState.TurnIn; i++) _runner.Tick();
+        Assert.Equal(DeliveryRunState.TurnIn, _runner.State);
+
+        _runner.Tick();                          // opens the route
+        _game.SupplyOpen = false;                // ...and the supply window goes away
+        _world.UtcNow = _world.UtcNow.AddSeconds(2);
+        _runner.Tick();
+
+        Assert.NotEqual(DeliveryRunState.Faulted, _runner.State);
+        Assert.Equal(1, _game.Committed);
+        Assert.Equal(DeliveryRunState.Done, _runner.State);
+    }
+
+    [Fact]
+    public void A_client_that_never_opens_the_window_faults_at_the_interact()
+    {
+        _game.Bag[ItemId] = 6;
+        _game.SupplyOpen = false;
+        Assert.True(_runner.Start(Zhloe, limit: 1));
+        Run(frames: 200);
+
+        Assert.Equal(DeliveryRunState.Faulted, _runner.State);
+        Assert.Contains("could not open the delivery window", _runner.StatusLine);
+    }
+
+    /// <summary>Tolerating the transition must not mean waiting forever for a window that is gone.</summary>
+    [Fact]
+    public void Both_windows_vanishing_before_the_first_hand_over_still_faults()
+    {
+        _game.Bag[ItemId] = 6;
+        Assert.True(_runner.Start(Zhloe, limit: 1));
+        for (var i = 0; i < 10 && _runner.State != DeliveryRunState.TurnIn; i++) _runner.Tick();
+        Assert.Equal(DeliveryRunState.TurnIn, _runner.State);
+
+        _game.SupplyOpen = false;                // and OpenRoute will never be reached
+        Run(frames: 200);
+
+        Assert.Equal(DeliveryRunState.Faulted, _runner.State);
+        Assert.Contains("never came up", _runner.StatusLine);
         Assert.Equal(0, _game.Committed);
     }
 }

@@ -140,12 +140,20 @@ public sealed class ScripLedger
         return (true, null);
     }
 
-    /// <summary>Deliveries left this week for a client — the weekly allowance (0 when locked or unreadable).</summary>
+    /// <summary>Deliveries left in the shared weekly allowance, across every client.</summary>
+    public int WeeklyRemaining => Math.Max(0, DeliveryLimits.WeeklyAllowance - _state.WeeklyAllowanceUsed);
+
+    /// <summary>
+    /// Deliveries this client can still take: its own six, but never more than the week has left.
+    /// The weekly allowance is shared, so a client with six of its own is still capped at two when
+    /// only two remain for the week.
+    /// </summary>
     public int RemainingDeliveries(DeliveryClient client)
     {
         if (!_state.IsUnlocked(client)) return 0;
         var used = _state.UsedThisWeek(client);
-        return used is { } u ? Math.Max(0, client.DeliveriesPerWeek - u) : client.DeliveriesPerWeek;
+        var own = used is { } u ? Math.Max(0, client.DeliveriesPerWeek - u) : client.DeliveriesPerWeek;
+        return Math.Min(own, WeeklyRemaining);
     }
 
     /// <summary>
@@ -174,15 +182,48 @@ public sealed class ScripLedger
         return Math.Min(remaining, (int)Math.Ceiling((max - current) / (double)perDelivery));
     }
 
+    /// <summary>
+    /// The best the week can still pay, per currency.
+    ///
+    /// <para>
+    /// The twelve allowances are shared, so this is not a sum over clients — it is twelve
+    /// deliveries spent as well as possible. Per currency the budget goes to the best-paying
+    /// clients first, which is the true ceiling and what an overcap warning should be built on.
+    /// Summing every client's six was what put the estimate four times over.
+    /// </para>
+    /// </summary>
     private Dictionary<int, int> MaxGainByCurrency()
     {
+        var budget = WeeklyRemaining;
         var total = new Dictionary<int, int>();
+        if (budget <= 0) return total;
+
+        // (rate, how many deliveries at that rate), per currency.
+        var offers = new Dictionary<int, List<(int Rate, int Count)>>();
         foreach (var client in _clients.All)
         {
             var paying = PayingDeliveries(client);
             if (paying <= 0) continue;
             foreach (var (currency, amount) in _rewards.PerDelivery(client, _state.Rank(client), _bonus.For(client).Craft))
-                total[currency] = total.GetValueOrDefault(currency) + amount * paying;
+            {
+                if (!offers.TryGetValue(currency, out var list))
+                    offers[currency] = list = [];
+                list.Add((amount, paying));
+            }
+        }
+
+        foreach (var (currency, list) in offers)
+        {
+            var left = budget;
+            var sum = 0;
+            foreach (var (rate, count) in list.OrderByDescending(x => x.Rate))
+            {
+                if (left <= 0) break;
+                var take = Math.Min(count, left);
+                sum += rate * take;
+                left -= take;
+            }
+            total[currency] = sum;
         }
         return total;
     }

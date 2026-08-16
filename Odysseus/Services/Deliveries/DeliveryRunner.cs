@@ -142,7 +142,10 @@ public sealed class DeliveryRunner
 
         var remaining = _scrips.RemainingDeliveries(client);
         if (remaining <= 0)
-            return Refuse(DeliveryStop.Setup, $"{client.Name} has no deliveries left this week.");
+            return Refuse(DeliveryStop.Setup, _scrips.WeeklyRemaining <= 0
+                ? $"The weekly allowance is spent — all {DeliveryLimits.WeeklyAllowance} deliveries are used across " +
+                  "every client. It resets with the weekly reset (Tuesday 08:00 UTC)."
+                : $"{client.Name} has taken all {client.DeliveriesPerWeek} of its own deliveries this week.");
 
         var (allowed, reason) = _scrips.MayTurnIn(client);
         if (!allowed)
@@ -334,43 +337,58 @@ public sealed class DeliveryRunner
             Block(DeliveryStop.Materials, $"{client.Name}: out of {request.ItemName} after {_delivered} deliveries.");
             return;
         }
-        if (!_game.IsSupplyOpen(client))
-        {
-            // The window closes itself after a hand-over; reopen for the next one.
-            if (_delivered > 0 && _delivered < _target) { Enter(DeliveryRunState.Interact); return; }
-            Fault($"{client.Name}: the delivery window closed unexpectedly.");
-            return;
-        }
 
         StatusLine = $"{client.Name}: turning in {request.ItemName} ({_delivered}/{_target})";
         if (_world.UtcNow - _lastAction < TurnInGap) return;
 
-        if (!_game.IsTradeOpen(request.ItemId))
+        // The trade window first: picking a route closes the supply window and opens this one, so
+        // asking "is the supply window still up?" at the wrong moment reads as a failure when it is
+        // just the handover between the two.
+        if (_game.IsTradeOpen(request.ItemId))
         {
-            _game.OpenRoute(DeliveryRoute.Craft);
-            _lastAction = _world.UtcNow;
-        }
-        else if (_game.CommitTrade(DeliveryRoute.Craft))
-        {
+            if (!_game.CommitTrade(DeliveryRoute.Craft))
+            {
+                // Retry rather than fault: the three events need the agent to have caught up, and
+                // a refusal one frame can succeed the next. The stall clock is the real backstop.
+                _lastAction = _world.UtcNow;
+                if (_world.UtcNow - _phaseStart > TurnInStall)
+                    Fault($"{client.Name}: the turn-in was refused by the game.");
+                return;
+            }
             _delivered++;
             _lastAction = _world.UtcNow;
             _phaseStart = _world.UtcNow;
             _log($"{client.Name}: delivered {_delivered}/{_target}.");
-        }
-        else
-        {
-            Fault($"{client.Name}: the turn-in was refused by the game.");
+            if (_delivered >= _target) Finish();
             return;
         }
 
+        if (_game.IsSupplyOpen(client))
+        {
+            _game.OpenRoute(DeliveryRoute.Craft);
+            _lastAction = _world.UtcNow;
+            return;
+        }
+
+        // Neither window is up. That is normal for a beat — mid-transition, or the client closed
+        // both after a hand-over — so go back and talk again rather than calling it a failure, and
+        // only give up once the stall clock runs out.
+        if (_delivered > 0)
+        {
+            Enter(DeliveryRunState.Interact);
+            return;
+        }
         if (_world.UtcNow - _phaseStart > TurnInStall)
-            Fault($"{client.Name}: the turn-in stalled after {_delivered} deliveries.");
+            Fault($"{client.Name}: the delivery window never came up.");
     }
 
     private void Finish()
     {
         State = DeliveryRunState.Done;
-        StatusLine = $"{_client!.Name}: {_delivered} delivered.";
+        var weekly = _scrips.WeeklyRemaining;
+        StatusLine = weekly <= 0
+            ? $"{_client!.Name}: {_delivered} delivered — the weekly allowance of {DeliveryLimits.WeeklyAllowance} is now spent."
+            : $"{_client!.Name}: {_delivered} delivered, {weekly} left in the weekly allowance.";
         _log(StatusLine);
     }
 

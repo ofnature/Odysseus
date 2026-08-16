@@ -109,6 +109,23 @@ public sealed class DeliveriesWindow : OdysseusWindow
     {
         var unlocked = _catalog.All.Count(_state.IsUnlocked);
         OdysseusTheme.IdChip($"Unlocked {unlocked}/{_catalog.All.Count}");
+
+        // The twelve allowances are shared across every client, so this — not the per-client 0/6 —
+        // is what actually decides how much of the week is left.
+        var weekly = _scrips.WeeklyRemaining;
+        ImGui.SameLine(0f, 8f);
+        if (weekly > 0)
+            OdysseusTheme.Chip($"{weekly}/{DeliveryLimits.WeeklyAllowance} deliveries left",
+                OdysseusTheme.GreenDark, OdysseusTheme.TextPrimary);
+        else
+            OdysseusTheme.Chip("Weekly limit hit", OdysseusTheme.NeutralDark, OdysseusTheme.TextPrimary);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip($"{DeliveryLimits.WeeklyAllowance} deliveries a week across all clients together,\n" +
+                             "at most 6 with any one of them. Resets Tuesday 08:00 UTC.\n" +
+                             (weekly > 0
+                                 ? "Per-client counts are capped by whatever is left here."
+                                 : "Nothing more can be turned in until the reset."));
+
         ImGui.SameLine(0f, 8f);
         if (_artisan.Available)
             OdysseusTheme.StateChip("Artisan ready");
@@ -275,7 +292,14 @@ public sealed class DeliveriesWindow : OdysseusWindow
     {
         if (remaining <= 0)
         {
-            ImGui.TextColored(OdysseusTheme.TextDisabled, "done this week");
+            var weeklySpent = _scrips.WeeklyRemaining <= 0;
+            ImGui.TextColored(OdysseusTheme.TextDisabled, weeklySpent ? "weekly limit hit" : "done this week");
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(weeklySpent
+                    ? $"All {DeliveryLimits.WeeklyAllowance} weekly deliveries are used across every client,\n" +
+                      "so nothing more can be turned in until Tuesday 08:00 UTC."
+                    : $"{client.Name} has taken all {client.DeliveriesPerWeek} of its own deliveries this week.\n" +
+                      $"{_scrips.WeeklyRemaining} of the shared allowance remain for other clients.");
             return;
         }
 
@@ -378,7 +402,8 @@ public sealed class DeliveriesWindow : OdysseusWindow
         if (_status.Length > 0)
             OdysseusTheme.TextWrappedColored(OdysseusTheme.TextSecondary, _status);
         OdysseusTheme.TextWrappedColored(OdysseusTheme.TextDisabled,
-            "Max gain assumes every remaining delivery pays its highest rate, bonus weeks included. Overcap is what would " +
+            $"Max gain spends the {DeliveryLimits.WeeklyAllowance} shared weekly allowances on the best-paying clients " +
+            "at their highest rate, bonus weeks included — it is a ceiling, not a forecast. Overcap is what would " +
             "be thrown away — spend those scrips first. A turn-in that would overcap is stopped and says so. Unlock queues " +
             "the client's opening quest chain onto the priority list.");
     }

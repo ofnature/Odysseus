@@ -24,6 +24,7 @@ public class ScripLedgerTests
         public int? UsedThisWeek(DeliveryClient c) => Used.GetValueOrDefault(c.Index);
         public int Rank(DeliveryClient c) => 1;
         public bool DataLoaded => true;
+        public int WeeklyAllowanceUsed => Used.Values.Sum();
         /// <summary>Default (0, 0) means "gauge full" — no rank-up cap unless a test asks for one.</summary>
         public Dictionary<uint, (int, int)> Gauge { get; } = new();
         public (int Current, int Max) Satisfaction(DeliveryClient c) => Gauge.GetValueOrDefault(c.Index);
@@ -160,6 +161,76 @@ public class ScripLedgerTests
         Assert.Equal(1, Row("2022-07-12T08:00:00Z"));
         Assert.Equal(0, Row("2022-09-27T08:00:00Z"));   // wraps after twelve weeks
         Assert.Equal(10, Row("2026-08-16T13:31:00Z"));  // matches the live client
+    }
+
+    /// <summary>
+    /// The twelve allowances are shared, not twelve each. Summing every unlocked client's six was
+    /// what put Max gain four times above what the week can actually pay.
+    /// </summary>
+    [Fact]
+    public void The_weekly_allowance_is_shared_across_clients()
+    {
+        var cur = new Currency();
+        var state = new State();
+        var rewards = new Rewards();
+        var clients = Enumerable.Range(1, 5)
+            .Select(i => new DeliveryClient((uint)i, $"Client {i}", 6, 1000, 60, 478)).ToList();
+        var ledger = new ScripLedger([PurpleCrafters], cur, new DeliveryCatalog(clients), state, rewards, new Bonus());
+        foreach (var c in clients) state.Unlocked.Add(c.Index);
+
+        // Five clients × six is thirty deliveries on paper; the week allows twelve.
+        Assert.Equal(12, ledger.WeeklyRemaining);
+        Assert.Equal(1200, ledger.Read().Single().MaxGain);
+
+        state.Used[clients[0].Index] = 4;                  // four spent anywhere
+        Assert.Equal(8, ledger.WeeklyRemaining);
+        Assert.Equal(800, ledger.Read().Single().MaxGain);
+        Assert.Equal(2, ledger.RemainingDeliveries(clients[0]));  // its own six, minus four used
+        Assert.Equal(6, ledger.RemainingDeliveries(clients[1]));  // untouched, and eight still fit
+    }
+
+    [Fact]
+    public void A_client_cannot_take_more_than_the_week_has_left()
+    {
+        var (ledger, _, state, _, _) = Make();
+        state.Unlocked.Add(Zhloe.Index);
+        state.Unlocked.Add(Naago.Index);
+        state.Used[Naago.Index] = 6;
+        state.Used[Zhloe.Index] = 4;                       // ten of twelve gone
+
+        Assert.Equal(2, ledger.WeeklyRemaining);
+        Assert.Equal(2, ledger.RemainingDeliveries(Zhloe)); // its own two, and the week's two agree
+        Assert.Equal(0, ledger.RemainingDeliveries(Naago));
+
+        state.Used[Zhloe.Index] = 6;                        // weekly limit hit
+        Assert.Equal(0, ledger.WeeklyRemaining);
+        Assert.Equal(0, ledger.RemainingDeliveries(Zhloe));
+        Assert.All(ledger.Read(), s => Assert.Equal(0, s.MaxGain));
+    }
+
+    /// <summary>With a shared budget the estimate has to spend it on the best payers, not the first.</summary>
+    [Fact]
+    public void Max_gain_spends_the_allowance_on_the_best_paying_clients()
+    {
+        var cur = new Currency();
+        var state = new State();
+        var rich = new DeliveryClient(1, "Rich", 6, 1000, 60, 478);
+        var poor = new DeliveryClient(2, "Poor", 6, 1000, 60, 478);
+        var rewards = new PerClientRewards { Rates = { [1] = 300, [2] = 50 } };
+        var ledger = new ScripLedger([PurpleCrafters], cur, new DeliveryCatalog([poor, rich]), state, rewards, new Bonus());
+        state.Unlocked.Add(rich.Index);
+        state.Unlocked.Add(poor.Index);
+
+        // Twelve to spend: six at 300 from Rich, then six at 50 from Poor.
+        Assert.Equal(6 * 300 + 6 * 50, ledger.Read().Single().MaxGain);
+    }
+
+    private sealed class PerClientRewards : IDeliveryRewards
+    {
+        public Dictionary<uint, int> Rates { get; } = new();
+        public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient client, int rank, bool bonus = false)
+            => new Dictionary<int, int> { [2] = Rates.GetValueOrDefault(client.Index) };
+        public int SatisfactionPerDelivery(DeliveryClient client, int rank, bool bonus = false) => 0;
     }
 
     [Fact]

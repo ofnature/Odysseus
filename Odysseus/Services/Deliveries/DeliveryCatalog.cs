@@ -14,6 +14,17 @@ public sealed record DeliveryClient(
     uint Index, string Name, int DeliveriesPerWeek, ushort UnlockQuestId, ushort UnlockLevel,
     uint TerritoryId, uint NpcDataId = 0, System.Numerics.Vector3 Position = default);
 
+/// <summary>Limits the game imposes on deliveries, in one place.</summary>
+public static class DeliveryLimits
+{
+    /// <summary>
+    /// Deliveries allowed per week across <b>all</b> clients together. Each client separately caps
+    /// at its own <c>DeliveriesPerWeek</c> (six), but twelve is the ceiling for the week no matter
+    /// how they are spread — nine unlocked clients do not mean fifty-four deliveries.
+    /// </summary>
+    public const int WeeklyAllowance = 12;
+}
+
 /// <summary>Reads the delivery clients' standing from the game.</summary>
 public interface IDeliveryState
 {
@@ -21,6 +32,9 @@ public interface IDeliveryState
     /// <summary>Deliveries already used this week, or null when it cannot be read.</summary>
     int? UsedThisWeek(DeliveryClient client);
     int Rank(DeliveryClient client);
+
+    /// <summary>Deliveries used this week across every client — against <see cref="DeliveryLimits.WeeklyAllowance"/>.</summary>
+    int WeeklyAllowanceUsed { get; }
 
     /// <summary>
     /// The satisfaction gauge: how far into the current rank, and what the rank needs. Max is 0 at
@@ -173,6 +187,27 @@ public sealed unsafe class DeliveryState : IDeliveryState
         {
             _log?.Invoke($"Satisfaction read failed: {ex.Message}");
             return (0, 0);
+        }
+    }
+
+    /// <summary>The game keeps a per-client tally; the weekly total is their sum.</summary>
+    public int WeeklyAllowanceUsed
+    {
+        get
+        {
+            try
+            {
+                var manager = FFXIVClientStructs.FFXIV.Client.Game.SatisfactionSupplyManager.Instance();
+                if (manager == null) return 0;
+                var total = 0;
+                foreach (var used in manager->UsedAllowances)
+                    total += used;
+                return total;
+            }
+            catch
+            {
+                return 0;
+            }
         }
     }
 
