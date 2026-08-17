@@ -33,19 +33,25 @@ public sealed class JournalWindow : OdysseusWindow
     private readonly QuestCatalog _catalog;
     private readonly IQuestStateReader _quests;
     private readonly UnlockPlanner _unlock;
+    private readonly PriorityList _priority;
     private readonly Func<ushort, bool> _hasPath;
 
     private string _search = string.Empty;
     private bool _hideCompleted = true;
     private bool _onlyWithPaths = true;
     private string _status = string.Empty;
+    private readonly Dictionary<ushort, ChainPlan?> _plans = new();
+    private DateTime _plansAt;
+    private static readonly TimeSpan PlanLife = TimeSpan.FromSeconds(3);
 
-    public JournalWindow(QuestCatalog catalog, IQuestStateReader quests, UnlockPlanner unlock, Func<ushort, bool> hasPath)
+    public JournalWindow(QuestCatalog catalog, IQuestStateReader quests, UnlockPlanner unlock, PriorityList priority,
+        Func<ushort, bool> hasPath)
         : base("Odysseus Journal##OdysseusJournal")
     {
         _catalog = catalog;
         _quests = quests;
         _unlock = unlock;
+        _priority = priority;
         _hasPath = hasPath;
         Size = new Vector2(760, 620);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -114,7 +120,9 @@ public sealed class JournalWindow : OdysseusWindow
         {
             var rows = category.ToList();
             ImGui.SetNextItemOpen(_search.Length > 0, ImGuiCond.FirstUseEver);
-            if (!ImGui.TreeNode($"{category.Key}  ({rows.Count})##c{name}{category.Key}")) continue;
+            var categoryOpen = ImGui.TreeNode($"{category.Key}  ({rows.Count})##c{name}{category.Key}");
+            QueueAllButton($"cat{name}{category.Key}", category.Key, rows);
+            if (!categoryOpen) continue;
 
             // "Disciple of the Hand Quests" is one journal category holding every crafter — 126
             // quests of eight interleaved lines. Split by class when the category actually holds
@@ -126,9 +134,12 @@ public sealed class JournalWindow : OdysseusWindow
                 foreach (var job in rows.GroupBy(q => q.JobName).OrderBy(g => g.Key.Length == 0).ThenBy(g => g.Key))
                 {
                     var label = job.Key.Length > 0 ? job.Key : "Other";
+                    var line = job.ToList();
                     ImGui.SetNextItemOpen(_search.Length > 0, ImGuiCond.FirstUseEver);
-                    if (!ImGui.TreeNode($"{label}  ({job.Count()})##j{name}{category.Key}{label}")) continue;
-                    foreach (var quest in Ordered(job))
+                    var jobOpen = ImGui.TreeNode($"{label}  ({line.Count})##j{name}{category.Key}{label}");
+                    QueueAllButton($"job{name}{category.Key}{label}", label, line);
+                    if (!jobOpen) continue;
+                    foreach (var quest in Ordered(line))
                         DrawQuest(quest);
                     ImGui.TreePop();
                 }
@@ -147,9 +158,73 @@ public sealed class JournalWindow : OdysseusWindow
     private static IEnumerable<QuestListing> Ordered(IEnumerable<QuestListing> quests)
         => quests.OrderBy(q => q.ClassJobLevel).ThenBy(q => q.QuestId);
 
+    /// <summary>
+    /// Queue a whole line, on the group's own header row.
+    ///
+    /// <para>
+    /// Quests go in the order the line is done, and each one still runs through the chain resolver,
+    /// so a prerequisite outside this group is pulled in with it. The priority list refuses
+    /// duplicates, which is what makes queueing twenty-one overlapping chains safe.
+    /// </para>
+    ///
+    /// <para>Only what is on screen is queued — the completed and no-path filters still apply.</para>
+    /// </summary>
+    private void QueueAllButton(string id, string label, IReadOnlyList<QuestListing> quests)
+    {
+        if (quests.Count == 0) return;
+        ImGui.SameLine();
+
+        // Deliberately not pre-checking which are runnable: that is a chain resolution each, and a
+        // category like Sidequests holds over a thousand. The filtering happens on click instead.
+        if (!OdysseusTheme.IconTextButton(FontAwesomeIcon.Plus, $"All##all{id}", OdysseusTheme.GreenDark,
+                $"Queue all {quests.Count} of {label}, in order, with anything they need first.\n" +
+                "Anything already queued or not yet reachable is skipped.",
+                new Vector2(52, 20)))
+            return;
+
+        var runnable = quests.Where(q => _unlock.Plan(q.QuestId) is { IsRunnable: true }).ToList();
+        if (runnable.Count == 0)
+        {
+            _status = $"{label}: nothing here can be queued yet.";
+            return;
+        }
+
+        var before = _priority.Count;
+        foreach (var quest in Ordered(runnable))
+            _unlock.Queue(quest.QuestId, quest.Name);
+        var added = _priority.Count - before;
+
+        _status = added == 0
+            ? $"{label}: everything was already on the priority list."
+            : $"{label}: queued {added} quest(s)" +
+              (added > runnable.Count ? $" — {added - runnable.Count} pulled in as prerequisites." : ".");
+        _plans.Clear();
+    }
+
+    /// <summary>
+    /// Chain plans, memoised for a moment.
+    ///
+    /// <para>
+    /// Every visible row wants one, and resolving a chain is a graph walk — doing that per row per
+    /// frame is what makes an expanded category crawl. Plans only move when a quest completes or
+    /// something is queued, so a short-lived cache costs nothing in accuracy.
+    /// </para>
+    /// </summary>
+    private ChainPlan? PlanFor(ushort questId)
+    {
+        var now = DateTime.UtcNow;
+        if (now - _plansAt > PlanLife)
+        {
+            _plans.Clear();
+            _plansAt = now;
+        }
+        if (_plans.TryGetValue(questId, out var cached)) return cached;
+        return _plans[questId] = _unlock.Plan(questId);
+    }
+
     private void DrawQuest(QuestListing quest)
     {
-        var plan = _unlock.Plan(quest.QuestId);
+        var plan = PlanFor(quest.QuestId);
         var runnable = plan is { IsRunnable: true };
 
         using (ImRaii.Disabled(!runnable))
@@ -163,6 +238,7 @@ public sealed class JournalWindow : OdysseusWindow
                 var queued = _unlock.Queue(quest.QuestId, quest.Name);
                 _status = $"Queued {queued.Steps.Count} quest(s) for {quest.Name}" +
                           (queued.Steps.Count > 1 ? $" — {string.Join(" → ", queued.Steps.Select(s => s.Name))}" : ".");
+                _plans.Clear();
             }
         }
 

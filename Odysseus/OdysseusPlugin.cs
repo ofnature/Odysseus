@@ -192,7 +192,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _flightWindow = new FlightWindow(currents, flightState, _collector, _priority, _catalog, unlockPlanner,
             () => ClientState.TerritoryType);
 
-        _journalWindow = new JournalWindow(_catalog, _quests, unlockPlanner, _pathStore.Has);
+        _journalWindow = new JournalWindow(_catalog, _quests, unlockPlanner, _priority, _pathStore.Has);
 
         // Built after the windows it can open: the deps record captures them, and the
         // nullable analysis is right that a field assigned later is null at this point.
