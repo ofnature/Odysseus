@@ -144,3 +144,41 @@ public class JournalGroupingTests
         Assert.False(Catalog.ById(3000)!.IsMainScenario);
     }
 }
+
+/// <summary>
+/// The journal puts all 126 crafter quests in one category, eight interleaved lines deep. Splitting
+/// by class is what makes that readable, so the split has to be exact about when it applies.
+/// </summary>
+public class JobGroupingTests
+{
+    private static QuestListing Job(ushort id, string name, string job, ushort level) =>
+        new(id, name, level, 2, false, [], 0) { Section = "Class & Job Quests", Category = "Disciple of the Hand Quests", JobName = job };
+
+    private static readonly QuestCatalog Catalog = new(
+    [
+        Job(205, "My First Saw", "Carpenter", 1),
+        Job(106, "A Test of Technique", "Carpenter", 5),
+        Job(292, "My First Cross-pein Hammer", "Blacksmith", 1),
+        Job(535, "My First Needle", "Weaver", 1),
+        new QuestListing(9000, "Nothing In Particular", 1, 2, false, [], 0)
+            { Section = "Class & Job Quests", Category = "Disciple of the Hand Quests" },
+    ]);
+
+    [Fact]
+    public void A_mixed_category_splits_into_one_group_per_class()
+    {
+        var byJob = Catalog.All.GroupBy(q => q.JobName).ToDictionary(g => g.Key, g => g.Count());
+        Assert.Equal(2, byJob["Carpenter"]);
+        Assert.Equal(1, byJob["Blacksmith"]);
+        Assert.Equal(1, byJob["Weaver"]);
+        Assert.Equal(1, byJob[string.Empty]);   // falls into "Other" rather than disappearing
+    }
+
+    [Fact]
+    public void A_class_line_reads_in_the_order_it_is_done()
+    {
+        var carpenter = Catalog.All.Where(q => q.JobName == "Carpenter")
+            .OrderBy(q => q.ClassJobLevel).ThenBy(q => q.QuestId).Select(q => q.Name).ToList();
+        Assert.Equal(["My First Saw", "A Test of Technique"], carpenter);
+    }
+}

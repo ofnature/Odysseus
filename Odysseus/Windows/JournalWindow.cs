@@ -112,16 +112,40 @@ public sealed class JournalWindow : OdysseusWindow
                      .GroupBy(q => q.Category.Length > 0 ? q.Category : name)
                      .OrderBy(g => g.Key))
         {
-            var rows = category.OrderBy(q => q.ClassJobLevel).ThenBy(q => q.QuestId).ToList();
+            var rows = category.ToList();
             ImGui.SetNextItemOpen(_search.Length > 0, ImGuiCond.FirstUseEver);
             if (!ImGui.TreeNode($"{category.Key}  ({rows.Count})##c{name}{category.Key}")) continue;
 
-            foreach (var quest in rows)
-                DrawQuest(quest);
+            // "Disciple of the Hand Quests" is one journal category holding every crafter — 126
+            // quests of eight interleaved lines. Split by class when the category actually holds
+            // more than one, and leave single-class categories flat rather than adding a tier that
+            // says nothing.
+            var jobs = rows.Select(q => q.JobName).Where(j => j.Length > 0).Distinct().ToList();
+            if (jobs.Count > 1)
+            {
+                foreach (var job in rows.GroupBy(q => q.JobName).OrderBy(g => g.Key.Length == 0).ThenBy(g => g.Key))
+                {
+                    var label = job.Key.Length > 0 ? job.Key : "Other";
+                    ImGui.SetNextItemOpen(_search.Length > 0, ImGuiCond.FirstUseEver);
+                    if (!ImGui.TreeNode($"{label}  ({job.Count()})##j{name}{category.Key}{label}")) continue;
+                    foreach (var quest in Ordered(job))
+                        DrawQuest(quest);
+                    ImGui.TreePop();
+                }
+            }
+            else
+            {
+                foreach (var quest in Ordered(rows))
+                    DrawQuest(quest);
+            }
             ImGui.TreePop();
         }
         ImGui.Unindent(12f);
     }
+
+    /// <summary>Level then id — the order a line is actually done in.</summary>
+    private static IEnumerable<QuestListing> Ordered(IEnumerable<QuestListing> quests)
+        => quests.OrderBy(q => q.ClassJobLevel).ThenBy(q => q.QuestId);
 
     private void DrawQuest(QuestListing quest)
     {

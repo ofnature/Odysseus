@@ -32,6 +32,7 @@ public sealed record MainWindowDeps(
     Action OpenDebug,
     Action OpenTribes,
     Action OpenDeliveries,
+    Action OpenJournal,
     Action<ushort> OpenEditor,
     Func<uint?> TargetDataId,
     Func<Vector3?> TargetPosition,
@@ -345,6 +346,9 @@ public sealed class MainWindow : OdysseusWindow
         ImGui.SameLine();
         if (OdysseusTheme.IconButton("deliveries", FontAwesomeIcon.Box,
                 "Custom deliveries, this week's bonuses and the scrip cap.", sq)) _d.OpenDeliveries();
+        ImGui.SameLine();
+        if (OdysseusTheme.IconButton("journal", FontAwesomeIcon.Book,
+                "Journal — find a quest line and queue its chain.", sq)) _d.OpenJournal();
     }
 
     // ── sections ──
@@ -385,6 +389,9 @@ public sealed class MainWindow : OdysseusWindow
         ImGui.SameLine();
         if (ImGui.Button("Deliveries##qa", h)) _d.OpenDeliveries();
         if (ImGui.IsItemHovered()) ImGui.SetTooltip("Custom deliveries, this week's bonuses and the scrip cap.");
+        ImGui.SameLine();
+        if (ImGui.Button("Journal##qa", h)) _d.OpenJournal();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Every quest line, grouped as the journal groups it. Queue a chain.");
 
         if (ImGui.Button("Settings##qa", h)) _d.OpenConfig();
         ImGui.SameLine();

@@ -204,6 +204,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => _debugWindow.IsOpen = true,
             () => _tribesWindow.IsOpen = true,
             () => _deliveriesWindow.IsOpen = true,
+            () => _journalWindow.IsOpen = true,
             questId => _pathEditorWindow.Open(questId),
             () => TargetManager.Target?.BaseId,
             () => TargetManager.Target?.Position,

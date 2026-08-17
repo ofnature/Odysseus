@@ -27,6 +27,13 @@ public sealed record QuestListing(ushort QuestId, string Name, ushort ClassJobLe
     /// <summary>The category within the section — an alliance raid series, a job's quest line.</summary>
     public string Category { get; init; } = string.Empty;
 
+    /// <summary>
+    /// The class the quest belongs to, when it belongs to exactly one — "Carpenter", "Miner".
+    /// The journal lumps every crafter into one category of 126 quests, which is unreadable; this
+    /// is what splits it back apart.
+    /// </summary>
+    public string JobName { get; init; } = string.Empty;
+
     /// <summary>The prerequisites are met, given a completion oracle.</summary>
     public bool IsUnlockedBy(Func<ushort, bool> isComplete) => PreviousJoin switch
     {
@@ -136,6 +143,7 @@ public sealed class QuestCatalog
                 {
                     Section = sectionName,
                     Category = categoryName,
+                    JobName = JobOf(row),
                 });
             }
             Load(rows);
@@ -145,6 +153,27 @@ public sealed class QuestCatalog
             log($"Quest catalog failed to load: {ex.GetType().Name}: {ex.Message}");
         }
     }
+
+    /// <summary>
+    /// Which single class a quest belongs to, or empty when it is not class-specific.
+    ///
+    /// <para>
+    /// <c>ClassJobRequired</c> names the class outright and is preferred. Failing that,
+    /// <c>ClassJobCategory0</c> is used — but only when its name is short enough to be one class's
+    /// abbreviation. The wide categories ("Disciples of the Hand", "All Classes") share the same
+    /// column and would group everything back together, which is the problem this exists to solve.
+    /// </para>
+    /// </summary>
+    private static string JobOf(Lumina.Excel.Sheets.Quest row)
+    {
+        if (row.ClassJobRequired.ValueNullable?.Name.ExtractText() is { Length: > 0 } required)
+            return Capitalise(required);
+
+        var category = row.ClassJobCategory0.ValueNullable?.Name.ExtractText() ?? string.Empty;
+        return category.Length is > 0 and <= 4 ? category : string.Empty;
+    }
+
+    private static string Capitalise(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
 
     /// <summary>Test constructor.</summary>
     public QuestCatalog(IEnumerable<QuestListing> rows) => Load(rows);
