@@ -17,9 +17,30 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public int PlayerLevel { get; set; } = 54;
     public bool IsCasting { get; set; }
     public bool IsCombatJob { get; set; } = true;
-    public List<int> Gearsets { get; } = [0];
-    public bool EquipGearset(int id) { Calls.Add($"Gearset {id}"); IsCombatJob = true; return Gearsets.Contains(id); }
-    public IReadOnlyList<int> CombatGearsets() => Gearsets;
+    public List<int> CombatGearsetIds { get; } = [0];
+    public bool EquipGearset(int id)
+    {
+        Calls.Add($"Gearset {id}");
+        IsCombatJob = true;
+        if (EquipLands && SavedGearsets.FirstOrDefault(g => g.Id == id) is { } set)
+            CurrentClassJob = set.ClassJobId;
+        return CombatGearsetIds.Contains(id) || SavedGearsets.Any(g => g.Id == id);
+    }
+    public IReadOnlyList<int> CombatGearsets() => CombatGearsetIds;
+
+    // ── Class and job ──
+    /// <summary>What <c>Gearsets()</c> reports; separate from the plain id list the tribe runner uses.</summary>
+    public List<GearsetInfo> SavedGearsets { get; } = [];
+    /// <summary>Equipping a gearset moves the class immediately; clear it to test the wait.</summary>
+    public bool EquipLands { get; set; } = true;
+    public uint CurrentClassJob { get; set; }
+    public Dictionary<string, uint> ClassJobs { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<ushort, uint> QuestStartJobs { get; } = new();
+    public IReadOnlyList<GearsetInfo> Gearsets() => SavedGearsets;
+    public uint? ResolveClassJob(string name)
+        => ClassJobs.TryGetValue(name.Replace(" ", string.Empty), out var id) ? id : null;
+    public uint? QuestStartClassJob(ushort questId)
+        => QuestStartJobs.TryGetValue(questId, out var job) ? job : null;
     public List<string> IconEntries { get; } = [];
     public IReadOnlyList<string> SelectIconStringEntries() => VisibleAddons.Contains("SelectIconString") ? IconEntries : [];
     public void SelectIconStringIndex(int index) => Calls.Add($"IconSelect {index}");
@@ -81,6 +102,9 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     /// <summary>Both qualities together, as the real reader counts them.</summary>
     public Dictionary<uint, int> Bag { get; } = new();
     public int ItemCount(uint itemId) => Bag.GetValueOrDefault(itemId);
+    /// <summary>The FC chest pages the client has loaded; never counted as held.</summary>
+    public Dictionary<uint, int> FcChest { get; } = new();
+    public int FreeCompanyChestCount(uint itemId) => FcChest.GetValueOrDefault(itemId);
     public bool IsDataIdSpawned(uint dataId) => Spawned.Contains(dataId);
     public float? DistanceToDataId(uint dataId) => Spawned.Contains(dataId) ? 1f : null;
     /// <summary>Spawned objects sit on the player unless a test places them somewhere.</summary>
@@ -108,6 +132,44 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public void SetBossModAi(bool enabled) { BossModAi = enabled; Calls.Add($"BmrAi {enabled}"); }
     public bool TheseusEnterDuty(uint cfc) { Calls.Add($"TheseusEnter {cfc}"); if (TheseusEnterAccepted) TheseusBusy = true; return TheseusEnterAccepted; }
 
+    // ── Making things ──
+    public bool CrafterReady { get; set; } = true;
+    public bool IsCrafting { get; set; }
+    /// <summary>How many a craft actually delivers before Artisan stops; the default makes the whole order.</summary>
+    public int CraftDelivers { get; set; } = int.MaxValue;
+    /// <summary>Leave Artisan's loop running after the order, to exercise the waiting path.</summary>
+    public bool CraftKeepsRunning { get; set; }
+    /// <summary>The job it would craft as; null stands for "no recipe, or Artisan refused".</summary>
+    public string? CraftJob { get; set; } = "BSM";
+    public string CraftShortfallText { get; set; } = string.Empty;
+    public string? StartCraft(uint itemId, int count)
+    {
+        Calls.Add($"Craft {count} x {itemId}");
+        if (CraftJob is null) return null;
+        Bag[itemId] = Bag.GetValueOrDefault(itemId) + Math.Min(CraftDelivers, count);
+        IsCrafting = CraftKeepsRunning;
+        return CraftJob;
+    }
+    public void StopCrafting() { Calls.Add("StopCraft"); IsCrafting = false; }
+    public string CraftShortfall(uint itemId, int count) => CraftShortfallText;
+
+    public bool GathererReady { get; set; } = true;
+    public bool IsGathering { get; set; }
+    public bool GathererIdle { get; set; }
+    public string GathererStatus { get; set; } = string.Empty;
+    public bool GatherStarts { get; set; } = true;
+    /// <summary>Item → how many starting the gatherer puts in the bag; nothing by default.</summary>
+    public Dictionary<uint, int> GatherDelivers { get; } = new();
+    public bool StartGathering()
+    {
+        Calls.Add("StartGather");
+        if (!GatherStarts) return false;
+        IsGathering = true;
+        foreach (var (id, n) in GatherDelivers) Bag[id] = Bag.GetValueOrDefault(id) + n;
+        return true;
+    }
+    public void StopGathering() { Calls.Add("StopGather"); IsGathering = false; }
+
     // ── Actions ──
     public bool TryTargetDataId(uint dataId) { Calls.Add($"Target {dataId}"); return Spawned.Contains(dataId); }
     public void SendChatCommand(string command) => Calls.Add($"Chat {command}");
@@ -117,6 +179,50 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public uint? ResolveAction(string name) => Actions.TryGetValue(name, out var id) ? id : null;
     public bool UseActionAccepted { get; set; } = true;
     public bool UseAction(uint actionId, Vector3? ground) { Calls.Add($"UseAction {actionId}{(ground is { } g ? $" @({g.X:F0},{g.Y:F0},{g.Z:F0})" : "")}"); return UseActionAccepted; }
+    // ── Vendors ──
+    /// <summary>The shop the window is showing, or 0 for none. Tests set it or let OpenShop set it.</summary>
+    public uint OpenShopId { get; set; }
+    /// <summary>What OpenShop lands on; 0 means "whatever was asked for".</summary>
+    public uint ShopOpensAs { get; set; }
+    public bool OpenShopAccepted { get; set; } = true;
+    public bool BuyAccepted { get; set; } = true;
+    public bool ShopIsBusy { get; set; }
+    /// <summary>How many a buy actually delivers; null means "everything asked for", 0 means a shop that takes the order and does nothing.</summary>
+    public int? BuyDelivers { get; set; }
+    public bool IsShopOpen(uint shopId) => OpenShopId != 0 && (shopId == 0 || shopId == OpenShopId);
+    public bool OpenShop(uint vendorDataId, uint shopId)
+    {
+        Calls.Add($"OpenShop {vendorDataId}/{shopId}");
+        if (!OpenShopAccepted) return false;
+        OpenShopId = ShopOpensAs != 0 ? ShopOpensAs : shopId;
+        return true;
+    }
+    public bool BuyFromShop(uint shopId, uint itemId, int count)
+    {
+        Calls.Add($"Buy {count} x {itemId} from {shopId}");
+        if (!BuyAccepted) return false;
+        Bag[itemId] = Bag.GetValueOrDefault(itemId) + (BuyDelivers is { } d ? Math.Min(d, count) : count);
+        return true;
+    }
+    public bool ShopBusy(uint shopId) => ShopIsBusy;
+    public void CloseShop() { Calls.Add("CloseShop"); OpenShopId = 0; }
+    public int Gil { get; set; } = 100_000;
+
+    // ── The Request window ──
+    public List<HandOverRequest> Requests { get; } = [];
+    public bool CanSatisfyHandOver { get; set; } = true;
+    public bool HandOverAccepted { get; set; } = true;
+    public IReadOnlyList<HandOverRequest> HandOverRequests
+        => VisibleAddons.Contains("Request") ? Requests : [];
+    public bool CompleteHandOverWindow()
+    {
+        Calls.Add("HandOver");
+        if (!VisibleAddons.Contains("Request") || !HandOverAccepted) return false;
+        VisibleAddons.Remove("Request");
+        IsOccupied = false;
+        return true;
+    }
+
     public bool RecommendedGearReady { get; set; } = true;
     public bool PrepareRecommendedGear() { Calls.Add("PrepareGear"); return true; }
     public void EquipRecommendedGear() => Calls.Add("EquipGear");

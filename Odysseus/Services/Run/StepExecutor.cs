@@ -42,6 +42,16 @@ public sealed class StepExecutor
         DutyRun,
         /// <summary>Emote / jump / item: fired, brief settle.</summary>
         ActionSettle,
+        /// <summary>Vendor interacted with, waiting for the shop window.</summary>
+        Shop,
+        /// <summary>Shop open: buy the shortfall and watch the bag until it is covered.</summary>
+        ShopBuy,
+        /// <summary>Gearset equipped, waiting for the class to actually change.</summary>
+        ClassSwitch,
+        /// <summary>Artisan has the craft; watch the bag until it is covered.</summary>
+        Craft,
+        /// <summary>GatherBuddy is switched on; watch the bag until it is covered.</summary>
+        Gather,
         Finish,
     }
 
@@ -74,6 +84,9 @@ public sealed class StepExecutor
     /// <summary>How long the reward window may sit before we press Complete ourselves — TextAdvance gets first go.</summary>
     private static readonly TimeSpan RewardWindowGrace = TimeSpan.FromSeconds(2.5);
     private static readonly TimeSpan RewardCompleteRetry = TimeSpan.FromSeconds(1.5);
+    /// <summary>Same courtesy for the hand-over window: TextAdvance fills and presses it first if it is holding.</summary>
+    private static readonly TimeSpan HandOverGrace = TimeSpan.FromSeconds(2.5);
+    private static readonly TimeSpan HandOverRetry = TimeSpan.FromSeconds(1.5);
     private static readonly TimeSpan CombatSpawnWait = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan CombatClearSettle = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan CombatMax = TimeSpan.FromMinutes(5);
@@ -83,6 +96,11 @@ public sealed class StepExecutor
     private static readonly TimeSpan SoloDutyMax = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan DutyMax = TimeSpan.FromMinutes(90);
     private static readonly TimeSpan ActionSettle = TimeSpan.FromSeconds(2);
+    /// <summary>A purchase is a server round trip; leave a beat between rounds rather than spamming the handler.</summary>
+    private static readonly TimeSpan ShopGap = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ShopMax = TimeSpan.FromSeconds(30);
+    /// <summary>How long a handoff may sit having done nothing before we call it stuck. Progress resets it.</summary>
+    private static readonly TimeSpan MakeIdle = TimeSpan.FromSeconds(60);
     private const int MaxMoveRetries = 3;
 
     private readonly IStepWorld _world;
@@ -94,6 +112,17 @@ public sealed class StepExecutor
     private DateTime _rewardWindowSince;
     private DateTime _rewardLastTry;
     private bool _rewardNeedsChoiceLogged;
+    private DateTime _handOverSince;
+    private DateTime _handOverLastTry;
+    /// <summary>The shop the current PurchaseItem step buys from; learned from the window when the step names none.</summary>
+    private uint _shopId;
+    /// <summary>How many of the step's item the bag should hold when the purchase is done.</summary>
+    private int _buyTarget;
+    private DateTime _lastBuy;
+    /// <summary>The ClassJob a SwitchClass step is waiting to land on.</summary>
+    private uint _switchTarget;
+    /// <summary>The handoff has been asked; a second ask would queue another batch on top.</summary>
+    private bool _makeAsked;
     private Phase _phase = Phase.None;
     private DateTime _phaseStart;
     private DateTime _stepStart;
@@ -130,6 +159,12 @@ public sealed class StepExecutor
         _listAnswered = false;
         _rewardWindowSince = default;
         _rewardNeedsChoiceLogged = false;
+        _handOverSince = default;
+        _shopId = 0;
+        _buyTarget = 0;
+        _lastBuy = default;
+        _switchTarget = 0;
+        _makeAsked = false;
         _stepStart = _world.UtcNow;
         _moveRetries = 0;
         _sawOccupied = false;
@@ -142,7 +177,7 @@ public sealed class StepExecutor
 
         if (!IsSupported(step.Kind))
         {
-            Fail($"step kind {step.KindName ?? step.Kind.ToString()} is not implemented yet");
+            Fail(WhyUnsupported(step));
             return;
         }
 
@@ -153,6 +188,12 @@ public sealed class StepExecutor
     {
         if (Status == StepStatus.Running)
             _world.StopMoving();
+        // A handoff we switched on outlives the step unless it is switched back off.
+        if (_makeAsked && _step is { } running)
+        {
+            if (running.Kind == StepKind.Craft) _world.StopCrafting();
+            if (running.Kind == StepKind.Gather) _world.StopGathering();
+        }
         _world.ReleaseDialogue();
         _step = null;
         _phase = Phase.None;
@@ -164,10 +205,32 @@ public sealed class StepExecutor
         StepKind.WalkTo or StepKind.Interact or StepKind.AcceptQuest or StepKind.CompleteQuest or StepKind.Combat
         or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent or StepKind.None
         or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem or StepKind.Say
-        or StepKind.EquipRecommended or StepKind.Action or StepKind.Instruction or StepKind.StatusOff;
+        or StepKind.EquipRecommended or StepKind.Action or StepKind.Instruction or StepKind.StatusOff
+        or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Craft or StepKind.Gather;
 
     /// <summary>The step hands the character to another plugin for a whole instance.</summary>
     public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
+
+    /// <summary>
+    /// Why a step cannot run — and the two reasons are not the same reason.
+    ///
+    /// <para>
+    /// An <see cref="StepKind.Unknown"/> step whose kept name parses to something we <i>do</i>
+    /// support was converted before we supported it: the path is stale, not the feature missing.
+    /// Saying "Craft is not implemented yet" there sends you looking for a feature that is already
+    /// there, when the fix is a re-import.
+    /// </para>
+    /// </summary>
+    public static string WhyUnsupported(QuestStep step)
+    {
+        if (step.Kind == StepKind.Unknown
+            && step.KindName is { Length: > 0 } named
+            && Enum.TryParse<StepKind>(named, ignoreCase: false, out var parsed)
+            && IsSupported(parsed))
+            return $"this path was converted before {named} steps were supported — " +
+                   "re-import your paths from Settings, then Retry";
+        return $"step kind {step.KindName ?? step.Kind.ToString()} is not implemented yet";
+    }
 
     public StepStatus Tick()
     {
@@ -329,6 +392,40 @@ public sealed class StepExecutor
                     Enter(step.Kind == StepKind.UseItem && step.EnemySpawnType == EnemySpawnType.AfterItemUse
                         ? Phase.CombatWait
                         : Phase.Finish);
+                break;
+
+            case Phase.Shop:
+                if (_world.IsShopOpen(_shopId))
+                {
+                    // A step that named no shop still has to buy through one; the window says which.
+                    if (_shopId == 0)
+                        _shopId = _world.OpenShopId;
+                    if (_shopId == 0)
+                        Fail("the vendor window opened but does not say which shop it is");
+                    else
+                        Enter(Phase.ShopBuy);
+                }
+                else if (now - _phaseStart > ReadyWait)
+                    Fail($"the shop at {step.DataId} never opened");
+                break;
+
+            case Phase.ShopBuy:
+                TickPurchase(step, now);
+                break;
+
+            case Phase.ClassSwitch:
+                if (_world.CurrentClassJob == _switchTarget)
+                    Enter(Phase.Finish);
+                else if (now - _phaseStart > ReadyWait)
+                    Fail($"the class did not change to {step.TargetClass} in {ReadyWait.TotalSeconds:F0}s");
+                break;
+
+            case Phase.Craft:
+                TickCraft(step, now);
+                break;
+
+            case Phase.Gather:
+                TickGather(step, now);
                 break;
 
             case Phase.Finish:
@@ -539,6 +636,28 @@ public sealed class StepExecutor
                 return Phase.ActionSettle;
             }
 
+            case StepKind.PurchaseItem:
+                return BeginPurchase(step);
+
+            case StepKind.Craft:
+                if (step.ItemId is null)
+                {
+                    Fail("Craft step names no item");
+                    return Phase.None;
+                }
+                return Phase.Craft;
+
+            case StepKind.Gather:
+                if (step.GatherItems is not { Count: > 0 })
+                {
+                    Fail("Gather step names nothing to gather");
+                    return Phase.None;
+                }
+                return Phase.Gather;
+
+            case StepKind.SwitchClass:
+                return BeginClassSwitch(step);
+
             case StepKind.UseItem:
                 if (step.ItemId is not { } itemId)
                 {
@@ -635,6 +754,307 @@ public sealed class StepExecutor
             _world.Log($"move{(direct ? " direct" : "")} to {Fmt(target)} refused (attempt {_moveRetries})");
     }
 
+    /// <summary>
+    /// Open the vendor's window. The count on the step is a <i>target total</i>, not an order —
+    /// that is how the data's own "skip if already held" clause reads it — so a step replayed after
+    /// a restart buys the shortfall and a step whose item is already in the bag buys nothing.
+    /// </summary>
+    private Phase BeginPurchase(QuestStep step)
+    {
+        if (step.ItemId is not { } item)
+        {
+            Fail("PurchaseItem step names no item");
+            return Phase.None;
+        }
+        if (step.PurchaseShopSheet is { Length: > 0 } sheet
+            && !sheet.Equals("GilShop", StringComparison.OrdinalIgnoreCase))
+        {
+            Fail($"PurchaseItem names a {sheet} shop — only gil shops are handled");
+            return Phase.None;
+        }
+
+        _buyTarget = Math.Max(1, step.ItemCount ?? 1);
+        if (_world.ItemCount(item) >= _buyTarget)
+            return Phase.Finish;
+
+        _shopId = step.PurchaseShopId ?? 0;
+        if (_world.IsShopOpen(_shopId))
+            return Phase.Shop; // already standing at an open window — that phase resolves the id
+
+        if (step.DataId is not { } vendor)
+        {
+            Fail("PurchaseItem step names no vendor");
+            return Phase.None;
+        }
+        if (!_world.OpenShop(vendor, _shopId))
+        {
+            Fail($"could not open the shop at {vendor}");
+            return Phase.None;
+        }
+        return Phase.Shop;
+    }
+
+    /// <summary>
+    /// Buy the shortfall, re-read the bag, buy again if it is still short. Re-planning each round
+    /// off the live count rather than trusting one order is what makes a partly-filled purchase
+    /// converge instead of double-buying — the same shape the delivery runner uses for ingredients.
+    /// </summary>
+    private void TickPurchase(QuestStep step, DateTime now)
+    {
+        var item = step.ItemId!.Value;
+        var held = _world.ItemCount(item);
+
+        if (held >= _buyTarget)
+        {
+            _world.CloseShop();
+            Enter(Phase.Finish);
+            return;
+        }
+
+        if (!_world.IsShopOpen(_shopId))
+        {
+            Fail("the shop window closed before the purchase finished");
+            return;
+        }
+        if (_world.ShopBusy(_shopId))
+            return;
+
+        if (now - _phaseStart > ShopMax)
+        {
+            _world.CloseShop();
+            var inChest = _world.FreeCompanyChestCount(item);
+            Fail($"still {held} of {_buyTarget} × item {item} after {ShopMax.TotalSeconds:F0}s at the shop — " +
+                 $"out of gil ({_world.Gil:N0}) or the shop is out of stock" +
+                 (inChest > 0 ? $"; {inChest} are in the FC chest" : string.Empty));
+            return;
+        }
+
+        if (_lastBuy != default && now - _lastBuy < ShopGap)
+            return;
+        _lastBuy = now;
+        if (!_world.BuyFromShop(_shopId, item, _buyTarget - held))
+        {
+            _world.CloseShop();
+            Fail($"shop {_shopId:X} does not stock item {item}");
+        }
+    }
+
+    /// <summary>
+    /// Hand the craft to Artisan and watch the bag. The count is a target total, as everywhere
+    /// else, so a step replayed after a restart makes up the shortfall and one whose item is
+    /// already in the bag makes nothing.
+    ///
+    /// <para>
+    /// Artisan is asked exactly once. It stopping with the bag still short is the interesting
+    /// case — it means the materials ran out, and the stop says which ones rather than leaving you
+    /// to work it out from an empty crafting log.
+    /// </para>
+    /// </summary>
+    private void TickCraft(QuestStep step, DateTime now)
+    {
+        var item = step.ItemId!.Value;
+        var want = Math.Max(1, step.ItemCount ?? 1);
+        var short_ = want - _world.ItemCount(item);
+
+        if (short_ <= 0)
+        {
+            if (_makeAsked && _world.IsCrafting)
+                _world.StopCrafting();
+            Enter(Phase.Finish);
+            return;
+        }
+
+        if (_world.IsCrafting)
+        {
+            _phaseStart = now; // it is working; the idle clock only runs while nothing happens
+            return;
+        }
+
+        if (_makeAsked)
+        {
+            var missing = _world.CraftShortfall(item, short_);
+            Fail($"Artisan stopped with {short_} × item {item} still to make" +
+                 (missing.Length > 0 ? $" — short of {missing}" : "") + ". Stock up, then Retry");
+            return;
+        }
+
+        if (!_world.CrafterReady)
+        {
+            Fail($"{short_} × item {item} needs crafting and Artisan is not loaded — " +
+                 "make them yourself, then Retry");
+            return;
+        }
+
+        if (_world.StartCraft(item, short_) is not { } job)
+        {
+            Fail($"no recipe for item {item}, or Artisan would not take the craft");
+            return;
+        }
+        _makeAsked = true;
+        _phaseStart = now;
+        _world.Log($"Asked Artisan for {short_} × item {item} as {job}.");
+    }
+
+    /// <summary>
+    /// Switch GatherBuddy on and watch our own bag, because it takes no request — it gathers from
+    /// its own lists and cannot report progress. So the bag is the progress meter and "waiting" is
+    /// the only failure signal it offers.
+    ///
+    /// <para>
+    /// A quest <i>event</i> item is not something it can ever fetch: those exist only inside the
+    /// quest, are in no sheet it reads and on no list you can add. Those stop immediately, named.
+    /// </para>
+    /// </summary>
+    private void TickGather(QuestStep step, DateTime now)
+    {
+        var targets = step.GatherItems!;
+
+        GatherTarget? outstanding = null;
+        foreach (var t in targets)
+            if (_world.ItemCount(t.ItemId) < t.ItemCount) { outstanding = t; break; }
+
+        if (outstanding is null)
+        {
+            if (_makeAsked)
+                _world.StopGathering();
+            Enter(Phase.Finish);
+            return;
+        }
+
+        if (outstanding.IsEventItem)
+        {
+            StopGathering();
+            Fail($"item {outstanding.ItemId} is a quest-only gathering item — no plugin can fetch it. " +
+                 "Gather it yourself, then Retry");
+            return;
+        }
+
+        if (!_world.GathererReady)
+        {
+            Fail($"{outstanding.ItemCount - _world.ItemCount(outstanding.ItemId)} × item {outstanding.ItemId} " +
+                 "needs gathering and GatherBuddy is not loaded — gather them yourself, then Retry");
+            return;
+        }
+
+        if (_world.IsGathering)
+        {
+            if (!_world.GathererIdle)
+            {
+                _phaseStart = now; // working
+                return;
+            }
+            if (now - _phaseStart <= MakeIdle)
+                return;
+            var why = _world.GathererStatus; // take the reason before switching it off
+            StopGathering();
+            Fail($"GatherBuddy has been idle for {MakeIdle.TotalSeconds:F0}s" +
+                 (why.Length > 0 ? $" — \"{why}\"" : "") +
+                 $". Check item {outstanding.ItemId} is on one of its auto-gather lists");
+            return;
+        }
+
+        if (_makeAsked)
+        {
+            Fail($"GatherBuddy stopped on its own with item {outstanding.ItemId} still short — " +
+                 "check it is on one of its auto-gather lists, then Retry");
+            return;
+        }
+
+        if (!_world.StartGathering())
+        {
+            Fail("GatherBuddy would not start");
+            return;
+        }
+        _makeAsked = true;
+        _phaseStart = now;
+        _world.Log($"Asked GatherBuddy for {outstanding.ItemCount} × item {outstanding.ItemId}.");
+    }
+
+    /// <summary>Only ever switch it off if we switched it on — the user's own session is not ours to stop.</summary>
+    private void StopGathering()
+    {
+        if (_makeAsked)
+            _world.StopGathering();
+    }
+
+    /// <summary>
+    /// Equip the gearset a <c>SwitchClass</c> step means. Nothing here presses a class into being:
+    /// if the character has no gearset for what the step asks, that is a stop with a name, because
+    /// the alternative is a quest that silently cannot progress.
+    /// </summary>
+    private Phase BeginClassSwitch(QuestStep step)
+    {
+        if (step.TargetClass is not { Length: > 0 } target)
+        {
+            Fail("SwitchClass step names no class");
+            return Phase.None;
+        }
+
+        var (set, failure) = ResolveSwitch(target);
+        if (set is null)
+        {
+            Fail(failure);
+            return Phase.None;
+        }
+        // Also the "already there" answer for a class asked for by its pre-30 name: the Conjurer a
+        // step wants is satisfied by the White Mage gearset, whose ClassJob is what we are on.
+        if (_world.CurrentClassJob == set.ClassJobId)
+            return Phase.Finish;
+        if (_world.InCombat)
+        {
+            Fail($"cannot switch to {target} in combat");
+            return Phase.None;
+        }
+        if (!_world.EquipGearset(set.Id))
+        {
+            Fail($"gearset {set.Id} for {target} was refused");
+            return Phase.None;
+        }
+        _switchTarget = set.ClassJobId;
+        return Phase.ClassSwitch;
+    }
+
+    /// <summary>
+    /// Which gearset a target name means. Three of the data's names are symbolic and resolve
+    /// against the character rather than the ClassJob sheet; the rest are class names. Returns a
+    /// null set and the reason when nothing fits.
+    /// </summary>
+    private (GearsetInfo? Set, string Failure) ResolveSwitch(string target)
+    {
+        var sets = _world.Gearsets();
+
+        if (Same(target, "ConfiguredCombatJob"))
+            return (Highest(sets, JobKind.Combat), "no combat gearset exists — save one, then Retry");
+        if (Same(target, "ConfiguredCraftingJob"))
+            return (Highest(sets, JobKind.Crafter), "no crafting gearset exists — save one, then Retry");
+
+        var startJob = Same(target, "QuestStartJob");
+        var wanted = startJob ? _world.QuestStartClassJob(_questId) : _world.ResolveClassJob(target);
+        if (wanted is not { } job || job == 0)
+            return (null, startJob
+                ? $"quest {_questId} does not say which class it was accepted on"
+                : $"unknown class \"{target}\" in the path data");
+
+        // A job satisfies its own class, so a Conjurer step takes the White Mage gearset. Highest
+        // level wins when several match — a character with both keeps the one it actually plays.
+        GearsetInfo? best = null;
+        foreach (var s in sets)
+            if ((s.ClassJobId == job || s.ParentClassJobId == job) && (best is null || s.Level > best.Level))
+                best = s;
+        return (best, $"no gearset for {target} — save one, then Retry");
+    }
+
+    private static GearsetInfo? Highest(System.Collections.Generic.IReadOnlyList<GearsetInfo> sets, JobKind kind)
+    {
+        GearsetInfo? best = null;
+        foreach (var s in sets)
+            if (s.Kind == kind && (best is null || s.Level > best.Level))
+                best = s;
+        return best;
+    }
+
+    private static bool Same(string a, string b) => a.Equals(b, StringComparison.OrdinalIgnoreCase);
+
     private void TickInteract(QuestStep step, DateTime now)
     {
         if (step.DataId is not { } dataId)
@@ -684,11 +1104,22 @@ public sealed class StepExecutor
         else
             _rewardWindowSince = default;
 
+        var handOverWindow = _world.IsAddonVisible("Request");
+        if (handOverWindow)
+        {
+            if (TickHandOverWindow(now))
+                return; // failed with a reason of its own
+        }
+        else
+            _handOverSince = default;
+
         if (now - _phaseStart > DialogueMax)
         {
             Fail(rewardWindow
                 ? "the quest reward window is waiting for a choice — pick a reward (or turn on \"Pick quest rewards automatically\"), then Retry"
-                : "dialogue never ended");
+                : handOverWindow
+                    ? $"the hand-over window is still asking for {Describe(_world.HandOverRequests)}"
+                    : "dialogue never ended");
             return;
         }
 
@@ -745,6 +1176,65 @@ public sealed class StepExecutor
             _world.Log("Quest reward window is up and Complete is not available — an optional reward needs choosing. " +
                        "Waiting for TextAdvance or you.");
         }
+    }
+
+    /// <summary>
+    /// The NPC hand-over window ("Request"). An interaction that wants items cannot end until its
+    /// slots are filled and Hand Over is pressed; TextAdvance does that when it is loaded and
+    /// holding, so it gets the same short grace the reward window gives it before we do it ourselves.
+    ///
+    /// <para>
+    /// The one thing worth failing fast on is a hand-in that <i>cannot</i> be satisfied: the game
+    /// answers that itself, and saying "this wants 3 × Cracked Cluster and you have 1" the moment
+    /// the window opens is worth more than two minutes of a dialogue that was never going to end.
+    /// </para>
+    /// </summary>
+    /// <returns>True when the step has been failed and the caller should stop.</returns>
+    private bool TickHandOverWindow(DateTime now)
+    {
+        if (_handOverSince == default)
+        {
+            _handOverSince = now;
+            _handOverLastTry = default;
+            return false;
+        }
+
+        if (now - _handOverSince < HandOverGrace)
+            return false;
+
+        // Judged only once the window has settled: its slots are populated a frame or two after it
+        // appears, and an unsatisfiable hand-in is not something TextAdvance could have fixed anyway.
+        if (!_world.CanSatisfyHandOver)
+        {
+            Fail($"the hand-over window wants {Describe(_world.HandOverRequests)} and the bags cannot cover it");
+            return true;
+        }
+
+        if (now - _handOverLastTry < HandOverRetry)
+            return false;
+
+        _handOverLastTry = now;
+        _world.CompleteHandOverWindow();
+        return false;
+    }
+
+    /// <summary>
+    /// What the window wants, and — for anything the bags are short of — whether it is sitting in
+    /// the FC chest instead. That last part is the difference between "go and craft three of these"
+    /// and "go and take the three you already own out of the chest".
+    /// </summary>
+    private string Describe(System.Collections.Generic.IReadOnlyList<HandOverRequest> requests)
+    {
+        if (requests.Count == 0)
+            return "nothing it will name";
+        var parts = new string[requests.Count];
+        for (var i = 0; i < requests.Count; i++)
+        {
+            var r = requests[i];
+            var chest = _world.ItemCount(r.ItemId) < r.Quantity ? _world.FreeCompanyChestCount(r.ItemId) : 0;
+            parts[i] = $"{r.Quantity} × {r.Name}" + (chest > 0 ? $" ({chest} in the FC chest)" : string.Empty);
+        }
+        return string.Join(", ", parts);
     }
 
     private void AnswerDialogue(QuestStep step)

@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using Dalamud.Game.Command;
 using Dalamud.Interface.Windowing;
@@ -92,6 +94,16 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         var aetherytes = new Services.Travel.AetheryteCatalog(DataManager, message => Log.Warning(message));
         var duties = new DutyCatalog(DataManager, message => Log.Warning(message));
+        // Built here rather than with the rest of the delivery services: the step world buys through
+        // the shop half for PurchaseItem steps and hands Craft/Gather steps to the same Artisan and
+        // GatherBuddy the deliveries use, so all of it has to exist first.
+        var deliveryWorld = new Services.Deliveries.GameDeliveryWorld(DataManager, message => Log.Warning(message));
+        var artisan = new ArtisanIpc(PluginInterface, message => Log.Warning(message));
+        var gatherBuddy = new GatherBuddyIpc(PluginInterface, message => Log.Warning(message));
+        var recipes = new Services.Deliveries.RecipeLookup(DataManager, message => Log.Warning(message));
+        var ingredients = new Services.Deliveries.IngredientSource(DataManager, message => Log.Warning(message));
+        var making = new ItemMaking(artisan, gatherBuddy, recipes, ingredients,
+            () => _config.DeliveryCraftJob, () => deliveryWorld.CurrentCraftType, id => deliveryWorld.ItemCount(id));
         _world = new GameStepWorld(
             ClientState, ObjectTable, Condition, GameGui, TargetManager, DataManager,
             new VnavIpc(PluginInterface, message => Log.Warning(message)),
@@ -102,7 +114,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             new TheseusIpc(PluginInterface, message => Log.Warning(message)),
             new ChatCommandSender(message => Log.Warning(message)),
             duties,
-            _quests, message => Log.Information(message));
+            _quests, deliveryWorld, making, message => Log.Information(message));
         _recorderFeed = new RecorderFeed(_world, _quests, aetherytes, duties);
         var dialogue = new DialogueCatalog(DataManager, message => Log.Warning(message));
         _runLog = new RunLog(
@@ -160,10 +172,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var deliveryRewards = new Services.Deliveries.DeliveryRewards(DataManager, message => Log.Warning(message));
         var scrips = new Services.Deliveries.ScripLedger(DataManager, new Services.Deliveries.InventoryCurrencyReader(),
             _deliveries, deliveryState, deliveryRewards, deliveryBonus, message => Log.Warning(message));
-        var artisan = new ArtisanIpc(PluginInterface, message => Log.Warning(message));
-        var gatherBuddy = new GatherBuddyIpc(PluginInterface, message => Log.Warning(message));
         var deliveryRequests = new Services.Deliveries.DeliveryRequests(DataManager, message => Log.Warning(message));
-        var deliveryWorld = new Services.Deliveries.GameDeliveryWorld(DataManager, message => Log.Warning(message));
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(
             _world,
             deliveryWorld,
@@ -171,8 +180,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             deliveryRequests,
             scrips,
             artisan,
-            new Services.Deliveries.RecipeLookup(DataManager, message => Log.Warning(message)),
-            new Services.Deliveries.IngredientSource(DataManager, message => Log.Warning(message)),
+            recipes,
+            ingredients,
             new Services.Deliveries.GatheringSource(DataManager, message => Log.Warning(message)),
             gatherBuddy,
             new StepExecutor(_world, dialogue),
@@ -192,7 +201,25 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _flightWindow = new FlightWindow(currents, flightState, _collector, _priority, _catalog, unlockPlanner,
             () => ClientState.TerritoryType);
 
-        _journalWindow = new JournalWindow(_catalog, _quests, unlockPlanner, _priority, _pathStore.Has);
+        // The bill of materials for a queued line: its own steps, read against the bags and the FC
+        // chest, with crafts expanded through the same recipe and ingredient lookups the deliveries
+        // use. Assembled here so the window stays presentation and the maths stays testable.
+        var itemNames = new Dictionary<uint, string>();
+        string ItemName(uint id)
+        {
+            if (itemNames.TryGetValue(id, out var cached)) return cached;
+            var name = DataManager.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(id)?.Name.ExtractText();
+            return itemNames[id] = string.IsNullOrEmpty(name) ? $"item {id}" : name;
+        }
+        IReadOnlyList<MaterialNeed> Bill(IEnumerable<Services.Paths.QuestPath> paths, bool inStepOrder)
+            => ChainMaterials.For(paths, ItemName, id => deliveryWorld.ItemCount(id),
+                _world.FreeCompanyChestCount, making.Ingredients, inStepOrder);
+
+        _journalWindow = new JournalWindow(_catalog, _quests, unlockPlanner, _priority, _pathStore.Has,
+            questIds => Bill(questIds.Select(_pathStore.ForQuest).OfType<Services.Paths.QuestPath>(), inStepOrder: false),
+            questId => _pathStore.ForQuest(questId) is { } path ? Bill([path], inStepOrder: true) : [],
+            questId => _pathStore.ForQuest(questId) is { } path && ChainMaterials.NamesItems(path),
+            () => _pathStore.OutdatedCount);
 
         // Built after the windows it can open: the deps record captures them, and the
         // nullable analysis is right that a field assigned later is null at this point.

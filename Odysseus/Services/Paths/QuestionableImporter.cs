@@ -211,6 +211,26 @@ public static class QuestionableImporter
 
         step.ActionName = Str(e, "Action");
         step.GroundTarget = Bool(e, "GroundTarget") ?? false;
+        step.TargetClass = Str(e, "TargetClass");
+
+        // Gather and Fish carry a list, not a single ItemId — one step can want two things at once.
+        if (e.TryGetProperty("ItemsToGather", out var gather) && gather.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var g in gather.EnumerateArray())
+            {
+                if (U32(g, "ItemId") is not { } id) continue;
+                (step.GatherItems ??= []).Add(new GatherTarget(id, Math.Max(1, I32(g, "ItemCount") ?? 1)));
+            }
+        }
+
+        // PurchaseItem names the shop to pick out of the vendor's options. 95 of the 112 steps in
+        // the bundle carry one and every one of them is a GilShop row; the other 17 are NPCs whose
+        // only purpose is the shop, so interacting opens it and there is nothing to choose.
+        if (e.TryGetProperty("PurchaseMenu", out var menu) && menu.ValueKind == JsonValueKind.Object)
+        {
+            step.PurchaseShopSheet = Str(menu, "ExcelSheet");
+            step.PurchaseShopId = U32(menu, "Key");
+        }
         if (e.TryGetProperty("RequiredQuestVariables", out var required) && required.ValueKind == JsonValueKind.Array)
             step.RequiredQuestVariables = ParseRequired(required);
 

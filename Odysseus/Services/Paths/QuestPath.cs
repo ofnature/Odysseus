@@ -68,6 +68,24 @@ public enum EnemySpawnType
 public sealed record DialogueChoice(string Type, string? Prompt, string? Answer, bool? Yes);
 
 /// <summary>
+/// One thing a <see cref="StepKind.Gather"/> or <see cref="StepKind.Fish"/> step wants.
+///
+/// <para>
+/// Ids at or above <see cref="EventItemBase"/> are <i>event</i> items — quest-only things like
+/// "Pristine Oak Branch" that come from a node the quest spawns. They are not in the Item sheet,
+/// never appear in the bags a plain count can see, and no gathering plugin has them on a list. 15
+/// of the 297 gather targets in the bundle are like that and none of them are in a class quest,
+/// which is why they are named and stopped on rather than handed off.
+/// </para>
+/// </summary>
+public sealed record GatherTarget(uint ItemId, int ItemCount)
+{
+    public const uint EventItemBase = 2_000_000;
+
+    public bool IsEventItem => ItemId >= EventItemBase;
+}
+
+/// <summary>
 /// One acceptable value for a quest variable slot: the whole byte, or just its high or low nibble.
 /// The data writes <c>32</c>, <c>{"High": 3}</c> or <c>{"Low": 1}</c>.
 /// </summary>
@@ -186,6 +204,29 @@ public sealed class QuestStep
     public uint? ItemId { get; set; }
     /// <summary>How many the step wants — Craft and PurchaseItem both carry it.</summary>
     public int? ItemCount { get; set; }
+    /// <summary>
+    /// For <see cref="StepKind.PurchaseItem"/>: the shop to pick out of the vendor's options, or
+    /// null when the NPC has only one and interacting opens it.
+    /// </summary>
+    public uint? PurchaseShopId { get; set; }
+    /// <summary>
+    /// Which sheet <see cref="PurchaseShopId"/> is a row of. Every one measured is <c>GilShop</c>;
+    /// the name is kept so a step naming some other kind of shop fails saying which rather than
+    /// buying out of the wrong window.
+    /// </summary>
+    public string? PurchaseShopSheet { get; set; }
+    /// <summary>
+    /// For <see cref="StepKind.Gather"/> and <see cref="StepKind.Fish"/>: what to come back with.
+    /// A step can want several things at once, which is why this is a list and not
+    /// <see cref="ItemId"/>.
+    /// </summary>
+    public List<GatherTarget>? GatherItems { get; set; }
+    /// <summary>
+    /// For <see cref="StepKind.SwitchClass"/>: the class as the data names it ("Fisher",
+    /// "Blue Mage"), or one of the three symbolic values <c>ConfiguredCombatJob</c>,
+    /// <c>ConfiguredCraftingJob</c>, <c>QuestStartJob</c>.
+    /// </summary>
+    public string? TargetClass { get; set; }
     public string? Emote { get; set; }
     /// <summary>Text key for a <see cref="StepKind.Say"/> step, resolved against the quest's dialogue sheet.</summary>
     public string? ChatMessageKey { get; set; }
@@ -204,7 +245,10 @@ public sealed class QuestStep
     public bool IsReplaySafe => Kind is StepKind.Interact or StepKind.AcceptQuest or StepKind.CompleteQuest
         or StepKind.WalkTo or StepKind.Combat or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard
         or StepKind.AttuneAetherCurrent or StepKind.None or StepKind.Say or StepKind.Emote or StepKind.EquipRecommended
-        or StepKind.Action or StepKind.Instruction or StepKind.StatusOff;
+        or StepKind.Action or StepKind.Instruction or StepKind.StatusOff or StepKind.SwitchClass
+        // Both work to a target total read off the bag, so running them again makes up a shortfall
+        // of zero and does nothing.
+        or StepKind.Craft or StepKind.Gather;
 
     public override string ToString()
         => $"{Kind}{(DataId is { } d ? $" {d}" : "")}{(Position is { } p ? $" @({p.X:F0},{p.Y:F0},{p.Z:F0})" : "")} in {TerritoryId}";
@@ -240,8 +284,15 @@ public sealed class QuestPath
     /// 1 → 2 (2026-08-16): named the 14 non-MSQ verbs (Action, Craft, Gather, Instruction,
     /// StatusOff, …) and added ActionName, GroundTarget, RequiredQuestVariables, ChatMessageKey.
     /// </para>
+    ///
+    /// <para>
+    /// 2 → 3 (2026-08-17): PurchaseItem's <c>PurchaseMenu</c>, SwitchClass's <c>TargetClass</c> and
+    /// Gather/Fish's <c>ItemsToGather</c>. All three were dropped on the floor before, so a stored
+    /// path for any of those verbs carries no shop, no class and nothing to gather, and must be
+    /// re-converted rather than kept.
+    /// </para>
     /// </summary>
-    public const int CurrentFormatVersion = 2;
+    public const int CurrentFormatVersion = 3;
 
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     public ushort QuestId { get; set; }
@@ -263,6 +314,43 @@ public sealed class QuestPath
     }
 
     public bool IsMainScenario => Category.Contains("/MSQ", System.StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The current converter would get more out of this path than the one that wrote it did.
+    ///
+    /// <para>
+    /// Version alone over-reports, and the over-report is not harmless. A path of nothing but
+    /// Interact and AcceptQuest steps parses identically under every converter so far, so its
+    /// version number is a fact about history rather than about the path. Worse, a quest dropped
+    /// upstream is never in a bundle again — "Child Labor" (2813) is one — so it can never be
+    /// re-converted, and counting it would be a warning nobody could ever act on.
+    /// </para>
+    ///
+    /// <para>
+    /// So the question asked is the useful one: does this path carry a step a later converter
+    /// handles better? Either a verb it did not know (kept as <see cref="StepKind.Unknown"/> with
+    /// its name) or one of the kinds that has since gained fields.
+    /// </para>
+    /// </summary>
+    public bool NeedsReconvert
+    {
+        get
+        {
+            if (FormatVersion >= CurrentFormatVersion)
+                return false;
+            foreach (var sequence in Sequences)
+            foreach (var step in sequence.Steps)
+            {
+                if (step.Kind is StepKind.Craft or StepKind.Gather or StepKind.Fish
+                    or StepKind.PurchaseItem or StepKind.SwitchClass)
+                    return true;
+                if (step.Kind == StepKind.Unknown && step.KindName is { Length: > 0 } named
+                    && Enum.TryParse<StepKind>(named, ignoreCase: false, out _))
+                    return true;
+            }
+            return false;
+        }
+    }
 
     public int StepCount
     {

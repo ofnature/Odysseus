@@ -42,14 +42,19 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
     private readonly ChatCommandSender _chat;
     private readonly DutyCatalog _duties;
     private readonly IQuestStateReader _quests;
+    private readonly Deliveries.IShopWorld _shops;
+    private readonly ItemMaking _making;
     private readonly Action<string> _log;
 
     public GameStepWorld(
         IClientState clientState, IObjectTable objectTable, ICondition condition, IGameGui gameGui,
         ITargetManager targets, IDataManager data, VnavIpc vnav, DaedalusIpc daedalus,
         TextAdvanceIpc textAdvance, LifestreamIpc lifestream, Travel.AetheryteCatalog aetherytes,
-        TheseusIpc theseus, ChatCommandSender chat, DutyCatalog duties, IQuestStateReader quests, Action<string> log)
+        TheseusIpc theseus, ChatCommandSender chat, DutyCatalog duties, IQuestStateReader quests,
+        Deliveries.IShopWorld shops, ItemMaking making, Action<string> log)
     {
+        _shops = shops;
+        _making = making;
         _lifestream = lifestream;
         _aetherytes = aetherytes;
         _theseus = theseus;
@@ -179,18 +184,40 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
     public IReadOnlyList<int> CombatGearsets()
     {
         var result = new List<int>();
+        foreach (var set in Gearsets())
+            if (set.Kind == JobKind.Combat)
+                result.Add(set.Id);
+        return result;
+    }
+
+    /// <summary>
+    /// The 100 gearset slots, skipping the empty ones and the ones whose class the character has
+    /// never levelled. Level comes from <c>ClassJobLevels</c> rather than the gearset, which only
+    /// carries an item level — a SwitchClass step choosing between two combat gearsets wants the
+    /// job actually played, and that is the class level.
+    /// </summary>
+    public IReadOnlyList<GearsetInfo> Gearsets()
+    {
+        var result = new List<GearsetInfo>();
         try
         {
             var module = FFXIVClientStructs.FFXIV.Client.UI.Misc.RaptureGearsetModule.Instance();
+            var state = PlayerState.Instance();
             if (module == null) return result;
             var jobs = _data.GetExcelSheet<ClassJob>();
             for (var i = 0; i < 100; i++)
             {
                 if (!module->IsValidGearset(i)) continue;
                 var entry = module->GetGearset(i);
-                if (entry == null) continue;
-                var role = jobs.GetRowOrDefault(entry->ClassJob)?.Role ?? 0;
-                if (role != 0) result.Add(i);
+                if (entry == null || entry->ClassJob == 0) continue;
+                if (jobs.GetRowOrDefault(entry->ClassJob) is not { } job) continue;
+
+                var level = 0;
+                if (state != null && job.ExpArrayIndex >= 0)
+                    level = state->ClassJobLevels[job.ExpArrayIndex];
+                if (level == 0) continue; // the class is not unlocked on this character
+
+                result.Add(new GearsetInfo(i, entry->ClassJob, job.ClassJobParent.RowId, level, KindOf(job)));
             }
         }
         catch (Exception ex)
@@ -198,6 +225,75 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
             _log($"Gearset scan failed: {ex.Message}");
         }
         return result;
+    }
+
+    /// <summary>
+    /// Crafters and gatherers both have role 0, so the role alone cannot separate them. ClassJob
+    /// rows 8–15 are CRP..CUL and 16–18 are MIN/BTN/FSH — the same fixed block the delivery code
+    /// reads craft types out of.
+    /// </summary>
+    private static JobKind KindOf(ClassJob job) => job.Role != 0
+        ? JobKind.Combat
+        : job.RowId switch
+        {
+            >= 8 and <= 15 => JobKind.Crafter,
+            >= 16 and <= 18 => JobKind.Gatherer,
+            _ => JobKind.Other,
+        };
+
+    public uint CurrentClassJob => _objectTable.LocalPlayer?.ClassJob.RowId ?? 0;
+
+    private Dictionary<string, uint>? _classJobsByName;
+
+    /// <summary>
+    /// The path data names classes as the game displays them ("Blue Mage", "Conjurer"). Both the
+    /// name and the three-letter abbreviation are indexed, and spaces are dropped, so "BlueMage"
+    /// resolves too — the upstream enum spells some of them without the space.
+    /// </summary>
+    public uint? ResolveClassJob(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return null;
+        if (_classJobsByName is null)
+        {
+            _classJobsByName = new Dictionary<string, uint>(StringComparer.OrdinalIgnoreCase);
+            try
+            {
+                foreach (var row in _data.GetExcelSheet<ClassJob>())
+                {
+                    if (row.RowId == 0) continue;
+                    Index(row.Name.ExtractText(), row.RowId);
+                    Index(row.NameEnglish.ExtractText(), row.RowId);
+                    Index(row.Abbreviation.ExtractText(), row.RowId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _log($"ClassJob sheet unavailable: {ex.Message}");
+            }
+        }
+        return _classJobsByName.TryGetValue(Key(name), out var id) ? id : null;
+
+        void Index(string text, uint rowId)
+        {
+            if (text.Length > 0) _classJobsByName!.TryAdd(Key(text), rowId);
+        }
+
+        static string Key(string text) => text.Replace(" ", string.Empty).Trim();
+    }
+
+    public uint? QuestStartClassJob(ushort questId)
+    {
+        try
+        {
+            var manager = QuestManager.Instance();
+            if (manager == null) return null;
+            var work = manager->GetQuestById(questId);
+            return work == null || work->AcceptClassJob == 0 ? null : work->AcceptClassJob;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public bool InCombat => _condition[ConditionFlag.InCombat];
@@ -276,6 +372,50 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         }
     }
 
+    /// <summary>The five Free Company chest pages, in tab order.</summary>
+    private static readonly InventoryType[] FreeCompanyPages =
+    [
+        InventoryType.FreeCompanyPage1, InventoryType.FreeCompanyPage2, InventoryType.FreeCompanyPage3,
+        InventoryType.FreeCompanyPage4, InventoryType.FreeCompanyPage5,
+    ];
+
+    /// <summary>
+    /// Counted by walking the pages, because <c>GetInventoryItemCount</c> does not reach them.
+    ///
+    /// <para>
+    /// A page's container only holds anything once the game has sent it, which it does when that
+    /// tab is first viewed — so this answers for the pages the character has looked at this
+    /// session and reports zero for the rest. That is the whole of the FC chest that is knowable
+    /// without opening it, and a zero here means "cannot say", never "definitely not there".
+    /// </para>
+    /// </summary>
+    public int FreeCompanyChestCount(uint itemId)
+    {
+        try
+        {
+            var manager = InventoryManager.Instance();
+            if (manager == null) return 0;
+
+            var total = 0;
+            foreach (var page in FreeCompanyPages)
+            {
+                var container = manager->GetInventoryContainer(page);
+                if (container == null || !container->IsLoaded) continue;
+                for (var slot = 0; slot < container->Size; slot++)
+                {
+                    var item = container->GetInventorySlot(slot);
+                    if (item != null && item->ItemId == itemId)
+                        total += (int)item->Quantity;
+                }
+            }
+            return total;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     // ── World objects ──
 
     public bool IsDataIdSpawned(uint dataId) => NearestWithDataId(dataId) is not null;
@@ -334,6 +474,33 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
     public bool TheseusEnterDuty(uint contentFinderConditionId) => _theseus.EnterDuty(contentFinderConditionId);
 
     public bool TheseusBusy => _theseus.IsBusy;
+
+    // ── Making things ──
+    //
+    // Straight through to the handoffs; every decision in them (which job's recipe, what is still
+    // missing) lives in ItemMaking, and the waiting lives in the executor.
+
+    public bool CrafterReady => _making.CrafterReady;
+
+    public bool IsCrafting => _making.IsCrafting;
+
+    public string? StartCraft(uint itemId, int count) => _making.StartCraft(itemId, count);
+
+    public void StopCrafting() => _making.StopCrafting();
+
+    public string CraftShortfall(uint itemId, int count) => _making.CraftShortfall(itemId, count);
+
+    public bool GathererReady => _making.GathererReady;
+
+    public bool IsGathering => _making.IsGathering;
+
+    public bool GathererIdle => _making.GathererIdle;
+
+    public string GathererStatus => _making.GathererStatus;
+
+    public bool StartGathering() => _making.StartGathering();
+
+    public void StopGathering() => _making.StopGathering();
 
     // ── Actions ──
 
@@ -412,6 +579,26 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
             return false;
         }
     }
+
+    // ── Vendors ──
+    //
+    // Straight through to the delivery world's shop half. The handler code there is field-proven
+    // and there is nothing quest-specific to add, so a PurchaseItem step buys through exactly the
+    // same three calls the ingredient runs use.
+
+    public bool IsShopOpen(uint shopId) => _shops.IsShopOpen(shopId);
+
+    public uint OpenShopId => _shops.OpenShopId;
+
+    public bool OpenShop(uint vendorDataId, uint shopId) => _shops.OpenShop(vendorDataId, shopId);
+
+    public bool BuyFromShop(uint shopId, uint itemId, int count) => _shops.BuyFromShop(shopId, itemId, count);
+
+    public bool ShopBusy(uint shopId) => _shops.ShopBusy(shopId);
+
+    public void CloseShop() => _shops.CloseShop();
+
+    public int Gil => _shops.Gil;
 
     public bool PrepareRecommendedGear()
     {
@@ -547,6 +734,124 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         catch (Exception ex)
         {
             _log($"JournalResult complete failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    // ── The Request window ──
+    //
+    // The window is AddonRequest; what it is asking for lives in UIState's NpcTrade, and the
+    // filling is AgentNpcTrade's — the same agent the delivery turn-in drives, because a delivery
+    // turn-in *is* this window with a collectability rating attached.
+
+    private const string HandOverWindow = "Request";
+
+    public IReadOnlyList<HandOverRequest> HandOverRequests
+    {
+        get
+        {
+            try
+            {
+                if (!IsAddonVisible(HandOverWindow)) return Array.Empty<HandOverRequest>();
+                var state = UIState.Instance();
+                if (state == null) return Array.Empty<HandOverRequest>();
+                var requests = state->NpcTrade.Requests;
+                var list = new List<HandOverRequest>(requests.Count);
+                for (var i = 0; i < requests.Count && i < requests.Items.Length; i++)
+                {
+                    var item = requests.Items[i];
+                    if (item.ItemId == 0) continue;
+                    var name = item.ItemName.ToString();
+                    list.Add(new HandOverRequest(item.ItemId,
+                        name.Length > 0 ? name : $"item {item.ItemId}",
+                        Math.Max(1, item.RequiredQuantity)));
+                }
+                return list;
+            }
+            catch (Exception ex)
+            {
+                _log($"Hand-over window read failed: {ex.Message}");
+                return Array.Empty<HandOverRequest>();
+            }
+        }
+    }
+
+    /// <summary>The game's own check, so a hand-in that cannot be met is named rather than waited on.</summary>
+    public bool CanSatisfyHandOver
+    {
+        get
+        {
+            try
+            {
+                var state = UIState.Instance();
+                return state != null && state->NpcTrade.CanSatisfyRequests();
+            }
+            catch
+            {
+                return true; // unreadable is not evidence of a shortfall — let the watchdog decide
+            }
+        }
+    }
+
+    /// <summary>
+    /// Fill every slot then press Hand Over. Each slot is selected through the agent and takes its
+    /// first offered item — the offers are already filtered to what that slot accepts, so "the
+    /// first one" cannot be the wrong item, only the wrong copy of the right one.
+    /// </summary>
+    public bool CompleteHandOverWindow()
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName(HandOverWindow);
+            if (addon.IsNull || !addon.IsVisible)
+                return false;
+            var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentNpcTrade.Instance();
+            if (agent == null || !agent->IsAgentActive())
+                return false;
+
+            var state = UIState.Instance();
+            if (state == null)
+                return false;
+
+            // How many slots there are is the trade state's answer, not the addon's: the same field
+            // the delivery turn-in reads, and the one that says what each slot will accept.
+            var request = (FFXIVClientStructs.FFXIV.Client.UI.AddonRequest*)addon.Address;
+            var slots = Math.Clamp((int)state->NpcTrade.Requests.Count, 0, 5);
+            var result = default(AtkValue);
+            Span<AtkValue> args = stackalloc AtkValue[4];
+            for (var slot = 0; slot < slots; slot++)
+            {
+                if (agent->SelectedTurnInSlot >= 0)
+                    return false; // a slot is mid-flight; come back next tick
+
+                agent->SelectTurnInSlot((ushort)slot, 0, 0);
+                if (agent->SelectedTurnInSlot != slot || agent->SelectedTurnInSlotItemOptions <= 0)
+                    continue; // already filled, or it has nothing to offer for this one
+
+                // Take the first offer. Same event the delivery turn-in uses to choose its item.
+                args[0].SetInt(0);
+                args[1].SetInt(0);
+                args[2].SetInt(0);
+                args[3].SetInt(0);
+                fixed (AtkValue* p = args)
+                    agent->ReceiveEvent(&result, p, 4, 1);
+            }
+
+            var button = request->HandOverButton;
+            if (button == null || !button->IsEnabled)
+                return false;
+            var owner = button->AtkComponentBase.OwnerNode;
+            if (owner == null)
+                return false;
+            var evt = owner->AtkResNode.AtkEventManager.Event;
+            if (evt == null)
+                return false;
+            request->AtkUnitBase.ReceiveEvent(evt->State.EventType, (int)evt->Param, evt, null);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log($"Hand-over failed: {ex.GetType().Name}: {ex.Message}");
             return false;
         }
     }

@@ -3,6 +3,25 @@ using System.Numerics;
 
 namespace Odysseus.Services.Run;
 
+/// <summary>What a class/job is for. Crafters and gatherers share role 0, so the role alone cannot tell them apart.</summary>
+public enum JobKind
+{
+    Other,
+    Combat,
+    Crafter,
+    Gatherer,
+}
+
+/// <summary>
+/// One saved gearset. <paramref name="ParentClassJobId"/> is the class a job grew out of — Conjurer
+/// for White Mage — and is what lets a step asking for "Conjurer" be satisfied by the White Mage
+/// gearset a character past level 30 actually has.
+/// </summary>
+public sealed record GearsetInfo(int Id, uint ClassJobId, uint ParentClassJobId, int Level, JobKind Kind);
+
+/// <summary>One slot of the NPC hand-over window: an item, and how many of it it wants.</summary>
+public sealed record HandOverRequest(uint ItemId, string Name, int Quantity);
+
 /// <summary>
 /// Everything the step executor needs from the game and from other plugins, behind one seam.
 ///
@@ -87,6 +106,21 @@ public interface IStepWorld
     /// <summary>Gearset ids whose class is a combat job, in order.</summary>
     System.Collections.Generic.IReadOnlyList<int> CombatGearsets();
 
+    /// <summary>Every saved gearset, in slot order.</summary>
+    System.Collections.Generic.IReadOnlyList<GearsetInfo> Gearsets();
+
+    /// <summary>The ClassJob row the character is on right now; 0 when unreadable.</summary>
+    uint CurrentClassJob { get; }
+
+    /// <summary>ClassJob row id for a class name as the path data spells it, or null when unknown.</summary>
+    uint? ResolveClassJob(string name);
+
+    /// <summary>
+    /// The class the character was on when it accepted a quest, or null when the quest is not in
+    /// the journal. Some steps switch back to it after a detour onto another job.
+    /// </summary>
+    uint? QuestStartClassJob(ushort questId);
+
     bool InCombat { get; }
 
     /// <summary>Not occupied, casting, zoning or otherwise mid-something.</summary>
@@ -133,6 +167,48 @@ public interface IStepWorld
     /// <summary>Theseus is driving the character.</summary>
     bool TheseusBusy { get; }
 
+    // ── Making things ──
+    //
+    // Odysseus neither crafts nor gathers. A Craft step asks Artisan for N of a recipe and watches
+    // the bag; a Gather step switches GatherBuddy on and watches the bag. Same handoff doctrine as
+    // Theseus above: we say what we want, wait, and stop with a reason if it does not arrive.
+
+    /// <summary>Artisan is loaded and answering.</summary>
+    bool CrafterReady { get; }
+
+    /// <summary>Artisan's endurance loop is running.</summary>
+    bool IsCrafting { get; }
+
+    /// <summary>
+    /// Ask for <paramref name="count"/> of an item. Returns the job it will craft as, or null when
+    /// the item has no recipe or Artisan refused.
+    /// </summary>
+    string? StartCraft(uint itemId, int count);
+
+    void StopCrafting();
+
+    /// <summary>
+    /// What making <paramref name="count"/> of an item is still short of — "3 × Iron Ore, 2 × Fire
+    /// Shard" — or empty when nothing is. The useful half of "Artisan stopped early".
+    /// </summary>
+    string CraftShortfall(uint itemId, int count);
+
+    /// <summary>GatherBuddy is loaded and answering.</summary>
+    bool GathererReady { get; }
+
+    /// <summary>Its auto-gather switch is on.</summary>
+    bool IsGathering { get; }
+
+    /// <summary>On, but with nothing it can reach — a timed node, the wrong job, or an item on no list.</summary>
+    bool GathererIdle { get; }
+
+    /// <summary>Whatever it is telling its own window, which is the only reason it gives.</summary>
+    string GathererStatus { get; }
+
+    bool StartGathering();
+
+    void StopGathering();
+
     // ── Actions ──
 
     /// <summary>Targets the nearest object with this data id without interacting. False when absent.</summary>
@@ -149,6 +225,50 @@ public interface IStepWorld
 
     /// <summary>Use an action on the current target (or at a ground point). False when refused.</summary>
     bool UseAction(uint actionId, Vector3? groundTarget);
+
+    // ── Vendors ──
+    //
+    // The same shop machinery the delivery runner buys craft ingredients with; a PurchaseItem step
+    // is the same three moves (open, buy, verify) against a shop the path names.
+
+    /// <summary>The vendor window is open. <c>0</c> asks only whether <i>a</i> shop is open.</summary>
+    bool IsShopOpen(uint shopId);
+
+    /// <summary>The event id of the shop that is open right now, or 0 when none is.</summary>
+    uint OpenShopId { get; }
+
+    /// <summary>Interact with a vendor and pick a shop; <c>0</c> takes the first one it offers.</summary>
+    bool OpenShop(uint vendorDataId, uint shopId);
+
+    /// <summary>Buy from an open shop. False when the item is not on its shelves.</summary>
+    bool BuyFromShop(uint shopId, uint itemId, int count);
+
+    /// <summary>A purchase is still going through.</summary>
+    bool ShopBusy(uint shopId);
+
+    void CloseShop();
+
+    /// <summary>Gil on hand.</summary>
+    int Gil { get; }
+
+    /// <summary>
+    /// How many of an item are held, both qualities. Also on <c>IConditionWorld</c>, which is what
+    /// asks it about skip clauses; a PurchaseItem step needs it to know what is left to buy.
+    /// </summary>
+    int ItemCount(uint itemId);
+
+    /// <summary>
+    /// How many of an item are sitting in the Free Company chest, or 0 when none is or no page is
+    /// readable.
+    ///
+    /// <para>
+    /// Deliberately <b>not</b> part of <see cref="ItemCount"/>. Nothing in the chest can be handed
+    /// over, crafted with or counted against a "skip if already held" clause — folding it in would
+    /// have a purchase step skip itself and the hand-in it was buying for fail. It exists only so a
+    /// stop can say where the missing item actually is.
+    /// </para>
+    /// </summary>
+    int FreeCompanyChestCount(uint itemId);
 
     /// <summary>Ask the game to compute recommended gear for the current job. Async; poll <see cref="RecommendedGearReady"/>.</summary>
     bool PrepareRecommendedGear();
@@ -182,6 +302,25 @@ public interface IStepWorld
     /// button is disabled — which means an optional reward still needs choosing.
     /// </summary>
     bool CompleteQuestRewardWindow();
+
+    // ── The Request window ──
+    //
+    // The NPC hand-over window: an interaction that wants items puts it up with a slot per item,
+    // and the interaction cannot end until the slots are filled and Hand Over is pressed. Both are
+    // things TextAdvance does when it is loaded and holding; these three are what let a run say
+    // what is missing, and finish the hand-in, when it is not.
+
+    /// <summary>What the hand-over window is asking for; empty when it is not up.</summary>
+    System.Collections.Generic.IReadOnlyList<HandOverRequest> HandOverRequests { get; }
+
+    /// <summary>The game's own answer to whether the bags can satisfy every slot.</summary>
+    bool CanSatisfyHandOver { get; }
+
+    /// <summary>
+    /// Fill every slot from the bags and press Hand Over. False when the window is not up, a slot
+    /// could not be filled, or the button is disabled.
+    /// </summary>
+    bool CompleteHandOverWindow();
 
     /// <summary>Ask TextAdvance to drive dialogue for us / stop.</summary>
     void HoldDialogue();

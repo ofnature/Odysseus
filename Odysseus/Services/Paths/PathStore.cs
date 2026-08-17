@@ -32,6 +32,7 @@ public sealed class PathStore
     private readonly Action<string>? _log;
     private readonly Dictionary<ushort, QuestPath> _paths = [];
     private bool _loaded;
+    private int _outdated;
 
     public PathStore(string directory, Action<string>? log = null)
     {
@@ -61,6 +62,22 @@ public sealed class PathStore
     {
         EnsureLoaded();
         return _paths.ContainsKey(questId);
+    }
+
+    /// <summary>
+    /// Paths a re-import would materially improve — see <see cref="QuestPath.NeedsReconvert"/>.
+    ///
+    /// <para>
+    /// They load and run, but only as far as the converter that wrote them understood: a verb named
+    /// after they were converted is stored as <see cref="StepKind.Unknown"/>, and every field added
+    /// since is simply absent. That degrades <i>silently</i> — a Craft step from a version-1 path is
+    /// indistinguishable from a step with no item, so it offers no material list and stops the run
+    /// blaming a feature that exists. Hence a count worth surfacing.
+    /// </para>
+    /// </summary>
+    public int OutdatedCount
+    {
+        get { EnsureLoaded(); return _outdated; }
     }
 
     /// <summary>Import from a bundle and persist. Returns the report; errors are in it, not thrown, except for a bad bundle.</summary>
@@ -97,6 +114,10 @@ public sealed class PathStore
         System.IO.Directory.CreateDirectory(_directory);
         var file = FileFor(path.QuestId);
         File.WriteAllText(file, JsonSerializer.Serialize(path, JsonOptions));
+        if (_paths.TryGetValue(path.QuestId, out var replaced) && replaced.NeedsReconvert)
+            _outdated--;
+        if (path.NeedsReconvert)
+            _outdated++;
         _paths[path.QuestId] = path;
     }
 
@@ -115,6 +136,7 @@ public sealed class PathStore
             {
                 var path = JsonSerializer.Deserialize<QuestPath>(File.ReadAllText(file), JsonOptions);
                 if (path is null || path.QuestId == 0) { failed++; continue; }
+                if (path.NeedsReconvert) _outdated++;
                 _paths[path.QuestId] = path;
             }
             catch (Exception ex)

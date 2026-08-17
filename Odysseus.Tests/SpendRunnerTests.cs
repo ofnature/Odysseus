@@ -49,6 +49,7 @@ public class SpendRunnerTests
         public bool CommitTrade(DeliveryRoute route) => false;
         public int CurrentCraftType => -1;
         public bool IsShopOpen(uint shopId) => false;
+        public uint OpenShopId => 0;
         public bool OpenShop(uint vendorDataId, uint shopId) => false;
         public bool BuyFromShop(uint shopId, uint itemId, int count) => false;
         public bool ShopBusy(uint shopId) => false;

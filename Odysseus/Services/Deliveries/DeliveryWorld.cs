@@ -4,6 +4,39 @@ using System.Collections.Generic;
 namespace Odysseus.Services.Deliveries;
 
 /// <summary>
+/// Buying from an NPC. Split out of <see cref="IDeliveryWorld"/> because a <c>PurchaseItem</c>
+/// quest step wants exactly this and nothing else about deliveries; the step executor takes the
+/// narrow interface and <see cref="GameDeliveryWorld"/> keeps being the one implementation, so
+/// there is no second copy of the shop-handler code to keep in step.
+/// </summary>
+public interface IShopWorld
+{
+    /// <summary>This shop's window is open. <c>0</c> asks only whether <i>a</i> shop is open.</summary>
+    bool IsShopOpen(uint shopId);
+
+    /// <summary>The event id of the shop that is open right now, or 0 when none is.</summary>
+    uint OpenShopId { get; }
+
+    /// <summary>
+    /// Interact with a vendor and pick its shop. <paramref name="shopId"/> may be 0 for an NPC
+    /// whose only purpose is the shop — then there is nothing to choose out of. False when the NPC
+    /// or the shop is not there.
+    /// </summary>
+    bool OpenShop(uint vendorDataId, uint shopId);
+
+    /// <summary>Buy from an open shop. False when the item is not on its shelves.</summary>
+    bool BuyFromShop(uint shopId, uint itemId, int count);
+
+    /// <summary>A purchase is still going through.</summary>
+    bool ShopBusy(uint shopId);
+
+    void CloseShop();
+
+    /// <summary>Gil on hand.</summary>
+    int Gil { get; }
+}
+
+/// <summary>
 /// The delivery-specific parts of the game the runner needs, beyond what <c>IStepWorld</c> covers.
 ///
 /// <para>
@@ -13,7 +46,7 @@ namespace Odysseus.Services.Deliveries;
 /// executor — no quest step ever needs them.
 /// </para>
 /// </summary>
-public interface IDeliveryWorld
+public interface IDeliveryWorld : IShopWorld
 {
     /// <summary>The supply window is open and belongs to this client.</summary>
     bool IsSupplyOpen(DeliveryClient client);
@@ -36,23 +69,6 @@ public interface IDeliveryWorld
 
     /// <summary>The crafting job the player is on right now, as a <c>CraftType</c> index, or -1.</summary>
     int CurrentCraftType { get; }
-
-    /// <summary>This shop's window is open.</summary>
-    bool IsShopOpen(uint shopId);
-
-    /// <summary>Interact with a vendor and pick its shop. False when the NPC or the shop is not there.</summary>
-    bool OpenShop(uint vendorDataId, uint shopId);
-
-    /// <summary>Buy from an open shop. False when the item is not on its shelves.</summary>
-    bool BuyFromShop(uint shopId, uint itemId, int count);
-
-    /// <summary>A purchase is still going through.</summary>
-    bool ShopBusy(uint shopId);
-
-    void CloseShop();
-
-    /// <summary>Gil on hand.</summary>
-    int Gil { get; }
 
     /// <summary>A nearby NPC that runs this special shop, or 0.</summary>
     uint FindSpecialShopVendor(uint shopId);
@@ -287,6 +303,30 @@ public sealed unsafe class GameDeliveryWorld : IDeliveryWorld
         }
     }
 
+    /// <summary>
+    /// Which shop the open window belongs to. Read back off the agent's event receiver, so it
+    /// answers the question a <c>PurchaseItem</c> step with no named shop has to ask: the vendor
+    /// was interacted with and something opened — what is it, so the buy can go through its handler?
+    /// </summary>
+    public uint OpenShopId
+    {
+        get
+        {
+            try
+            {
+                var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentShop.Instance();
+                if (agent == null || !agent->IsAgentActive() || agent->EventReceiver == null || !agent->IsAddonReady())
+                    return 0;
+                var proxy = (FFXIVClientStructs.FFXIV.Client.Game.Event.ShopEventHandler.AgentProxy*)agent->EventReceiver;
+                return proxy->Handler == null ? 0 : proxy->Handler->Info.EventId.Id;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+    }
+
     public bool OpenShop(uint vendorDataId, uint shopId)
     {
         try
@@ -309,13 +349,22 @@ public sealed unsafe class GameDeliveryWorld : IDeliveryWorld
                 return false;
             }
 
+            // A step that names no shop cannot choose between several. Take the first shop the NPC
+            // offers rather than guessing at the others' kinds — OpenShopId then says which it was.
             for (var i = 0; i < selector->OptionsCount; i++)
             {
-                if (selector->Options[i].Handler->Info.EventId.Id != shopId) continue;
+                var handler = selector->Options[i].Handler;
+                if (handler == null) continue;
+                if (shopId != 0
+                    ? handler->Info.EventId.Id != shopId
+                    : handler->Info.EventId.ContentId != FFXIVClientStructs.FFXIV.Client.Game.Event.EventHandlerContent.Shop)
+                    continue;
                 FFXIVClientStructs.FFXIV.Client.Game.Event.EventFramework.Instance()->InteractWithHandlerFromSelector(i);
                 return true;
             }
-            _log($"Shop {shopId:X} is not among what that NPC offers.");
+            _log(shopId != 0
+                ? $"Shop {shopId:X} is not among what that NPC offers."
+                : "That NPC's options include no shop.");
             return false;
         }
         catch (Exception ex)
