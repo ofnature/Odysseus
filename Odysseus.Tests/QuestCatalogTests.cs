@@ -182,3 +182,41 @@ public class JobGroupingTests
         Assert.Equal(["My First Saw", "A Test of Technique"], carpenter);
     }
 }
+
+/// <summary>
+/// The two columns disagree on spelling for the same class: a class's opening quest resolves to
+/// "CRP" while the rest of its line resolves to "Carpenter". Unresolved, that shows in the journal
+/// as a group of one beside a group of twenty.
+/// </summary>
+public class JobNameNormalisationTests
+{
+    private static readonly Dictionary<string, string> ByAbbreviation =
+        new(StringComparer.OrdinalIgnoreCase) { ["CRP"] = "Carpenter", ["BSM"] = "Blacksmith", ["MIN"] = "Miner" };
+
+    private static string Resolve(string categoryName)
+    {
+        // Mirrors QuestCatalog.JobOf's fallback branch.
+        if (categoryName.Length is 0 or > 4) return string.Empty;
+        return ByAbbreviation.TryGetValue(categoryName, out var full) ? full : categoryName;
+    }
+
+    [Theory]
+    [InlineData("CRP", "Carpenter")]
+    [InlineData("BSM", "Blacksmith")]
+    [InlineData("MIN", "Miner")]
+    [InlineData("crp", "Carpenter")]                     // the sheets are not consistent about case
+    public void An_abbreviation_resolves_to_the_full_class_name(string abbreviation, string expected)
+        => Assert.Equal(expected, Resolve(abbreviation));
+
+    [Fact]
+    public void A_wide_category_is_not_a_class_and_stays_out()
+    {
+        Assert.Equal(string.Empty, Resolve("Disciples of the Hand"));
+        Assert.Equal(string.Empty, Resolve("All Classes"));
+        Assert.Equal(string.Empty, Resolve(""));
+    }
+
+    [Fact]
+    public void An_unknown_short_name_is_kept_rather_than_dropped()
+        => Assert.Equal("ZZZ", Resolve("ZZZ"));
+}

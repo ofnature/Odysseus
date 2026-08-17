@@ -105,6 +105,7 @@ public sealed class QuestCatalog
     {
         try
         {
+            var jobNames = ClassNamesByAbbreviation(data);
             var rows = new List<QuestListing>();
             foreach (var row in data.GetExcelSheet<Lumina.Excel.Sheets.Quest>())
             {
@@ -143,7 +144,7 @@ public sealed class QuestCatalog
                 {
                     Section = sectionName,
                     Category = categoryName,
-                    JobName = JobOf(row),
+                    JobName = JobOf(row, jobNames),
                 });
             }
             Load(rows);
@@ -163,14 +164,36 @@ public sealed class QuestCatalog
     /// abbreviation. The wide categories ("Disciples of the Hand", "All Classes") share the same
     /// column and would group everything back together, which is the problem this exists to solve.
     /// </para>
+    ///
+    /// <para>
+    /// The fallback is then resolved back through <c>ClassJob.Abbreviation</c>, because the two
+    /// columns disagree on spelling for the same class: a class's opening quest gives "CRP" where
+    /// the rest of its line gives "Carpenter", and unresolved that shows up as a group of one
+    /// sitting beside a group of twenty.
+    /// </para>
     /// </summary>
-    private static string JobOf(Lumina.Excel.Sheets.Quest row)
+    private static string JobOf(Lumina.Excel.Sheets.Quest row, IReadOnlyDictionary<string, string> byAbbreviation)
     {
         if (row.ClassJobRequired.ValueNullable?.Name.ExtractText() is { Length: > 0 } required)
             return Capitalise(required);
 
         var category = row.ClassJobCategory0.ValueNullable?.Name.ExtractText() ?? string.Empty;
-        return category.Length is > 0 and <= 4 ? category : string.Empty;
+        if (category.Length is 0 or > 4) return string.Empty;
+        return byAbbreviation.TryGetValue(category, out var full) ? full : category;
+    }
+
+    /// <summary>Class abbreviation → full name, e.g. CRP → Carpenter.</summary>
+    private static Dictionary<string, string> ClassNamesByAbbreviation(IDataManager data)
+    {
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var job in data.GetExcelSheet<Lumina.Excel.Sheets.ClassJob>())
+        {
+            var abbreviation = job.Abbreviation.ExtractText();
+            var name = job.Name.ExtractText();
+            if (abbreviation.Length > 0 && name.Length > 0)
+                map.TryAdd(abbreviation, Capitalise(name));
+        }
+        return map;
     }
 
     private static string Capitalise(string s) => s.Length == 0 ? s : char.ToUpperInvariant(s[0]) + s[1..];
