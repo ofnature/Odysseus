@@ -182,6 +182,7 @@ public static class QuestionableImporter
             DisableNavmesh = Bool(e, "DisableNavmesh") ?? false,
             AetheryteShortcut = Str(e, "AetheryteShortcut"),
             AetherCurrentId = U32(e, "AetherCurrentId"),
+            ItemCount = (int?)U32(e, "ItemCount"),
             ItemId = U32(e, "ItemId"),
             Emote = Str(e, "Emote"),
             DelaySecondsAtStart = F32(e, "DelaySecondsAtStart"),
@@ -274,8 +275,13 @@ public static class QuestionableImporter
             QuestsAccepted = U16List(e, "QuestsAccepted"),
             Flying = Str(e, "Flying"),
             AetheryteUnlocked = Bool(e, "AetheryteUnlocked"),
-            NotInInventory = U32(e, "NotInInventory"),
         };
+        // The item clause is nested: SkipConditions.StepIf.Item.NotInInventory.
+        if (e.TryGetProperty("Item", out var item) && item.ValueKind == System.Text.Json.JsonValueKind.Object)
+            c.Item = new ItemCondition { NotInInventory = Bool(item, "NotInInventory") ?? false };
+        // The item clause is nested: SkipConditions.StepIf.Item.NotInInventory.
+        if (e.TryGetProperty("Item", out var itemClause) && itemClause.ValueKind == JsonValueKind.Object)
+            c.Item = new ItemCondition { NotInInventory = Bool(itemClause, "NotInInventory") ?? false };
         if (e.TryGetProperty("CompletionQuestVariablesFlags", out var flags))
             c.CompletionQuestVariablesFlags = ParseFlags(flags);
         return c;

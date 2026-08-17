@@ -97,11 +97,31 @@ public sealed class StepCondition
     /// <summary>Six-slot bitmask over the quest's variables; null slot = don't care.</summary>
     public byte?[]? CompletionQuestVariablesFlags { get; set; }
     public bool? AetheryteUnlocked { get; set; }
-    public uint? NotInInventory { get; set; }
+    /// <summary>Asks about the step's own item — see <see cref="ItemCondition"/>.</summary>
+    public ItemCondition? Item { get; set; }
     /// <summary>True when nothing was specified.</summary>
     public bool IsEmpty
         => InTerritory is null && NotInTerritory is null && QuestsCompleted is null && QuestsAccepted is null
-           && Flying is null && CompletionQuestVariablesFlags is null && AetheryteUnlocked is null && NotInInventory is null;
+           && Flying is null && CompletionQuestVariablesFlags is null && AetheryteUnlocked is null && Item is null;
+}
+
+/// <summary>
+/// A condition about the step's own <see cref="QuestStep.ItemId"/> and <see cref="QuestStep.ItemCount"/>.
+///
+/// <para>
+/// This is what stops a Craft step remaking something already in the bag, and a PurchaseItem step
+/// re-buying materials after a restart. The bundle carries it on 257 of its 402 Craft steps; we
+/// parsed the wrong shape and so never evaluated it, which had exactly the effect the data was
+/// written to prevent.
+/// </para>
+/// </summary>
+public sealed class ItemCondition
+{
+    /// <summary>
+    /// <c>false</c> — the common case — means "skip when the item <i>is</i> held". <c>true</c>
+    /// inverts it: skip when it is not.
+    /// </summary>
+    public bool NotInInventory { get; set; }
 }
 
 /// <summary>Skip rules on a step: skip the whole step, or just its teleport, when the condition holds.</summary>
@@ -164,6 +184,8 @@ public sealed class QuestStep
     public ushort? PickUpQuestId { get; set; }
     public uint? AetherCurrentId { get; set; }
     public uint? ItemId { get; set; }
+    /// <summary>How many the step wants — Craft and PurchaseItem both carry it.</summary>
+    public int? ItemCount { get; set; }
     public string? Emote { get; set; }
     /// <summary>Text key for a <see cref="StepKind.Say"/> step, resolved against the quest's dialogue sheet.</summary>
     public string? ChatMessageKey { get; set; }

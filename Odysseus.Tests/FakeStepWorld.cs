@@ -78,6 +78,9 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public void Mount() { Calls.Add("Mount"); IsMounted = true; }
     public bool IsQuestComplete(ushort questId) => CompletedQuests.Contains(questId);
     public bool IsQuestAccepted(ushort questId) => AcceptedQuests.Contains(questId);
+    /// <summary>Both qualities together, as the real reader counts them.</summary>
+    public Dictionary<uint, int> Bag { get; } = new();
+    public int ItemCount(uint itemId) => Bag.GetValueOrDefault(itemId);
     public bool IsDataIdSpawned(uint dataId) => Spawned.Contains(dataId);
     public float? DistanceToDataId(uint dataId) => Spawned.Contains(dataId) ? 1f : null;
     /// <summary>Spawned objects sit on the player unless a test places them somewhere.</summary>

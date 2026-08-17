@@ -256,6 +256,26 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     public bool IsQuestAccepted(ushort questId) => _quests.IsAccepted(questId);
 
+    /// <summary>
+    /// Both qualities counted. A quest takes an HQ item as readily as an NQ one, so counting only
+    /// NQ would have the engine remake something already sitting in the bag — which is the whole
+    /// point of the condition that asks.
+    /// </summary>
+    public unsafe int ItemCount(uint itemId)
+    {
+        try
+        {
+            var manager = FFXIVClientStructs.FFXIV.Client.Game.InventoryManager.Instance();
+            if (manager == null) return 0;
+            return manager->GetInventoryItemCount(itemId, isHq: false)
+                   + manager->GetInventoryItemCount(itemId, isHq: true);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     // ── World objects ──
 
     public bool IsDataIdSpawned(uint dataId) => NearestWithDataId(dataId) is not null;

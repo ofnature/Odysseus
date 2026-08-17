@@ -11,13 +11,16 @@ public interface IConditionWorld
     bool CanFlyHere { get; }
     bool IsQuestComplete(ushort questId);
     bool IsQuestAccepted(ushort questId);
+
+    /// <summary>How many of an item are held, both qualities — HQ counts, the game accepts it.</summary>
+    int ItemCount(uint itemId);
 }
 
 /// <summary>Evaluates <see cref="StepCondition"/> against live state. Pure; the only inputs are the interface and the snapshot.</summary>
 public static class StepConditions
 {
     /// <summary>True when every specified clause holds. An empty or null condition is <i>false</i> — "skip if nothing" must never skip.</summary>
-    public static bool Holds(StepCondition? condition, IConditionWorld world, QuestSnapshot quest)
+    public static bool Holds(StepCondition? condition, IConditionWorld world, QuestSnapshot quest, QuestStep? step = null)
     {
         if (condition is null || condition.IsEmpty)
             return false;
@@ -39,15 +42,22 @@ public static class StepConditions
         if (condition.CompletionQuestVariablesFlags is { } flags && !quest.Satisfies(flags))
             return false;
 
-        // AetheryteUnlocked / NotInInventory are not evaluated yet — treated as "holds", which is
-        // the conservative direction for a skip (skipping a teleport we could have taken costs a
-        // walk; skipping a step we needed costs the quest). Revisit when a path needs them.
+        if (condition.Item is { } item)
+        {
+            // The clause is about the step's own item, so without a step there is nothing to ask.
+            if (step?.ItemId is not { } itemId) return false;
+            var held = world.ItemCount(itemId) >= (step.ItemCount ?? 1);
+            if (held == item.NotInInventory) return false;
+        }
+
+        // AetheryteUnlocked is still not evaluated; it is only ever seen on teleport clauses, where
+        // a wrong answer costs a walk rather than the quest.
         return true;
     }
 
     /// <summary>The step itself should be skipped right now.</summary>
     public static bool ShouldSkipStep(QuestStep step, IConditionWorld world, QuestSnapshot quest)
-        => Holds(step.SkipConditions?.StepIf, world, quest);
+        => Holds(step.SkipConditions?.StepIf, world, quest, step);
 
     /// <summary>The step's aetheryte teleport should be skipped (already nearby, etc.).</summary>
     public static bool ShouldSkipAetheryte(QuestStep step, IConditionWorld world, QuestSnapshot quest)
