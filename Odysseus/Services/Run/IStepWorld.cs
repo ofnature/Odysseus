@@ -19,6 +19,21 @@ public enum JobKind
 /// </summary>
 public sealed record GearsetInfo(int Id, uint ClassJobId, uint ParentClassJobId, int Level, JobKind Kind);
 
+/// <summary>
+/// How to reach a zone the path does not say how to reach.
+///
+/// <para>
+/// The two legs exist because half a city can hold no aetheryte at all — Ul'dah's Steps of Thal
+/// has six aethernet shards and nothing to teleport to — so getting there means teleporting to the
+/// city and then hopping. Either leg may stand alone: a plain zone is one teleport, and the other
+/// half of the city you are already standing in is one hop.
+/// </para>
+/// </summary>
+/// <param name="AetheryteId">Teleport here first, or null when already in the right city.</param>
+/// <param name="AethernetName">Then hop here, or null when the teleport lands you in the zone.</param>
+/// <param name="AetheryteTerritory">The zone the teleport lands in — not the destination when a hop follows.</param>
+public sealed record TravelRoute(uint? AetheryteId, string? AethernetName, uint AetheryteTerritory);
+
 /// <summary>One slot of the NPC hand-over window: an item, and how many of it it wants.</summary>
 public sealed record HandOverRequest(uint ItemId, string Name, int Quantity);
 
@@ -85,8 +100,33 @@ public interface IStepWorld
     /// <summary>Start a teleport. False when refused outright (no Lifestream, unknown/locked aetheryte).</summary>
     bool Teleport(uint aetheryteId);
 
+    /// <summary>
+    /// How to get to a zone, using only aetherytes the character has attuned. Null when there is
+    /// no way in.
+    ///
+    /// <para>
+    /// This is how a run reaches a quest it is not standing next to. Most steps name their own
+    /// shortcut, but 1,851 of the bundle's 4,255 quests open on a step that names a territory and
+    /// no aetheryte — they work when the previous quest left you in the right place and not
+    /// otherwise, which is exactly the case where pressing Start should still work.
+    /// </para>
+    /// </summary>
+    TravelRoute? RouteTo(uint territoryId, Vector3? near);
+
     /// <summary>Start an aethernet hop to a shard by its display name. False when refused.</summary>
     bool AethernetTeleport(string destination);
+
+    /// <summary>
+    /// The zone an aethernet destination sits in, or null when the sheet does not know the name.
+    /// Lets a hop be judged by where it landed rather than by having stopped being busy.
+    /// </summary>
+    uint? AethernetTerritoryOf(string destination);
+
+    /// <summary>
+    /// Where to stand to use the aethernet in this zone — the nearest shard or city aetheryte.
+    /// Null when the zone has none, or none whose position the sheet records.
+    /// </summary>
+    Vector3? NearestAethernetAccess(uint territoryId, Vector3 near);
 
     /// <summary>A teleport or aethernet hop is in progress (Lifestream busy, or the player is between areas).</summary>
     bool IsTravelBusy { get; }

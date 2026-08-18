@@ -72,7 +72,9 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
         Calls.Add($"Move{(direct ? "Direct" : "")} {destination.X:F0},{destination.Y:F0},{destination.Z:F0} fly={fly}");
         LastMoveTarget = destination;
         if (!MoveAccepted) return false;
-        IsMoving = true;
+        // A pathfind that finds nothing leaves you standing still — that is what zero waypoints
+        // means, and modelling it is what lets the executor's retry-then-give-up be tested.
+        IsMoving = PathWaypointCount != 0;
         if (ArriveOnMove) { PlayerPosition = destination; IsMoving = false; }
         return true;
     }
@@ -88,6 +90,18 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool ArriveOnTeleport { get; set; } = true;
     public uint? ResolveAetheryte(string name) => Aetherytes.TryGetValue(name, out var id) ? id : null;
     public uint? AetheryteTerritory(uint aetheryteId) => AetheryteTerritories.TryGetValue(aetheryteId, out var t) ? t : null;
+    /// <summary>Territory → an aetheryte in it the character has attuned. Absent means no way in.</summary>
+    public Dictionary<uint, uint> AttunedByTerritory { get; } = new();
+    /// <summary>Territory → the aethernet hop that reaches it, for a zone with no aetheryte of its own.</summary>
+    public Dictionary<uint, (uint? Aetheryte, string Hop, uint Lands)> AethernetByTerritory { get; } = new();
+    public TravelRoute? RouteTo(uint territoryId, Vector3? near)
+    {
+        if (AttunedByTerritory.TryGetValue(territoryId, out var id))
+            return new TravelRoute(id, null, territoryId);
+        if (AethernetByTerritory.TryGetValue(territoryId, out var v))
+            return new TravelRoute(v.Aetheryte, v.Hop, v.Lands);
+        return null;
+    }
     public bool Teleport(uint aetheryteId)
     {
         Calls.Add($"Teleport {aetheryteId}");
@@ -95,7 +109,21 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
         if (ArriveOnTeleport && AetheryteTerritories.TryGetValue(aetheryteId, out var t)) TerritoryId = t;
         return true;
     }
-    public bool AethernetTeleport(string destination) { Calls.Add($"Aethernet {destination}"); return TeleportAccepted; }
+    /// <summary>Aethernet destination → the zone it lands in, and where the fake puts you.</summary>
+    public Dictionary<string, uint> AethernetTerritories { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public uint? AethernetTerritoryOf(string destination)
+        => AethernetTerritories.TryGetValue(destination, out var t) ? t : null;
+    /// <summary>Territory → where its aethernet access point stands. Absent means none placed.</summary>
+    public Dictionary<uint, Vector3> AethernetAccess { get; } = new();
+    public Vector3? NearestAethernetAccess(uint territoryId, Vector3 near)
+        => AethernetAccess.TryGetValue(territoryId, out var p) ? p : null;
+    public bool AethernetTeleport(string destination)
+    {
+        Calls.Add($"Aethernet {destination}");
+        if (!TeleportAccepted) return false;
+        if (ArriveOnTeleport && AethernetTerritories.TryGetValue(destination, out var t)) TerritoryId = t;
+        return true;
+    }
     public void Mount() { Calls.Add("Mount"); IsMounted = true; }
     public bool IsQuestComplete(ushort questId) => CompletedQuests.Contains(questId);
     public bool IsQuestAccepted(ushort questId) => AcceptedQuests.Contains(questId);

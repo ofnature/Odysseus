@@ -24,6 +24,7 @@ public sealed class LifestreamIpc
 
     private ICallGateSubscriber<uint, byte, bool>? _teleport;
     private ICallGateSubscriber<string, bool>? _aethernetTeleport;
+    private ICallGateSubscriber<uint, bool>? _aethernetById;
     private ICallGateSubscriber<bool>? _isBusy;
     private ICallGateSubscriber<object>? _abort;
     private bool _warned;
@@ -41,6 +42,19 @@ public sealed class LifestreamIpc
     /// <summary>Walk to and use the nearest aethernet shard to reach <paramref name="destination"/> (Lifestream display name).</summary>
     public bool AethernetTeleport(string destination) => Try(() =>
         (_aethernetTeleport ??= _pluginInterface.GetIpcSubscriber<string, bool>("Lifestream.AethernetTeleport")).InvokeFunc(destination));
+
+    /// <summary>
+    /// The same hop, addressed by the destination's <c>PlaceName</c> row rather than its text.
+    ///
+    /// <para>
+    /// Preferred wherever the id is known: matching on a display name has to agree with Lifestream
+    /// about spelling, capitalisation and which language the client is in, and a hop that quietly
+    /// matches nothing looks exactly like one that worked — it returns true and stands still.
+    /// </para>
+    /// </summary>
+    public bool AethernetTeleportByPlaceName(uint placeNameRowId) => Try(() =>
+        (_aethernetById ??= _pluginInterface.GetIpcSubscriber<uint, bool>("Lifestream.AethernetTeleportByPlaceNameId"))
+            .InvokeFunc(placeNameRowId));
 
     /// <summary>Lifestream is mid-task (walking to a shard, waiting on a teleport).</summary>
     public bool IsBusy => Try(() =>

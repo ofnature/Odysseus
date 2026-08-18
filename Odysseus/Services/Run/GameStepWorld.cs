@@ -149,9 +149,140 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     public uint? AetheryteTerritory(uint aetheryteId) => _aetherytes.TerritoryOf(aetheryteId);
 
+    /// <summary>
+    /// A teleport straight into the zone, else a hop across the city aethernet, else nothing.
+    ///
+    /// <para>
+    /// Attunement is checked because an unattuned aetheryte is not a route, it is a refused
+    /// teleport. When the unlock state cannot be read at all the first candidate is taken and
+    /// Lifestream gets to be the one that says no — better than declaring a zone unreachable
+    /// because of a bad read.
+    /// </para>
+    /// </summary>
+    public TravelRoute? RouteTo(uint territoryId, Vector3? near)
+    {
+        if (Attuned(_aetherytes.InTerritory(territoryId, near)) is { } direct)
+            return new TravelRoute(direct, null, territoryId);
+
+        // No aetheryte in the zone. It may still be half a city, reachable only across the aethernet.
+        if (_aetherytes.ShardIn(territoryId, near) is not { } shard)
+            return null;
+
+        // Already on that network — one hop and nothing else.
+        if (_aetherytes.GroupOfTerritory(TerritoryId) == shard.Group)
+            return new TravelRoute(null, shard.Name, territoryId);
+
+        if (_aetherytes.HubOfGroup(shard.Group) is not { } hub || Attuned([hub]) is null)
+            return null;
+        return new TravelRoute(hub, shard.Name, _aetherytes.TerritoryOf(hub) ?? territoryId);
+    }
+
+    /// <summary>The first of these the character has attuned, or null when none is.</summary>
+    private uint? Attuned(IReadOnlyList<uint> candidates)
+    {
+        if (candidates.Count == 0)
+            return null;
+        try
+        {
+            var state = UIState.Instance();
+            if (state == null)
+                return candidates[0];
+            foreach (var id in candidates)
+                if (state->IsAetheryteUnlocked(id))
+                    return id;
+            return null;
+        }
+        catch
+        {
+            return candidates[0];
+        }
+    }
+
     public bool Teleport(uint aetheryteId) => _lifestream.Teleport(aetheryteId);
 
-    public bool AethernetTeleport(string destination) => _lifestream.AethernetTeleport(destination);
+    public uint? AethernetTerritoryOf(string destination)
+        => _aetherytes.StopNamed(destination)?.TerritoryId;
+
+    private HashSet<uint>? _shardObjectIds;
+
+    /// <summary>
+    /// The EObj rows named "Aethernet shard". Their positions are not in any sheet — the
+    /// <c>Aetheryte</c> rows carry no Level at all, for shards or for the city aetheryte — so the
+    /// only truthful source is the object table, and these ids are how it is recognised there.
+    /// </summary>
+    private HashSet<uint> ShardObjectIds()
+    {
+        if (_shardObjectIds is not null) return _shardObjectIds;
+        _shardObjectIds = [];
+        try
+        {
+            var names = _data.GetExcelSheet<EObjName>();
+            foreach (var eobj in _data.GetExcelSheet<EObj>())
+                if (names.GetRowOrDefault(eobj.RowId)?.Singular.ExtractText() is { Length: > 0 } n
+                    && n.Contains("aethernet", StringComparison.OrdinalIgnoreCase))
+                    _shardObjectIds.Add(eobj.RowId);
+        }
+        catch (Exception ex)
+        {
+            _log($"Aethernet shard object ids unavailable: {ex.Message}");
+        }
+        return _shardObjectIds;
+    }
+
+    /// <summary>
+    /// Where to stand to use the aethernet, read off what is actually loaded around you — a shard
+    /// object, or the city aetheryte, whichever is nearer.
+    /// </summary>
+    public Vector3? NearestAethernetAccess(uint territoryId, Vector3 near)
+    {
+        try
+        {
+            var shards = ShardObjectIds();
+            Vector3? best = null;
+            var bestDistance = float.MaxValue;
+            foreach (var obj in _objectTable)
+            {
+                var isAccess = obj.ObjectKind == ObjectKind.Aetheryte
+                               || (obj.ObjectKind == ObjectKind.EventObj && shards.Contains(obj.BaseId));
+                if (!isAccess) continue;
+                var distance = Vector3.Distance(obj.Position, near);
+                if (distance >= bestDistance) continue;
+                bestDistance = distance;
+                best = obj.Position;
+            }
+            return best;
+        }
+        catch (Exception ex)
+        {
+            _log($"Aethernet access lookup failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    public bool AethernetTeleport(string destination)
+    {
+        // By id when the sheet knows the destination — both sides then read the same row and there
+        // is no spelling to disagree about. The name gate stays as the fallback.
+        if (_aetherytes.StopNamed(destination) is { } stop && stop.PlaceNameId != 0)
+        {
+            if (_lifestream.AethernetTeleportByPlaceName(stop.PlaceNameId))
+                return true;
+            _log($"Aethernet to {stop.Name} by id was refused; trying by name.");
+        }
+        var place = StripCity(destination);
+        _log($"Aethernet destination \"{destination}\" is not in the Aetheryte sheet; asking Lifestream by name.");
+        return _lifestream.AethernetTeleport(place);
+    }
+
+    /// <summary>"[Ul'dah] Goldsmiths' Guild" → "Goldsmiths' Guild". Anything unbracketed is left alone.</summary>
+    public static string StripCity(string destination)
+    {
+        var close = destination.IndexOf(']');
+        return destination.StartsWith('[') && close > 0
+            ? destination[(close + 1)..].Trim()
+            : destination.Trim();
+    }
+
 
     public bool IsTravelBusy
         => _lifestream.IsBusy

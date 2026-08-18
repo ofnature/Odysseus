@@ -39,12 +39,28 @@ public sealed class AetheryteCatalog
     private readonly Dictionary<uint, (string Name, string Zone, uint TerritoryId, System.Numerics.Vector3? Position)> _byId = new();
     private readonly Dictionary<uint, string> _aliasById = new();
 
+    /// <summary>
+    /// One aethernet destination inside a city. <paramref name="Group"/> is the city's aethernet
+    /// network — every shard and the city's own aetheryte share it, which is what says which
+    /// aetheryte to teleport to before hopping.
+    /// </summary>
+    public sealed record Shard(uint Id, string Name, uint PlaceNameId, uint TerritoryId, byte Group, System.Numerics.Vector3? Position);
+
+    private readonly List<Shard> _shards = [];
+    /// <summary>Every aethernet stop by name — shards and city aetherytes alike.</summary>
+    private readonly Dictionary<string, Shard> _stopsByName = new(StringComparer.OrdinalIgnoreCase);
+    /// <summary>Aethernet group → the city aetheryte you can actually teleport to.</summary>
+    private readonly Dictionary<byte, uint> _hubByGroup = new();
+    /// <summary>Territory → its aethernet group, for "am I already in this city".</summary>
+    private readonly Dictionary<uint, byte> _groupByTerritory = new();
+
     /// <summary>Build from the game's sheets.</summary>
     public AetheryteCatalog(IDataManager data, Action<string> log)
     {
         try
         {
-            var rows = data.GetExcelSheet<Aetheryte>()
+            var sheet = data.GetExcelSheet<Aetheryte>();
+            var rows = sheet
                 .Where(a => a.IsAetheryte)
                 .Select(a => (
                     Id: a.RowId,
@@ -53,6 +69,31 @@ public sealed class AetheryteCatalog
                     Territory: a.Territory.RowId,
                     Position: LevelPosition(a)));
             Load(rows);
+
+            // The aethernet, kept apart from the teleport network because the two are reached by
+            // different calls. Half a city can hold no aetheryte at all — Ul'dah's Steps of Thal
+            // has six shards and none — so without this such a zone looks unreachable.
+            foreach (var a in sheet)
+            {
+                if (a.RowId == 0) continue;
+                var territory = a.Territory.RowId;
+                if (territory == 0) continue;
+                _groupByTerritory.TryAdd(territory, a.AethernetGroup);
+                var name = a.AethernetName.ValueNullable?.Name.ExtractText() ?? string.Empty;
+                // The PlaceName row is kept because that is what Lifestream's id-based hop takes —
+                // an id cannot be mis-spelled, and both sides read it from the same sheet.
+                var stop = new Shard(a.RowId, name, a.AethernetName.RowId, territory, a.AethernetGroup, LevelPosition(a));
+                // A city aetheryte is an aethernet stop as well as a teleport target, so it is
+                // named here too — "[Ul'dah] Aetheryte Plaza" is one, and every city has one.
+                if (name.Length > 0) _stopsByName.TryAdd(name, stop);
+                if (a.IsAetheryte)
+                {
+                    _hubByGroup.TryAdd(a.AethernetGroup, a.RowId);
+                    continue;
+                }
+                if (name.Length == 0) continue;
+                _shards.Add(stop);
+            }
         }
         catch (Exception ex)
         {
@@ -132,6 +173,102 @@ public sealed class AetheryteCatalog
         }
         return best;
     }
+
+    /// <summary>
+    /// Every aetheryte in a zone, closest to <paramref name="near"/> first when a point is given.
+    ///
+    /// <para>
+    /// Unlike <see cref="NearestIn"/> this has no distance limit: it answers "how would I get to
+    /// this zone at all", where any aetheryte in it will do and the nearest is merely the least
+    /// walking afterwards. Ones with no recorded position sort last rather than being dropped —
+    /// an aetheryte we cannot place is still one we can teleport to.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<uint> InTerritory(uint territoryId, System.Numerics.Vector3? near = null)
+    {
+        var found = new List<(uint Id, float Distance)>();
+        foreach (var (id, v) in _byId)
+        {
+            if (v.TerritoryId != territoryId)
+                continue;
+            var distance = near is { } point && v.Position is { } p
+                ? System.Numerics.Vector3.Distance(p, point)
+                : float.MaxValue;
+            found.Add((id, distance));
+        }
+        found.Sort((a, b) => a.Distance.CompareTo(b.Distance));
+        return found.ConvertAll(f => f.Id);
+    }
+
+    /// <summary>The aethernet destination in a zone, nearest to a point when one is given.</summary>
+    public Shard? ShardIn(uint territoryId, System.Numerics.Vector3? near = null)
+    {
+        Shard? best = null;
+        var bestDistance = float.MaxValue;
+        foreach (var shard in _shards)
+        {
+            if (shard.TerritoryId != territoryId) continue;
+            var distance = near is { } point && shard.Position is { } p
+                ? System.Numerics.Vector3.Distance(p, point)
+                : float.MaxValue;
+            if (best is null || distance < bestDistance)
+            {
+                best = shard;
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>The city aetheryte an aethernet group hangs off, or null when it has none.</summary>
+    public uint? HubOfGroup(byte group) => _hubByGroup.TryGetValue(group, out var id) ? id : null;
+
+    /// <summary>
+    /// An aethernet stop by the name the path data uses, brackets and all.
+    ///
+    /// <para>
+    /// Two spellings have to be tried. "[Ul'dah] Goldsmiths' Guild" is the shard the sheet calls
+    /// "Goldsmiths' Guild", so the bracketed city is noise. But "[Ul'dah] Aetheryte Plaza" is the
+    /// city aetheryte, which the sheet calls "Ul'dah Aetheryte Plaza" — there the city is part of
+    /// the name. Measured across the bundle: without the second attempt, all sixteen city plazas
+    /// resolve to nothing, which is one in eight of every aethernet name it uses. A third attempt
+    /// restores the article the data drops — "The Crystarium Aetheryte Plaza".
+    /// </para>
+    ///
+    /// <para>
+    /// The nine Firmament stops resolve to nothing on purpose: they are not in the Aetheryte sheet
+    /// at all but on Ishgard's housing aethernet, which Lifestream reaches through different calls.
+    /// Those fall through to the by-name gate and fail saying so.
+    /// </para>
+    /// </summary>
+    public Shard? StopNamed(string dataName)
+    {
+        var (city, name) = SplitCity(dataName);
+        if (name.Length == 0)
+            return null;
+        if (_stopsByName.TryGetValue(name, out var direct))
+            return direct;
+        if (city.Length == 0)
+            return null;
+        if (_stopsByName.TryGetValue($"{city} {name}", out var prefixed))
+            return prefixed;
+        // The data drops the article the sheet keeps: "[Crystarium] Aetheryte Plaza" against
+        // "The Crystarium Aetheryte Plaza".
+        return _stopsByName.TryGetValue($"The {city} {name}", out var articled) ? articled : null;
+    }
+
+    /// <summary>"[Ul'dah] Aetheryte Plaza" → ("Ul'dah", "Aetheryte Plaza"). No brackets, no city.</summary>
+    public static (string City, string Name) SplitCity(string dataName)
+    {
+        var close = dataName.IndexOf(']');
+        return dataName.StartsWith('[') && close > 0
+            ? (dataName[1..close].Trim(), dataName[(close + 1)..].Trim())
+            : (string.Empty, dataName.Trim());
+    }
+
+    /// <summary>The aethernet group a zone belongs to, or null when it is on no network.</summary>
+    public byte? GroupOfTerritory(uint territoryId)
+        => _groupByTerritory.TryGetValue(territoryId, out var g) ? g : null;
 
     public int Count => _byId.Count;
 

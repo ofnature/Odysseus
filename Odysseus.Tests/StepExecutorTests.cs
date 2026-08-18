@@ -127,15 +127,12 @@ public class StepExecutorTests
         var world = new FakeStepWorld { PathWaypointCount = 0 };
         var ex = new StepExecutor(world);
         ex.Begin(Step(StepKind.WalkTo, new Vector3(10, 0, 10)));
-        // The move is accepted (IsMoving goes true while it pathfinds), then vnav reports it
-        // found nothing: not moving, zero waypoints.
-        Run(ex, world, maxTicks: 2);
-        Assert.Contains(world.Calls, c => c.StartsWith("Move"));
-        world.IsMoving = false;
-        world.Advance(2);
 
+        // Zero waypoints is asked again before it is believed — a mesh still loading answers that
+        // way for a moment — so the step ends after the retries, not on the first answer.
         Assert.Equal(StepStatus.Failed, Run(ex, world));
         Assert.Contains("no path", ex.FailReason);
+        Assert.Equal(3, world.Calls.Count(c => c.StartsWith("Move ")));
     }
 
     [Fact]

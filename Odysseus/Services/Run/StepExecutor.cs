@@ -101,6 +101,8 @@ public sealed class StepExecutor
     private static readonly TimeSpan ShopMax = TimeSpan.FromSeconds(30);
     /// <summary>How long a handoff may sit having done nothing before we call it stuck. Progress resets it.</summary>
     private static readonly TimeSpan MakeIdle = TimeSpan.FromSeconds(60);
+    /// <summary>How long a pathfind is given to answer before the attempt is judged.</summary>
+    private static readonly TimeSpan PathSettle = TimeSpan.FromSeconds(2);
     private const int MaxMoveRetries = 3;
 
     private readonly IStepWorld _world;
@@ -134,6 +136,13 @@ public sealed class StepExecutor
     private bool _skipTeleport;
     /// <summary>The instance this step hands off has been run; arriving again means finish, not re-enter.</summary>
     private bool _handoffDone;
+    /// <summary>An aethernet hop the route resolver added, for a zone with no aetheryte of its own.</summary>
+    private string? _autoAethernet;
+    /// <summary>The zone the current hop should land in; 0 when the sheet does not know it.</summary>
+    private uint _aethernetTerritory;
+    /// <summary>A detour: walk here rather than to the step's own point, then go to <see cref="_detourThen"/>.</summary>
+    private Vector3? _detourTo;
+    private Phase _detourThen;
     private uint _teleportTarget;
     private uint _teleportTerritory;
     private bool _sawTravelBusy;
@@ -171,6 +180,9 @@ public sealed class StepExecutor
         _sawCombat = false;
         _skipTeleport = skipTeleport;
         _sawTravelBusy = false;
+        _autoAethernet = null;
+        _aethernetTerritory = 0;
+        _detourTo = null;
         _handoffDone = false;
         FailReason = string.Empty;
         Status = StepStatus.Running;
@@ -207,6 +219,26 @@ public sealed class StepExecutor
         or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem or StepKind.Say
         or StepKind.EquipRecommended or StepKind.Action or StepKind.Instruction or StepKind.StatusOff
         or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Craft or StepKind.Gather;
+
+    /// <summary>
+    /// Carried out on the character rather than in the world, so there is nowhere to be.
+    ///
+    /// <para>
+    /// Every step in the data carries a territory, but for these it records where the path author
+    /// happened to be standing, not a requirement — equipping a hammer, saving a gearset, switching
+    /// class or handing a craft to Artisan all work from anywhere. Enforcing that tag stopped a run
+    /// at the Free Company workshop because a step was written in Ul'dah.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="StepKind.Gather"/> is deliberately not here. Its territory may well be the zone
+    /// its nodes are in, and guessing wrong there means sending the gatherer somewhere useless.
+    /// </para>
+    /// </summary>
+    public static bool IsPlaceless(StepKind kind) => kind is
+        StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset or StepKind.SwitchClass
+        or StepKind.Craft or StepKind.EquipRecommended or StepKind.Instruction or StepKind.StatusOff;
+
 
     /// <summary>The step hands the character to another plugin for a whole instance.</summary>
     public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
@@ -276,17 +308,28 @@ public sealed class StepExecutor
                     if (now - _phaseStart > ReadyWait) Fail("never became ready for the aethernet");
                     break;
                 }
-                if (!_world.AethernetTeleport(step.AethernetShortcut![1]))
+                if (AethernetDestination is not { } hop)
                 {
-                    Fail($"aethernet to {step.AethernetShortcut[1]} was refused — Lifestream loaded?");
+                    Fail("aethernet hop with no destination");
                     break;
                 }
+                if (!_world.AethernetTeleport(hop))
+                {
+                    Fail($"aethernet to {hop} was refused — Lifestream loaded?");
+                    break;
+                }
+                _aethernetTerritory = _world.AethernetTerritoryOf(hop) ?? 0;
                 Enter(Phase.AethernetWait);
                 break;
 
             case Phase.AethernetWait:
-                TickTravelWait(now, arrived: !_world.IsTravelBusy && _world.IsReady,
-                    what: $"aethernet to {step.AethernetShortcut![1]}", next: NextAfterTravel);
+                // Judged by where it landed, not merely by Lifestream having gone quiet. A hop that
+                // matched nothing stops being busy immediately, and calling that "arrived" reported
+                // the wrong failure two phases later.
+                TickTravelWait(now,
+                    arrived: !_world.IsTravelBusy && _world.IsReady
+                             && (_aethernetTerritory == 0 || _world.TerritoryId == _aethernetTerritory),
+                    what: $"aethernet to {AethernetDestination}", next: NextAfterTravel);
                 break;
 
             case Phase.Mount:
@@ -453,37 +496,124 @@ public sealed class StepExecutor
             var id = _world.ResolveAetheryte(aetheryteName);
             if (id is null)
             {
-                Fail($"unknown aetheryte \"{aetheryteName}\" in the path data");
-                return Phase.None;
+                // Bad or renamed data. Say so, but do not stop on it — working the route out
+                // ourselves below gets there anyway, and the log keeps the data problem visible.
+                _world.Log($"Unknown aetheryte \"{aetheryteName}\" in the path data; finding my own way.");
             }
-            var territory = _world.AetheryteTerritory(id.Value) ?? 0;
-            var farAway = step.Position is { } p && Vector3.Distance(_world.PlayerPosition, p) > TeleportWorthDistance;
-            if (_world.TerritoryId != territory || farAway)
+            else
             {
-                _teleportTarget = id.Value;
-                _teleportTerritory = territory;
-                return Phase.Teleport;
+                var territory = _world.AetheryteTerritory(id.Value) ?? 0;
+                var farAway = step.Position is { } p && Vector3.Distance(_world.PlayerPosition, p) > TeleportWorthDistance;
+                if (_world.TerritoryId != territory || farAway)
+                {
+                    _teleportTarget = id.Value;
+                    _teleportTerritory = territory;
+                    return Phase.Teleport;
+                }
+                return NextAfterTeleport();
             }
         }
 
-        return NextAfterTeleport();
+        return NextAfterOwnRoute();
     }
+
+    /// <summary>
+    /// Get to the step's zone when the path does not say how.
+    ///
+    /// <para>
+    /// Most steps name their own aetheryte, and those are honoured above. The rest assume you are
+    /// already in the right place because the previous quest left you there — true while a run
+    /// rolls on, false the moment you press Start from somewhere else. That is the case this
+    /// exists for: the run should take itself to the quest rather than stopping, or worse, waiting
+    /// in silence for a zone change that is never going to happen.
+    /// </para>
+    /// </summary>
+    private Phase NextAfterOwnRoute()
+    {
+        var step = _step!;
+
+        if (step.TerritoryId == 0 || _world.TerritoryId == step.TerritoryId || IsPlaceless(step.Kind))
+            return NextAfterTeleport();
+
+        // The path already says which shard to hop to, and it chose the one beside the NPC. This
+        // resolver exists for steps that say nothing — overriding a named destination sent the run
+        // to the Gladiators' Guild for a quest in the Goldsmiths'. Reaching here with a hop named
+        // means the step's own teleport was skipped because its condition says we are already in
+        // the right city, so the hop is usable as written.
+        if (step.AethernetShortcut is { Length: 2 })
+            return NextAfterTeleport();
+
+        // Already where a zone-line walk was meant to end — the walk itself handles that arrival.
+        if (step.TargetTerritoryId is { } crossing && _world.TerritoryId == crossing)
+            return NextAfterTeleport();
+
+        if (_world.RouteTo(step.TerritoryId, step.Position) is not { } route)
+            return NextAfterTeleport(); // no way in; the travel check names it
+
+        _autoAethernet = route.AethernetName;
+        _world.Log($"Quest step is in territory {step.TerritoryId} and the path names no way there — " +
+                   (route.AetheryteId is { } id
+                       ? $"teleporting to aetheryte {id}" + (route.AethernetName is { } hop ? $", then {hop}." : ".")
+                       : $"taking the aethernet to {route.AethernetName}."));
+
+        if (route.AetheryteId is not { } aetheryte)
+            return Phase.Aethernet; // already in the city; the hop is the whole journey
+
+        _teleportTarget = aetheryte;
+        _teleportTerritory = route.AetheryteTerritory;
+        return Phase.Teleport;
+    }
+
+    /// <summary>The aethernet destination in play — the route we worked out, else the one the step names.</summary>
+    private string? AethernetDestination => _autoAethernet ?? (_step?.AethernetShortcut is { Length: 2 } s ? s[1] : null);
 
     private Phase NextAfterTeleport()
     {
-        var step = _step!;
-        if (step.AethernetShortcut is { Length: 2 })
-            return Phase.Aethernet;
+        if (AethernetDestination is not null)
+            return BeginAethernet();
         return NextAfterTravel();
     }
+
+    /// <summary>
+    /// Walk to an aethernet access point before hopping.
+    ///
+    /// <para>
+    /// The network is only reachable from a shard or the city aetheryte — standing in the middle of
+    /// Ul'dah, there is nothing to use. The path data says so by naming the shard to travel
+    /// <i>from</i> as well as the one to travel to, which we had been ignoring, so the hop was
+    /// asked for from wherever the previous step happened to end.
+    /// </para>
+    /// </summary>
+    private Phase BeginAethernet()
+    {
+        if (_world.NearestAethernetAccess(_world.TerritoryId, _world.PlayerPosition) is not { } access)
+            return Phase.Aethernet; // nothing placed in this zone; let the hop try anyway
+
+        if (Vector3.Distance(_world.PlayerPosition, access) <= DefaultStopDistance + ArrivalSlack)
+            return Phase.Aethernet;
+
+        _world.Log($"Walking to the aethernet at {Fmt(access)} before hopping to {AethernetDestination}.");
+        _detourTo = access;
+        _detourThen = Phase.Aethernet;
+        return Phase.Move;
+    }
+
 
     private Phase NextAfterTravel()
     {
         var step = _step!;
 
+        // Nothing to reach and nowhere to be — do it where you stand.
+        if (IsPlaceless(step.Kind))
+            return Phase.WaitReady;
+
         if (step.TerritoryId != 0 && _world.TerritoryId != step.TerritoryId)
         {
-            Fail($"step is in territory {step.TerritoryId} but you are in {_world.TerritoryId} and the path gives no way there");
+            // Getting here means the route resolver could not help either, so say which of the two
+            // reasons it is. "Waiting to be somewhere" with no explanation is the failure mode this
+            // whole path exists to avoid.
+            Fail($"the quest is in territory {step.TerritoryId} and you are in {_world.TerritoryId} — " +
+                 "no aetheryte there that you have attuned. Attune one or travel there yourself, then Retry");
             return Phase.None;
         }
 
@@ -684,12 +814,15 @@ public sealed class StepExecutor
 
     private void TickMove(QuestStep step, DateTime now)
     {
-        var target = step.Position!.Value;
-        var tolerance = StopDistanceFor(step);
+        // A detour — walking to a merchant the craft turned out to need — borrows this phase and
+        // lands somewhere other than the step's own destination.
+        var detour = _detourTo;
+        var target = detour ?? step.Position!.Value;
+        var tolerance = detour is null ? StopDistanceFor(step) : DefaultStopDistance;
         var distance = Vector3.Distance(_world.PlayerPosition, target);
 
         // A walk across a zone line arrives by changing zone, not by reaching the point.
-        if (step.TargetTerritoryId is { } targetTerritory && _world.TerritoryId == targetTerritory)
+        if (detour is null && step.TargetTerritoryId is { } targetTerritory && _world.TerritoryId == targetTerritory)
         {
             _world.StopMoving();
             Enter(Phase.WaitReady);
@@ -699,9 +832,13 @@ public sealed class StepExecutor
         if (distance <= tolerance + ArrivalSlack)
         {
             _world.StopMoving();
-            Enter(Phase.WaitReady);
+            var next = detour is null ? Phase.WaitReady : _detourThen;
+            _detourTo = null;
+            Enter(next);
             return;
         }
+
+
 
         if (now - _stepStart > MoveTotal)
         {
@@ -727,20 +864,22 @@ public sealed class StepExecutor
         }
 
         // Not moving and not there. Either we have not asked yet, or the path ended short.
-        if (_lastMoveIssue != default && now - _lastMoveIssue < TimeSpan.FromSeconds(1))
+        if (_lastMoveIssue != default && now - _lastMoveIssue < PathSettle)
             return; // give the pathfinder a beat before judging it
 
-        if (!direct && _lastMoveIssue != default && _world.PathWaypointCount == 0)
+        // A pathfind that came back with no waypoints used to end the step outright. It is a real
+        // signal but not a reliable one — a mesh still loading, or a fresh area, answers zero for a
+        // moment — so it is asked again before it is believed. Exhausting the retries is still far
+        // quicker than waiting out the three-minute movement timeout, which is why the check exists.
+        if (_moveRetries >= MaxMoveRetries)
         {
-            Fail($"no path to {Fmt(target)}");
+            Fail(!direct && _world.PathWaypointCount == 0
+                ? $"no path to {Fmt(target)} after {_moveRetries} attempts"
+                : $"stalled {_moveRetries} times short of {Fmt(target)} ({distance:F1}y left)");
             return;
         }
 
-        if (_moveRetries >= MaxMoveRetries)
-        {
-            Fail($"stalled {_moveRetries} times short of {Fmt(target)} ({distance:F1}y left)");
-            return;
-        }
+
 
         var fly = step.Fly && _world.CanFlyHere;
         var ok = direct
