@@ -75,6 +75,24 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     public int DeliveryCraftJob { get; set; } = -1;
 
     /// <summary>
+    /// Sell what crafter and gatherer quests hand over, at the next vendor a run opens.
+    ///
+    /// <para>
+    /// Off by default — it disposes of your things, and an opt-out would be the wrong way round for
+    /// that. Only what a quest measurably added to the bag is ever offered, capped at that many, so
+    /// a reward of one Venture cannot reach the stack behind it. A vendor sale is recoverable from
+    /// the buyback list; that is why this sells rather than discards.
+    /// </para>
+    /// </summary>
+    public bool SellQuestRewards { get; set; }
+
+    /// <summary>
+    /// What is banked and not yet sold. Persisted because the vendor is rarely the next thing a run
+    /// reaches, and a hand-in should still be swept up after a restart.
+    /// </summary>
+    public List<Services.Quest.PendingSale> PendingRewardSales { get; set; } = [];
+
+    /// <summary>
     /// Spend scrips without being asked, when a turn-in would otherwise overcap. Off by default:
     /// spending is irreversible and the cap guard already stops the waste, so this only exists to
     /// keep a long run from stalling.

@@ -41,6 +41,8 @@ public sealed class ConfigWindow : OdysseusWindow
     private readonly PriorityList _priority;
     private readonly IPriorityWorld _priorityWorld;
     private readonly QuestCatalog _catalog;
+    /// <summary>How many reward items are banked and waiting for a vendor.</summary>
+    private readonly Func<int> _pendingSales;
 
     private ConfigSection _currentSection = ConfigSection.General;
     private string _bundlePath;
@@ -48,7 +50,7 @@ public sealed class ConfigWindow : OdysseusWindow
     private string _prioritySearch = string.Empty;
 
     public ConfigWindow(OdysseusConfig config, Action save, PluginPresence presence, PathStore pathStore, string defaultBundlePath,
-        PriorityList priority, IPriorityWorld priorityWorld, QuestCatalog catalog)
+        PriorityList priority, IPriorityWorld priorityWorld, QuestCatalog catalog, Func<int> pendingSales)
         : base("Odysseus Settings##OdysseusConfig")
     {
         _config = config;
@@ -60,6 +62,7 @@ public sealed class ConfigWindow : OdysseusWindow
         _priority = priority;
         _priorityWorld = priorityWorld;
         _catalog = catalog;
+        _pendingSales = pendingSales;
 
         Size = new Vector2(620, 520);
         SizeCondition = ImGuiCond.FirstUseEver;
@@ -273,6 +276,26 @@ public sealed class ConfigWindow : OdysseusWindow
         {
             ImGui.SameLine();
             ImGui.TextColored(OdysseusTheme.StatusYellow, "(TextAdvance not loaded)");
+        }
+
+        var sellRewards = _config.SellQuestRewards;
+        if (ImGui.Checkbox("Sell crafter and gatherer quest rewards", ref sellRewards))
+        {
+            _config.SellQuestRewards = sellRewards;
+            _save();
+        }
+        OdysseusTheme.HelpMarker(
+            "Disciple of the Hand and Land quest lines pay in tools and gear that a finished character has no use " +
+            "for. With this on, whatever such a quest hands over is sold at the next vendor a run opens.\n\n" +
+            "Only what the quest measurably added to your bags is ever offered, capped at that many — the bag is " +
+            "counted before the hand-in and again after, so a reward of one Venture can never reach the stack " +
+            "behind it, and nothing you already owned is touched.\n\n" +
+            "It sells rather than discards because a vendor sale can be undone from the buyback list. It will " +
+            "still sell materia and Allagan pieces, which are worth more elsewhere.");
+        if (_config.SellQuestRewards && _pendingSales() is > 0 and var owed)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.TextSecondary, $"({owed} waiting for a vendor)");
         }
     }
 

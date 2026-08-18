@@ -347,6 +347,53 @@ public class ShopAndClassStepTests
         Assert.DoesNotContain("HandOver", world.Calls);
     }
 
+    /// <summary>
+    /// Handing over a high-quality item raises "do you really want to trade a high-quality item?",
+    /// whose Yes stays greyed until its checkbox is ticked. Two passes, as the real dialog needs:
+    /// the enable state only settles a frame after the tick.
+    /// </summary>
+    [Fact]
+    public void A_high_quality_hand_in_ticks_the_confirmation_before_pressing_yes()
+    {
+        var (ex, world) = AtHandOver(quantity: 1, satisfiable: true);
+        world.TradeConfirmUp = true;
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Contains("TickConfirm", world.Calls);
+        Assert.Contains("ConfirmYes", world.Calls);
+        Assert.True(world.Calls.IndexOf("TickConfirm") < world.Calls.IndexOf("ConfirmYes"));
+    }
+
+    /// <summary>
+    /// The confirmation is modal and outlives the hand-in that raised it — it was found blocking
+    /// an aethernet hop, two phases away from any dialogue. Answering it only while in the
+    /// dialogue phase left the run stuck in travel with the prompt on screen, so it is now
+    /// answered from wherever the step happens to be.
+    /// </summary>
+    [Fact]
+    public void The_confirmation_is_answered_even_mid_travel()
+    {
+        var world = new FakeStepWorld { TradeConfirmUp = true, TerritoryId = 400 };
+        world.Aetherytes["Ul'dah"] = 9;
+        world.AetheryteTerritories[9] = 401;
+        world.Spawned.Add(1001);
+        var step = new QuestStep
+        {
+            Kind = StepKind.Interact, KindName = "Interact", TerritoryId = 401, DataId = 1001,
+            AetheryteShortcut = "Ul'dah",
+        };
+        var ex = new StepExecutor(world);
+        ex.Begin(step);
+
+        // Two ticks inside the travel phases — nowhere near a dialogue.
+        ex.Tick();
+        world.Advance(0.5);
+        ex.Tick();
+
+        Assert.Contains("TickConfirm", world.Calls);
+        Assert.Contains("ConfirmYes", world.Calls);
+    }
+
     /// <summary>TextAdvance gets the first go, exactly as it does at the reward window.</summary>
     [Fact]
     public void The_hand_over_window_is_left_alone_for_a_moment_first()

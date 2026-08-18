@@ -1154,6 +1154,58 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
     /// and is left alone, which keeps this from answering prompts it was never meant to see.
     /// </para>
     /// </summary>
+    /// <summary>Addon sheet row 102434 — "Do you really want to trade a high-quality item?"</summary>
+    private const uint HighQualityTradeRow = 102434;
+
+    private string? _highQualityPrompt;
+
+    public bool ConfirmTradeDialog()
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName("SelectYesno");
+            if (addon.IsNull || !addon.IsVisible)
+                return false;
+
+            var yesno = (FFXIVClientStructs.FFXIV.Client.UI.AddonSelectYesno*)addon.Address;
+            var checkbox = yesno->ConfirmCheckBox;
+            if (checkbox == null || checkbox->AtkComponentButton.AtkComponentBase.OwnerNode == null)
+                return false; // an ordinary yes/no has no checkbox at all
+
+            if (!IsHighQualityTrade(yesno))
+                return false;
+
+            if (!checkbox->IsChecked)
+                return AtkClick.CheckBox(&yesno->AtkUnitBase, checkbox);
+
+            AtkClick.ForceEnable(yesno->YesButton);
+            return AtkClick.Button(&yesno->AtkUnitBase, yesno->YesButton);
+        }
+        catch (Exception ex)
+        {
+            _log($"Trade confirmation failed: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The prompt is matched against the game's own string for it, so this answers one question
+    /// and no other. Both sides come from the Addon sheet, which keeps it language-independent.
+    /// A sheet we cannot read falls back to the checkbox alone — still far narrower than any
+    /// yes/no, and better than leaving a blocking dialog on screen.
+    /// </summary>
+    private bool IsHighQualityTrade(FFXIVClientStructs.FFXIV.Client.UI.AddonSelectYesno* yesno)
+    {
+        _highQualityPrompt ??= _data.GetExcelSheet<Addon>().GetRowOrDefault(HighQualityTradeRow)?.Text.ExtractText()
+                               ?? string.Empty;
+        if (_highQualityPrompt.Length == 0)
+            return true;
+        if (yesno->PromptText == null)
+            return false;
+        var prompt = yesno->PromptText->NodeText.ToString();
+        return prompt.Contains(_highQualityPrompt, StringComparison.OrdinalIgnoreCase);
+    }
+
     public void HoldDialogue() => _textAdvance.Hold();
 
     public void ReleaseDialogue() => _textAdvance.Release();

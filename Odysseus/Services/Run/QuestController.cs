@@ -186,6 +186,12 @@ public sealed class QuestController
 
     public event Action<ushort>? QuestCompleted;
 
+    /// <summary>
+    /// A hand-in is about to happen. Raised as the <c>CompleteQuest</c> step begins, which is the
+    /// last moment the bag is still free of whatever the quest is about to give us — the reward
+    /// sweep counts here and again at <see cref="QuestCompleted"/>, and banks the difference.
+    /// </summary>
+    public event Action<ushort>? QuestCompleting;
 
     private QuestStep? _singleStep;
 
@@ -431,6 +437,8 @@ public sealed class QuestController
             }
             var skipTeleport = StepConditions.ShouldSkipAetheryte(step, _conditions, snap);
             _stepStarted = _world.UtcNow;
+            if (step.Kind == StepKind.CompleteQuest)
+                QuestCompleting?.Invoke(_questId);
             _executor.Begin(step, skipTeleport, _questId);
             _log($"Step {_stepIndex + 1}/{_block.Steps.Count} in seq {sequence}: {step}" +
                  (step.AetheryteShortcut is { } a ? $" via {a}{(skipTeleport ? " (skipped)" : "")}" : ""));

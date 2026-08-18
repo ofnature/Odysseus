@@ -51,6 +51,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly Services.Tribes.TribeRunner _tribeRunner;
     private readonly Services.Deliveries.DeliveryRunner _deliveryRunner;
     private readonly Services.Deliveries.SpendRunner _spender;
+    private readonly RewardLedger _rewardLedger;
+    private readonly RewardSeller _seller;
+    private readonly GameChestWorld _chestWorld;
+    private readonly ChestWithdrawer _withdrawer;
     private readonly Services.Flight.CurrentCollector _collector;
     private readonly FlightWindow _flightWindow;
     private readonly JournalWindow _journalWindow;
@@ -139,6 +143,30 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _controller.PriorityNext = () => _priority.NextReady(_priorityWorld);
         _controller.StoryCurrent = () => _frontier.Current()?.QuestId;
 
+        // Reward sweep. The ledger measures across the hand-in — counted as the CompleteQuest step
+        // begins and again when the quest is confirmed complete — so only what the quest actually
+        // added is ever offered to a vendor.
+        var rewards = new QuestRewards(DataManager, message => Log.Warning(message));
+        _rewardLedger = new RewardLedger(_config.PendingRewardSales);
+        _controller.QuestCompleting += id => _rewardLedger.Before(id, rewards.Candidates(id), itemId => deliveryWorld.ItemCount(itemId));
+        _controller.QuestCompleted += id =>
+        {
+            var gained = _rewardLedger.After(id, itemId => deliveryWorld.ItemCount(itemId));
+            if (gained.Count == 0) return;
+            Log.Information($"Quest {id} rewards banked for selling: " +
+                            string.Join(", ", gained.Select(g => $"{g.Quantity} × {g.ItemId}")));
+            SaveRewardLedger();
+        };
+        _seller = new RewardSeller(
+            new GameSellWorld(DataManager, () => deliveryWorld.IsShopOpen(0), itemId => deliveryWorld.ItemCount(itemId),
+                message => Log.Information(message)),
+            _rewardLedger, () => _config.SellQuestRewards, SaveRewardLedger);
+
+        // Fetching from the FC chest. Manual only, and gated on the chest window being open — that
+        // window is the transfer session, so there is no version of this that works from anywhere.
+        _chestWorld = new GameChestWorld(GameGui, DataManager, id => deliveryWorld.ItemCount(id), message => Log.Information(message));
+        _withdrawer = new ChestWithdrawer(_chestWorld);
+
         _tribes = new Services.Tribes.TribeCatalog(DataManager, message => Log.Warning(message));
         _tribeState = new Services.Tribes.TribeState(_tribes, message => Log.Warning(message));
         _tribeRunner = new Services.Tribes.TribeRunner(_world, _tribeState, _controller,
@@ -154,7 +182,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         _configWindow = new ConfigWindow(_config, SaveConfig, _presence, _pathStore,
             QuestionableImporter.DefaultBundlePath(PluginInterface.ConfigDirectory.Parent?.FullName ?? string.Empty),
-            _priority, _priorityWorld, _catalog);
+            _priority, _priorityWorld, _catalog,
+            () => _rewardLedger.Pending.Sum(p => p.Quantity));
         _pathEditorWindow = new PathEditorWindow(
             _pathStore, _catalog, _controller, _recorder,
             () => ClientState.TerritoryType,
@@ -221,7 +250,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             questIds => Bill(questIds.Select(_pathStore.ForQuest).OfType<Services.Paths.QuestPath>(), inStepOrder: false),
             questId => _pathStore.ForQuest(questId) is { } path ? Bill([path], inStepOrder: true) : [],
             questId => _pathStore.ForQuest(questId) is { } path && ChainMaterials.NamesItems(path),
-            () => _pathStore.OutdatedCount);
+            () => _pathStore.OutdatedCount,
+            () => _chestWorld.ChestOpen,
+            needs => _withdrawer.Start(needs) is var queued && queued > 0
+                ? $"Fetching {queued} item(s) from the FC chest — keep it open."
+                : _withdrawer.Status);
 
         // Built after the windows it can open: the deps record captures them, and the
         // nullable analysis is right that a field assigned later is null at this point.
@@ -343,6 +376,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             return;
         }
 
+        // Fetching from the chest is something you asked for by pressing a button, so it runs
+        // whatever else is going on and owns the frame until it is done.
+        if (_withdrawer.Busy) { _withdrawer.Tick(); return; }
+
         // Collecting currents owns the frame; it drives its own executor, not the controller.
         if (!_collector.IsFinished) { _collector.Tick(); return; }
 
@@ -363,6 +400,13 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             _tribeRunner.Tick();
             return;
         }
+        // The reward sweep runs off whatever vendor window happens to be open — a run's own
+        // PurchaseItem step, or one you opened yourself. It ticks only once every other runner has
+        // declined the frame, and never while a purchase is in flight: both drive the same shop,
+        // and a sale landing between our buy and its verification would read as the buy failing.
+        if (!_controller.Phase.StartsWith("Shop", System.StringComparison.Ordinal))
+            _seller.Tick();
+
         if (_tribeQueue.Count > 0 && _controller.State == RunState.Idle)
         {
             var next = _tribeQueue.Peek();
@@ -481,4 +525,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         PluginInterface.SavePluginConfig(_config);
     }
 
+    /// <summary>Persist what is banked, so a hand-in is still swept up after a restart.</summary>
+    private void SaveRewardLedger()
+    {
+        _config.PendingRewardSales = _rewardLedger.Pending.ToList();
+        PluginInterface.SavePluginConfig(_config);
+    }
 }

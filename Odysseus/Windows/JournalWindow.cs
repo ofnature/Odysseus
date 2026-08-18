@@ -39,6 +39,8 @@ public sealed class JournalWindow : OdysseusWindow
     private readonly Func<ushort, IReadOnlyList<MaterialNeed>> _questMaterials;
     private readonly Func<ushort, bool> _namesItems;
     private readonly Func<int> _outdatedPaths;
+    private readonly Func<bool> _chestOpen;
+    private readonly Func<IReadOnlyList<(uint ItemId, int Missing)>, string> _grabFromChest;
 
     private string _search = string.Empty;
     private bool _hideCompleted = true;
@@ -64,10 +66,13 @@ public sealed class JournalWindow : OdysseusWindow
     /// <param name="questMaterials">One quest id → its own items, in the order its steps want them.</param>
     /// <param name="namesItems">Whether a quest names any item at all — cheap enough to ask per row.</param>
     /// <param name="outdatedPaths">How many stored paths an older converter wrote.</param>
+    /// <param name="chestOpen">The FC chest window is open — the transfer session, without which nothing moves.</param>
+    /// <param name="grabFromChest">Queue a withdrawal; returns what it made of the request, for the status line.</param>
     public JournalWindow(QuestCatalog catalog, IQuestStateReader quests, UnlockPlanner unlock, PriorityList priority,
         Func<ushort, bool> hasPath, Func<IReadOnlyList<ushort>, IReadOnlyList<MaterialNeed>> materials,
         Func<ushort, IReadOnlyList<MaterialNeed>> questMaterials, Func<ushort, bool> namesItems,
-        Func<int> outdatedPaths)
+        Func<int> outdatedPaths, Func<bool> chestOpen,
+        Func<IReadOnlyList<(uint ItemId, int Missing)>, string> grabFromChest)
         : base("Odysseus Journal##OdysseusJournal")
     {
         _catalog = catalog;
@@ -79,6 +84,8 @@ public sealed class JournalWindow : OdysseusWindow
         _questMaterials = questMaterials;
         _namesItems = namesItems;
         _outdatedPaths = outdatedPaths;
+        _chestOpen = chestOpen;
+        _grabFromChest = grabFromChest;
         Size = new Vector2(760, 620);
         SizeCondition = ImGuiCond.FirstUseEver;
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(560, 320), MaximumSize = new Vector2(1400, 1400) };
@@ -266,6 +273,7 @@ public sealed class JournalWindow : OdysseusWindow
             missing == 0
                 ? $"{label}: you already have everything ({_bill.Count} items)."
                 : $"{label}: {missing} of {_bill.Count} items still to find.");
+        GrabButton($"bill{label}", _bill);
 
         if (!ImGui.BeginTable($"##bill{label}", 5,
                 ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.Borders))
@@ -300,6 +308,34 @@ public sealed class JournalWindow : OdysseusWindow
         ImGui.EndTable();
         ImGui.TextColored(OdysseusTheme.TextDisabled,
             "The FC chest column only counts pages the game has loaded — open the chest and view each tab to fill it in.");
+    }
+
+    /// <summary>
+    /// Fetch the shortfall out of the FC chest. Only offered when something is actually short and
+    /// the chest holds some of it — the button is disabled rather than hidden when the chest is
+    /// shut, because "open the chest first" is the thing worth saying.
+    /// </summary>
+    private void GrabButton(string id, IReadOnlyList<MaterialNeed> bill)
+    {
+        var wanted = bill
+            .Where(n => n.Missing > 0 && n.InChest > 0)
+            .Select(n => (n.ItemId, Math.Min(n.Missing, n.InChest)))
+            .ToList();
+        if (wanted.Count == 0)
+            return;
+
+        var open = _chestOpen();
+        ImGui.SameLine();
+        using (ImRaii.Disabled(!open))
+        {
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Box, $"Grab from FC##grab{id}", OdysseusTheme.GreenDark,
+                    open
+                        ? $"Withdraw {wanted.Count} item(s) from the FC chest.\n" +
+                          "Whole stacks only — the game's move has no quantity, so this can bring back more than you need."
+                        : "Open the FC chest first — that window is the transfer session, standing next to it is not enough.",
+                    new Vector2(118, 20)))
+                _status = _grabFromChest(wanted);
+        }
     }
 
     private static string Describe(MaterialSource source) => source switch
@@ -450,6 +486,7 @@ public sealed class JournalWindow : OdysseusWindow
             ImGui.SameLine();
             ImGui.TextColored(OdysseusTheme.TextDisabled, $"· {Describe(need.Source)} · have {have}{chest}");
         }
+        GrabButton($"q{quest.QuestId}", _questBill);
         ImGui.Unindent(28f);
     }
 }

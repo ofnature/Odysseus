@@ -303,6 +303,11 @@ public sealed class StepExecutor
         if (_world.IsDead && _phase is not (Phase.SoloDutyRun or Phase.DutyRun))
             return Fail("player is dead");
 
+        // The high-quality trade confirmation is modal: it blocks the interaction that raised it
+        // AND everything queued behind it — it was found stalling an aethernet hop, two phases
+        // away from the hand-in it belongs to. So it is answered wherever it appears, which is
+        // safe because the world matches it against the game's own string for that one prompt.
+        _world.ConfirmTradeDialog();
 
         switch (_phase)
         {

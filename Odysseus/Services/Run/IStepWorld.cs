@@ -410,6 +410,18 @@ public interface IStepWorld
     /// </summary>
     bool CompleteHandOverWindow();
 
+    /// <summary>
+    /// Answer the "do you really want to trade a high-quality item?" confirmation, whose Yes is
+    /// greyed until its checkbox is ticked. Returns true when it acted — including the tick on its
+    /// own, which takes one pass, with Yes on the next.
+    ///
+    /// <para>
+    /// False when no such dialog is up. A plain yes/no with no checkbox is deliberately <i>not</i>
+    /// touched here: this answers one specific question, and blanket-confirming whatever prompt
+    /// happens to be on screen is how an automation agrees to something nobody asked it to.
+    /// </para>
+    /// </summary>
+    bool ConfirmTradeDialog();
 
     /// <summary>Ask TextAdvance to drive dialogue for us / stop.</summary>
     void HoldDialogue();

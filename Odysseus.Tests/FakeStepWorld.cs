@@ -299,6 +299,17 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool HandOverAccepted { get; set; } = true;
     public IReadOnlyList<HandOverRequest> HandOverRequests
         => VisibleAddons.Contains("Request") ? Requests : [];
+    /// <summary>Set when the HQ-trade confirmation is on screen; it takes two passes, as the real one does.</summary>
+    public bool TradeConfirmUp { get; set; }
+    public bool TradeConfirmTicked { get; private set; }
+    public bool ConfirmTradeDialog()
+    {
+        if (!TradeConfirmUp) return false;
+        if (!TradeConfirmTicked) { TradeConfirmTicked = true; Calls.Add("TickConfirm"); return true; }
+        Calls.Add("ConfirmYes");
+        TradeConfirmUp = false;
+        return true;
+    }
     public bool CompleteHandOverWindow()
     {
         Calls.Add("HandOver");
