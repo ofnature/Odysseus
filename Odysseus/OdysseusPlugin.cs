@@ -124,7 +124,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world, dialogue), _world, _world, _config,
             _frontier.Next,
             id => _catalog.ById(id)?.ClassJobLevel ?? 0,
-            _runLog, message => Log.Information(message));
+            _runLog, message => Log.Information(message),
+            // Lets a purchase step see whether the craft it feeds is already made.
+            itemId => making.Ingredients(itemId, 1).Select(i => i.ItemId).ToList());
 
         // Priority list: saved in config only while the persist toggle is on.
         _priority = new PriorityList(_catalog, _config.PriorityQuests, _config.PersistPriorityList, ids =>
@@ -478,4 +480,5 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         OdysseusTheme.SetMode(_config.Theme);
         PluginInterface.SavePluginConfig(_config);
     }
+
 }

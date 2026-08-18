@@ -248,7 +248,10 @@ public sealed class QuestStep
         or StepKind.Action or StepKind.Instruction or StepKind.StatusOff or StepKind.SwitchClass
         // Both work to a target total read off the bag, so running them again makes up a shortfall
         // of zero and does nothing.
-        or StepKind.Craft or StepKind.Gather;
+        or StepKind.Craft or StepKind.Gather
+        // Equipping what is already worn is a no-op, and both gearset steps check before acting —
+        // CreateGearset in particular would otherwise leave a duplicate behind on every replay.
+        or StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset;
 
     public override string ToString()
         => $"{Kind}{(DataId is { } d ? $" {d}" : "")}{(Position is { } p ? $" @({p.X:F0},{p.Y:F0},{p.Z:F0})" : "")} in {TerritoryId}";

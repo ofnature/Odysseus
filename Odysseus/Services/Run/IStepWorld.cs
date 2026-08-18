@@ -19,6 +19,15 @@ public enum JobKind
 /// </summary>
 public sealed record GearsetInfo(int Id, uint ClassJobId, uint ParentClassJobId, int Level, JobKind Kind);
 
+/// <summary>One base material a craft is short of, after the recipe tree has been walked to the bottom.</summary>
+public sealed record MaterialShortfall(uint ItemId, string Name, int Missing);
+
+/// <summary>A merchant who sells something, and what they want for it.</summary>
+public sealed record VendorOffer(uint VendorDataId, uint ShopId, string VendorName, uint UnitPrice);
+
+/// <summary>One slot of the NPC hand-over window: an item, and how many of it it wants.</summary>
+public sealed record HandOverRequest(uint ItemId, string Name, int Quantity);
+
 /// <summary>
 /// How to reach a zone the path does not say how to reach.
 ///
@@ -33,9 +42,6 @@ public sealed record GearsetInfo(int Id, uint ClassJobId, uint ParentClassJobId,
 /// <param name="AethernetName">Then hop here, or null when the teleport lands you in the zone.</param>
 /// <param name="AetheryteTerritory">The zone the teleport lands in — not the destination when a hop follows.</param>
 public sealed record TravelRoute(uint? AetheryteId, string? AethernetName, uint AetheryteTerritory);
-
-/// <summary>One slot of the NPC hand-over window: an item, and how many of it it wants.</summary>
-public sealed record HandOverRequest(uint ItemId, string Name, int Quantity);
 
 /// <summary>
 /// Everything the step executor needs from the game and from other plugins, behind one seam.
@@ -97,9 +103,6 @@ public interface IStepWorld
     /// <summary>The zone an aetheryte stands in.</summary>
     uint? AetheryteTerritory(uint aetheryteId);
 
-    /// <summary>Start a teleport. False when refused outright (no Lifestream, unknown/locked aetheryte).</summary>
-    bool Teleport(uint aetheryteId);
-
     /// <summary>
     /// How to get to a zone, using only aetherytes the character has attuned. Null when there is
     /// no way in.
@@ -112,6 +115,9 @@ public interface IStepWorld
     /// </para>
     /// </summary>
     TravelRoute? RouteTo(uint territoryId, Vector3? near);
+
+    /// <summary>Start a teleport. False when refused outright (no Lifestream, unknown/locked aetheryte).</summary>
+    bool Teleport(uint aetheryteId);
 
     /// <summary>Start an aethernet hop to a shard by its display name. False when refused.</summary>
     bool AethernetTeleport(string destination);
@@ -160,6 +166,34 @@ public interface IStepWorld
     /// the journal. Some steps switch back to it after a detour onto another job.
     /// </summary>
     uint? QuestStartClassJob(ushort questId);
+
+    /// <summary>That item is in an equipment slot right now.</summary>
+    bool IsEquipped(uint itemId);
+
+    /// <summary>
+    /// The single class a main-hand tool makes you, or null when the item is not one.
+    ///
+    /// <para>
+    /// Being a Goldsmith is what a Chaser Hammer is <i>for</i> — the game changes your class off the
+    /// main hand, so any Goldsmith tool does it and the weathered one the quest hands over is just
+    /// the one you are given when you own none. This is what lets an equip fall back to a gearset.
+    /// Deliberately null for gear that merely happens to be restricted, where the item itself is
+    /// the requirement and no gearset substitutes for it.
+    /// </para>
+    /// </summary>
+    uint? EquipClassOf(uint itemId);
+
+    /// <summary>
+    /// Move an item out of the bags or armoury into the slot it belongs in. False when it is not
+    /// equipment, or is nowhere to be found. Async — poll <see cref="IsEquipped"/>.
+    /// </summary>
+    bool EquipItem(uint itemId);
+
+    /// <summary>Save what is equipped now as a new gearset. False when all 100 slots are taken.</summary>
+    bool CreateGearset();
+
+    /// <summary>Overwrite the active gearset with what is equipped now. False when there is none.</summary>
+    bool UpdateGearset();
 
     bool InCombat { get; }
 
@@ -220,6 +254,13 @@ public interface IStepWorld
     bool IsCrafting { get; }
 
     /// <summary>
+    /// The recipe to run right now to get closer to making <paramref name="count"/> of an item,
+    /// deepest first — twelve Copper Rings with no ingots in the bag answers "twelve Copper Ingot".
+    /// Null when it is already held, or when what is missing cannot be crafted at all.
+    /// </summary>
+    (uint ItemId, int Count)? NextCraft(uint itemId, int count);
+
+    /// <summary>
     /// Ask for <paramref name="count"/> of an item. Returns the job it will craft as, or null when
     /// the item has no recipe or Artisan refused.
     /// </summary>
@@ -228,10 +269,17 @@ public interface IStepWorld
     void StopCrafting();
 
     /// <summary>
-    /// What making <paramref name="count"/> of an item is still short of — "3 × Iron Ore, 2 × Fire
-    /// Shard" — or empty when nothing is. The useful half of "Artisan stopped early".
+    /// What making <paramref name="count"/> of an item is still short of, followed to the bottom of
+    /// the recipe tree so only what cannot itself be crafted is named. Empty when nothing is short.
     /// </summary>
-    string CraftShortfall(uint itemId, int count);
+    System.Collections.Generic.IReadOnlyList<MaterialShortfall> CraftShortfall(uint itemId, int count);
+
+    /// <summary>
+    /// A merchant standing within reach who sells this, or null. Restricted to one who is actually
+    /// here: a shop cannot be opened across a zone, and a character new enough to be short of ore
+    /// is exactly the one who should not be sent hunting for a vendor they cannot see.
+    /// </summary>
+    VendorOffer? VendorNearbyFor(uint itemId);
 
     /// <summary>GatherBuddy is loaded and answering.</summary>
     bool GathererReady { get; }
@@ -361,6 +409,7 @@ public interface IStepWorld
     /// could not be filled, or the button is disabled.
     /// </summary>
     bool CompleteHandOverWindow();
+
 
     /// <summary>Ask TextAdvance to drive dialogue for us / stop.</summary>
     void HoldDialogue();

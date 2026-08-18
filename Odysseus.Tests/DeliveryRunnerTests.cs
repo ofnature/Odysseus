@@ -162,6 +162,8 @@ public class DeliveryRunnerTests
 
     private sealed class Ingredients : IIngredientSource
     {
+        public IReadOnlyList<(uint ShopId, uint VendorDataId, string VendorName, uint Cost)> VendorsFor(uint itemId) => [];
+
         public bool HasVendor { get; set; } = true;
         public uint Cost { get; set; } = 100;
         public Func<uint, int>? LastHeld { get; private set; }

@@ -50,6 +50,8 @@ public sealed class QuestController
     private readonly IRunPolicy _policy;
     private readonly Func<ushort, ushort?> _nextQuest;
     private readonly Func<ushort, int> _questLevel;
+    /// <summary>What a craft consumes — lets a purchase see whether anything downstream still needs it.</summary>
+    private readonly PurchasePlan.IngredientsOf _ingredientsOf;
     private readonly IStepLog _stepLog;
     private readonly Action<string> _log;
 
@@ -88,8 +90,10 @@ public sealed class QuestController
     public QuestController(
         IQuestStateReader quests, PathStore paths, StepExecutor executor,
         IStepWorld world, IConditionWorld conditions, IRunPolicy policy,
-        Func<ushort, ushort?> nextQuest, Func<ushort, int> questLevel, IStepLog stepLog, Action<string> log)
+        Func<ushort, ushort?> nextQuest, Func<ushort, int> questLevel, IStepLog stepLog, Action<string> log,
+        PurchasePlan.IngredientsOf? ingredientsOf = null)
     {
+        _ingredientsOf = ingredientsOf ?? (_ => []);
         _quests = quests;
         _paths = paths;
         _executor = executor;
@@ -181,6 +185,7 @@ public sealed class QuestController
     public string WakeNote { get; private set; } = string.Empty;
 
     public event Action<ushort>? QuestCompleted;
+
 
     private QuestStep? _singleStep;
 
@@ -387,6 +392,14 @@ public sealed class QuestController
                 _log($"Skip step {_stepIndex} ({step}) — condition holds.");
                 _stepStarted = _world.UtcNow;
                 LogStep(step, "Skipped", "condition holds");
+                _stepIndex++;
+                return;
+            }
+            if (!PurchasePlan.IsWorthBuying(_block.Steps, _stepIndex, _conditions.ItemCount, _ingredientsOf))
+            {
+                _log($"Skip step {_stepIndex} ({step}) — nothing left in this sequence needs it.");
+                _stepStarted = _world.UtcNow;
+                LogStep(step, "Skipped", "the craft it feeds is already made");
                 _stepIndex++;
                 return;
             }

@@ -28,6 +28,12 @@ public interface IIngredientSource
     /// of an item are already in the bags.
     /// </summary>
     IReadOnlyList<IngredientNeed> Plan(ushort recipeId, int crafts, Func<uint, int> held);
+
+    /// <summary>
+    /// Everyone who sells an item, without asking about any recipe. Empty when nobody does. Which
+    /// of them is within reach is the caller's question — this only says who they are.
+    /// </summary>
+    IReadOnlyList<(uint ShopId, uint VendorDataId, string VendorName, uint Cost)> VendorsFor(uint itemId);
 }
 
 /// <summary>
@@ -53,7 +59,7 @@ public sealed class IngredientSource : IIngredientSource
 
     private readonly IDataManager _data;
     private readonly Action<string>? _log;
-    private readonly Dictionary<uint, (uint ShopId, uint VendorDataId, string VendorName, uint Cost)> _vendorCache = new();
+    private readonly Dictionary<uint, List<(uint ShopId, uint VendorDataId, string VendorName, uint Cost)>> _vendorCache = new();
     private Dictionary<uint, List<uint>>? _shopsByNpc;
 
     public IngredientSource(IDataManager data, Action<string>? log = null)
@@ -92,14 +98,19 @@ public sealed class IngredientSource : IIngredientSource
     }
 
     /// <summary>
-    /// Which NPC sells an item. Several may; the first is taken, and the runner only uses it if that
-    /// NPC turns out to be spawned nearby.
+    /// Every NPC who sells an item, in sheet order.
+    ///
+    /// <para>
+    /// All of them, not the first: seven NPCs sell Copper Ore and the one standing in the
+    /// Goldsmiths' Guild is sixth. Taking the first and giving up when they are not here declined a
+    /// sale from a merchant three paces away, which is the whole point of asking.
+    /// </para>
     /// </summary>
-    private (uint ShopId, uint VendorDataId, string VendorName, uint Cost) FindVendor(uint itemId)
+    public IReadOnlyList<(uint ShopId, uint VendorDataId, string VendorName, uint Cost)> VendorsFor(uint itemId)
     {
         if (_vendorCache.TryGetValue(itemId, out var cached)) return cached;
 
-        var result = (0u, 0u, string.Empty, 0u);
+        var found = new List<(uint, uint, string, uint)>();
         try
         {
             // Shops that stock it, with the price.
@@ -119,8 +130,7 @@ public sealed class IngredientSource : IIngredientSource
                     var match = npcShops.FirstOrDefault(shops.ContainsKey);
                     if (match == 0) continue;
                     var name = _data.GetExcelSheet<ENpcResident>().GetRowOrDefault(npcId)?.Singular.ExtractText() ?? string.Empty;
-                    result = (match, npcId, Capitalise(name), shops[match]);
-                    break;
+                    found.Add((match, npcId, Capitalise(name), shops[match]));
                 }
             }
         }
@@ -129,9 +139,12 @@ public sealed class IngredientSource : IIngredientSource
             _log?.Invoke($"Vendor lookup for item {itemId} failed: {ex.Message}");
         }
 
-        _vendorCache[itemId] = result;
-        return result;
+        return _vendorCache[itemId] = found;
     }
+
+    /// <summary>The first NPC who sells it, for callers that only want somewhere to point at.</summary>
+    private (uint ShopId, uint VendorDataId, string VendorName, uint Cost) FindVendor(uint itemId)
+        => VendorsFor(itemId) is { Count: > 0 } all ? all[0] : (0u, 0u, string.Empty, 0u);
 
     /// <summary>
     /// NPC → the shops it runs, built once. <c>ENpcData</c> holds event handler ids; the high half

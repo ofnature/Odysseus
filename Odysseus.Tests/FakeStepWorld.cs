@@ -41,6 +41,28 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
         => ClassJobs.TryGetValue(name.Replace(" ", string.Empty), out var id) ? id : null;
     public uint? QuestStartClassJob(ushort questId)
         => QuestStartJobs.TryGetValue(questId, out var job) ? job : null;
+
+    // ── Equipment ──
+    public HashSet<uint> Equipped { get; } = [];
+    /// <summary>Items the character actually holds; anything else cannot be equipped.</summary>
+    public HashSet<uint> Equippable { get; } = [];
+    /// <summary>Equipping lands immediately; clear it to test the wait.</summary>
+    public bool EquipLandsNow { get; set; } = true;
+    public bool GearsetSlotFree { get; set; } = true;
+    public bool HasActiveGearset { get; set; } = true;
+    /// <summary>Item → the single class its main hand makes you; absent means "not a class tool".</summary>
+    public Dictionary<uint, uint> ToolClasses { get; } = new();
+    public bool IsEquipped(uint itemId) => Equipped.Contains(itemId);
+    public uint? EquipClassOf(uint itemId) => ToolClasses.TryGetValue(itemId, out var job) ? job : null;
+    public bool EquipItem(uint itemId)
+    {
+        Calls.Add($"Equip {itemId}");
+        if (!Equippable.Contains(itemId)) return false;
+        if (EquipLandsNow) Equipped.Add(itemId);
+        return true;
+    }
+    public bool CreateGearset() { Calls.Add("CreateGearset"); return GearsetSlotFree; }
+    public bool UpdateGearset() { Calls.Add("UpdateGearset"); return HasActiveGearset; }
     public List<string> IconEntries { get; } = [];
     public IReadOnlyList<string> SelectIconStringEntries() => VisibleAddons.Contains("SelectIconString") ? IconEntries : [];
     public void SelectIconStringIndex(int index) => Calls.Add($"IconSelect {index}");
@@ -169,17 +191,52 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool CraftKeepsRunning { get; set; }
     /// <summary>The job it would craft as; null stands for "no recipe, or Artisan refused".</summary>
     public string? CraftJob { get; set; } = "BSM";
-    public string CraftShortfallText { get; set; } = string.Empty;
+    /// <summary>What a craft is short of, once the tree is walked; the fake states it directly.</summary>
+    public List<MaterialShortfall> Shortfall { get; } = [];
+    /// <summary>Item → a merchant standing here who sells it.</summary>
+    public Dictionary<uint, VendorOffer> Vendors { get; } = new();
+    public VendorOffer? VendorNearbyFor(uint itemId) => Vendors.TryGetValue(itemId, out var v) ? v : null;
+    /// <summary>Item → what one of it is made from, so the fake can model a recipe tree.</summary>
+    public Dictionary<uint, uint> MadeFrom { get; } = new();
+    /// <summary>How many of the ingredient one of the product needs.</summary>
+    public int PerCraft { get; set; } = 1;
+    public (uint ItemId, int Count)? NextCraft(uint itemId, int count)
+    {
+        var missing = count - ItemCount(itemId);
+        if (missing <= 0) return null;
+        if (MadeFrom.TryGetValue(itemId, out var ingredient))
+        {
+            var deeper = NextCraft(ingredient, missing * PerCraft);
+            if (deeper is { } d) return d;
+        }
+        else if (!Craftable.Contains(itemId))
+        {
+            return null;   // a leaf: bought or gathered, never made
+        }
+        return (itemId, missing);
+    }
+    /// <summary>Items with a recipe. Anything in MadeFrom is craftable implicitly.</summary>
+    public HashSet<uint> Craftable { get; } = [];
+
     public string? StartCraft(uint itemId, int count)
     {
         Calls.Add($"Craft {count} x {itemId}");
         if (CraftJob is null) return null;
-        Bag[itemId] = Bag.GetValueOrDefault(itemId) + Math.Min(CraftDelivers, count);
+        // Artisan makes nothing it has no materials for — which is the whole reason a missing
+        // sub-component has to be crafted first.
+        var made = MadeFrom.TryGetValue(itemId, out var ingredient)
+            ? Math.Min(count, ItemCount(ingredient) / Math.Max(1, PerCraft))
+            : count;
+        if (made > 0)
+        {
+            if (MadeFrom.ContainsKey(itemId)) Bag[ingredient] = ItemCount(ingredient) - made * PerCraft;
+            Bag[itemId] = Bag.GetValueOrDefault(itemId) + Math.Min(CraftDelivers, made);
+        }
         IsCrafting = CraftKeepsRunning;
         return CraftJob;
     }
     public void StopCrafting() { Calls.Add("StopCraft"); IsCrafting = false; }
-    public string CraftShortfall(uint itemId, int count) => CraftShortfallText;
+    public IReadOnlyList<MaterialShortfall> CraftShortfall(uint itemId, int count) => Shortfall;
 
     public bool GathererReady { get; set; } = true;
     public bool IsGathering { get; set; }

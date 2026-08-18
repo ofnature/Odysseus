@@ -65,6 +65,7 @@ public class CraftGatherStepTests
     public void Craft_asks_Artisan_for_the_shortfall_and_finishes_when_the_bag_is_covered()
     {
         var world = new FakeStepWorld();
+        world.Craftable.Add(Ingot);
         world.Bag[Ingot] = 1;
         var ex = new StepExecutor(world);
         ex.Begin(Craft(Ingot, 3));
@@ -87,25 +88,45 @@ public class CraftGatherStepTests
     }
 
     /// <summary>
-    /// Artisan stopping short means the materials ran out. Saying which ones is the whole value of
-    /// the stop — otherwise you are left staring at an idle crafting log.
+    /// Artisan producing nothing means the materials ran out. Saying which ones is the whole value
+    /// of the stop — otherwise you are left staring at an idle crafting log.
     /// </summary>
     [Fact]
     public void Craft_that_stops_short_names_the_missing_ingredients()
     {
-        var world = new FakeStepWorld { CraftDelivers = 1, CraftShortfallText = "4 × Copper Ore, 2 × Fire Shard" };
+        var world = new FakeStepWorld { CraftDelivers = 0 };
+        world.Shortfall.Add(new MaterialShortfall(Ore, "Copper Ore", 4));
+        world.Craftable.Add(Ingot);
         var ex = new StepExecutor(world);
         ex.Begin(Craft(Ingot, 3));
 
         Assert.Equal(StepStatus.Failed, Run(ex, world));
         Assert.Contains("Artisan stopped", ex.FailReason);
-        Assert.Contains("4 × Copper Ore, 2 × Fire Shard", ex.FailReason);
+        Assert.Contains("4 × Copper Ore", ex.FailReason);
+    }
+
+    /// <summary>
+    /// Artisan making some but not all is progress, not failure: the loop re-reads the bag and
+    /// asks for what is left, which converges. Only a round that delivers nothing is the end.
+    /// </summary>
+    [Fact]
+    public void A_craft_that_arrives_in_pieces_keeps_going_until_it_is_covered()
+    {
+        var world = new FakeStepWorld { CraftDelivers = 1 };
+        world.Craftable.Add(Ingot);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(Ingot, 3));
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Equal(3, world.Bag[Ingot]);
+        Assert.Equal(3, world.Calls.Count(c => c.StartsWith("Craft ")));
     }
 
     [Fact]
     public void Craft_without_Artisan_stops_and_says_so()
     {
         var world = new FakeStepWorld { CrafterReady = false };
+        world.Craftable.Add(Ingot);
         var ex = new StepExecutor(world);
         ex.Begin(Craft(Ingot, 1));
 
@@ -129,6 +150,7 @@ public class CraftGatherStepTests
     public void Cancelling_a_craft_stops_Artisan()
     {
         var world = new FakeStepWorld { CraftDelivers = 0, CraftKeepsRunning = true };
+        world.Craftable.Add(Ingot);
         var ex = new StepExecutor(world);
         ex.Begin(Craft(Ingot, 3));
         ex.Tick();
@@ -138,6 +160,193 @@ public class CraftGatherStepTests
 
         ex.Cancel();
         Assert.Contains("StopCraft", world.Calls);
+    }
+
+    // ── Sub-component crafting ──
+    //
+    // Quest 613's shape: twelve Copper Rings, each needing a Copper Ingot, with no ingots in the
+    // bag. Artisan crafts one recipe — asked for the rings it makes nothing — and its crafting
+    // lists, which do resolve sub-crafts, can only be started by id if you built one by hand.
+
+    private const uint Rings = 5086;
+
+    [Fact]
+    public void A_craft_makes_its_missing_sub_component_first()
+    {
+        var world = new FakeStepWorld();
+        world.MadeFrom[Rings] = Ingot;      // one ring per ingot
+        world.Craftable.Add(Ingot);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(Rings, 12));
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        var ingots = world.Calls.IndexOf($"Craft 12 x {Ingot}");
+        var rings = world.Calls.IndexOf($"Craft 12 x {Rings}");
+        Assert.True(ingots >= 0, "the ingots were never crafted");
+        Assert.True(rings > ingots, "the rings were crafted before the ingots they are made from");
+        Assert.Equal(12, world.Bag[Rings]);
+    }
+
+    /// <summary>Ore → ingot → rings: the deepest missing thing is made first, and only then up.</summary>
+    [Fact]
+    public void A_two_deep_tree_is_walked_from_the_bottom()
+    {
+        var world = new FakeStepWorld();
+        world.MadeFrom[Rings] = Ingot;
+        world.MadeFrom[Ingot] = Ore;
+        world.Craftable.Add(Ore);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(Rings, 2));
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        var order = world.Calls.Where(c => c.StartsWith("Craft ")).ToList();
+        Assert.Equal(3, order.Count);
+        Assert.StartsWith($"Craft 2 x {Ore}", order[0]);
+        Assert.StartsWith($"Craft 2 x {Ingot}", order[1]);
+        Assert.StartsWith($"Craft 2 x {Rings}", order[2]);
+    }
+
+    /// <summary>What is already in the bag is not remade on the way down.</summary>
+    [Fact]
+    public void A_sub_component_already_held_is_not_crafted_again()
+    {
+        var world = new FakeStepWorld();
+        world.MadeFrom[Rings] = Ingot;
+        world.Craftable.Add(Ingot);
+        world.Bag[Ingot] = 12;
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(Rings, 12));
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.DoesNotContain($"Craft 12 x {Ingot}", world.Calls);
+        Assert.Contains($"Craft 12 x {Rings}", world.Calls);
+    }
+
+    /// <summary>
+    /// A sub-component that cannot be crafted — ore comes out of the ground or a vendor — is where
+    /// the walk stops, and the stop says what to go and get.
+    /// </summary>
+    [Fact]
+    public void A_sub_component_that_can_only_be_bought_stops_with_a_reason()
+    {
+        var world = new FakeStepWorld();
+        world.Shortfall.Add(new MaterialShortfall(Ingot, "Copper Ingot", 12));
+        world.MadeFrom[Rings] = Ingot;      // ingot is not in Craftable — a leaf
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(Rings, 12));
+
+        // This is the message from the live run: Artisan was asked, made nothing, and the stop
+        // names the ingredient that has to come from somewhere else.
+        Assert.Equal(StepStatus.Failed, Run(ex, world));
+        Assert.Contains("Artisan stopped", ex.FailReason);
+        Assert.Contains("12 × Copper Ingot", ex.FailReason);
+    }
+
+    // ── Buying what the craft turned out to need ──
+    //
+    // The path data assumes you own the materials. A character running the class for the first
+    // time owns none of them, and every crafting guild keeps its material vendor beside the
+    // guildmaster — so the shop is a few paces away and the run can just go and buy.
+
+    private const uint GuildVendor = 1004419;
+
+    [Fact]
+    public void A_craft_short_of_a_base_material_buys_it_from_a_vendor_standing_here()
+    {
+        var world = new FakeStepWorld();
+        world.Craftable.Add(Ingot);
+        world.MadeFrom[Ingot] = Ore;
+        world.PerCraft = 3;
+        world.Shortfall.Add(new MaterialShortfall(Ore, "Copper Ore", 3));
+        world.Vendors[Ore] = new VendorOffer(GuildVendor, 262176, "Alaric", 9);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(Ingot, 1));
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Contains($"OpenShop {GuildVendor}/262176", world.Calls);
+        Assert.Contains($"Buy 3 x {Ore} from 262176", world.Calls);
+        Assert.Contains("CloseShop", world.Calls);
+        Assert.Equal(1, world.Bag[Ingot]);   // and it went back and made the thing
+    }
+
+    /// <summary>
+    /// Being in the object table is not being in reach. A merchant across the guild hall is
+    /// visible and still too far to talk to — the first attempt stood still and tried to open a
+    /// shop from thirty yalms.
+    /// </summary>
+    [Fact]
+    public void It_walks_to_a_merchant_who_is_visible_but_not_beside_you()
+    {
+        var world = new FakeStepWorld { ArriveOnMove = true };
+        world.Craftable.Add(Ingot);
+        world.MadeFrom[Ingot] = Ore;
+        world.PerCraft = 3;
+        world.Shortfall.Add(new MaterialShortfall(Ore, "Copper Ore", 3));
+        world.Vendors[Ore] = new VendorOffer(GuildVendor, 262176, "Alaric", 9);
+        world.Spawned.Add(GuildVendor);
+        world.Positions[GuildVendor] = new System.Numerics.Vector3(30, 0, 0);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(Ingot, 1));
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Contains(world.Calls, c => c.StartsWith("Move 30,0,0"));
+        Assert.Contains($"OpenShop {GuildVendor}/262176", world.Calls);
+        Assert.Equal(1, world.Bag[Ingot]);
+    }
+
+    /// <summary>Standing beside them already, there is nothing to walk.</summary>
+    [Fact]
+    public void It_does_not_walk_when_the_merchant_is_already_in_reach()
+    {
+        var world = new FakeStepWorld();
+        world.Craftable.Add(Ingot);
+        world.MadeFrom[Ingot] = Ore;
+        world.PerCraft = 3;
+        world.Shortfall.Add(new MaterialShortfall(Ore, "Copper Ore", 3));
+        world.Vendors[Ore] = new VendorOffer(GuildVendor, 262176, "Alaric", 9);
+        world.Spawned.Add(GuildVendor);   // no Positions entry — sits on the player
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(Ingot, 1));
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Move "));
+    }
+
+    /// <summary>Nobody here sells it — then it is still a stop, and still says what to go and get.</summary>
+    [Fact]
+    public void With_no_vendor_in_reach_it_stops_naming_the_material()
+    {
+        var world = new FakeStepWorld();
+        world.Craftable.Add(Ingot);
+        world.MadeFrom[Ingot] = Ore;
+        world.PerCraft = 3;
+        world.Shortfall.Add(new MaterialShortfall(Ore, "Copper Ore", 3));
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(Ingot, 1));
+
+        Assert.Equal(StepStatus.Failed, Run(ex, world));
+        Assert.Contains("3 × Copper Ore", ex.FailReason);
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("OpenShop"));
+    }
+
+    /// <summary>
+    /// Each material is bought once. A craft that still fails after the shopping has something
+    /// else wrong with it, and bouncing between the vendor and the crafting log would hide that.
+    /// </summary>
+    [Fact]
+    public void A_material_is_bought_once_and_then_the_step_gives_up()
+    {
+        var world = new FakeStepWorld { BuyDelivers = 0 };   // the shop takes the order and delivers nothing
+        world.Craftable.Add(Ingot);
+        world.MadeFrom[Ingot] = Ore;
+        world.PerCraft = 3;
+        world.Shortfall.Add(new MaterialShortfall(Ore, "Copper Ore", 3));
+        world.Vendors[Ore] = new VendorOffer(GuildVendor, 262176, "Alaric", 9);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(Ingot, 1));
+
+        Assert.Equal(StepStatus.Failed, Run(ex, world));
+        Assert.Equal(1, world.Calls.Count(c => c.StartsWith("OpenShop")));
     }
 
     // ── Gather ──
@@ -336,7 +545,7 @@ public class CraftGatherStepTests
         Assert.DoesNotContain("not implemented", StepExecutor.WhyUnsupported(stale));
 
         // A verb we genuinely cannot run still says so.
-        var genuinely = new QuestStep { Kind = StepKind.Unknown, KindName = "EquipItem", TerritoryId = 400 };
+        var genuinely = new QuestStep { Kind = StepKind.Unknown, KindName = "Snipe", TerritoryId = 400 };
         Assert.Contains("not implemented", StepExecutor.WhyUnsupported(genuinely));
 
         // And one nobody has ever seen keeps its name.

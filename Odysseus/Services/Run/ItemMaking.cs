@@ -53,6 +53,48 @@ public sealed class ItemMaking
     public RecipeOption? RecipeFor(uint itemId)
         => RecipePicker.Pick(_recipes.OptionsFor(itemId), _preferredCraftType(), _currentCraftType());
 
+    /// <summary>
+    /// How deep a recipe tree is followed. Three levels covers ore → ingot → part → product, which
+    /// is deeper than anything a class quest asks for, and bounds a cycle in bad sheet data.
+    /// </summary>
+    private const int MaxCraftDepth = 4;
+
+    /// <summary>
+    /// The recipe to actually run right now to get closer to making <paramref name="count"/> of an
+    /// item — deepest first.
+    ///
+    /// <para>
+    /// Artisan crafts one recipe: ask it for twelve Copper Rings with no ingots in the bag and it
+    /// makes nothing. Its crafting lists do resolve sub-crafts, but the IPC can only start a list
+    /// that already exists, so the tree is walked here instead. An ingredient that is itself
+    /// craftable and missing is returned before the thing that needs it, and the caller comes back
+    /// for the next one once it lands.
+    /// </para>
+    ///
+    /// <para>
+    /// Null when the item is already held, or when nothing craftable is missing — which means
+    /// what is left has to be bought or gathered, and the caller says so.
+    /// </para>
+    /// </summary>
+    public (uint ItemId, int Count)? NextCraft(uint itemId, int count) => NextCraft(itemId, count, 0);
+
+    private (uint ItemId, int Count)? NextCraft(uint itemId, int count, int depth)
+    {
+        var missing = count - _held(itemId);
+        if (missing <= 0 || depth >= MaxCraftDepth)
+            return null;
+        if (RecipeFor(itemId) is not { } recipe)
+            return null; // not something we can make at all
+
+        foreach (var need in _ingredients.Plan(recipe.RecipeId, missing, _held))
+        {
+            if (need.Missing <= 0) continue;
+            if (NextCraft(need.ItemId, need.Needed, depth + 1) is { } deeper)
+                return deeper;
+        }
+        return (itemId, missing);
+    }
+
     public string? StartCraft(uint itemId, int count)
     {
         if (RecipeFor(itemId) is not { } recipe)
@@ -76,15 +118,65 @@ public sealed class ItemMaking
         return list;
     }
 
-    public string CraftShortfall(uint itemId, int count)
+    /// <summary>
+    /// What is actually missing, followed to the bottom of the recipe tree.
+    ///
+    /// <para>
+    /// The direct ingredient is rarely the useful answer. Twelve Copper Rings that stopped one
+    /// ingot short are not short of an ingot — the ingot is craftable, and the loop would have made
+    /// it — they are short of the <i>ore</i> the ingot needs. Reporting the immediate ingredient
+    /// sends you to buy the one thing you did not need.
+    /// </para>
+    ///
+    /// <para>
+    /// A missing ingredient that is itself craftable is therefore recursed into, and only what
+    /// cannot be made is named. Totals are aggregated, because one base material commonly feeds
+    /// several branches.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<MaterialShortfall> CraftShortfall(uint itemId, int count)
     {
-        if (RecipeFor(itemId) is not { } recipe)
-            return string.Empty;
-        var parts = new List<string>();
+        var totals = new Dictionary<uint, (string Name, int Missing)>();
+        Collect(itemId, count, 0, totals);
+
+        var list = new List<MaterialShortfall>(totals.Count);
+        foreach (var (id, entry) in totals)
+            list.Add(new MaterialShortfall(id, entry.Name, entry.Missing));
+        return list;
+    }
+
+    /// <summary>Everyone who sells an item, in sheet order. The caller picks one it can reach.</summary>
+    public IReadOnlyList<(uint VendorDataId, uint ShopId, string VendorName, uint Cost)> VendorsFor(uint itemId)
+    {
+        var list = new List<(uint, uint, string, uint)>();
+        foreach (var v in _ingredients.VendorsFor(itemId))
+            if (v.VendorDataId != 0 && v.ShopId != 0)
+                list.Add((v.VendorDataId, v.ShopId, v.VendorName, v.Cost));
+        return list;
+    }
+
+    private void Collect(uint itemId, int count, int depth, Dictionary<uint, (string Name, int Missing)> into)
+    {
+        if (count <= 0 || RecipeFor(itemId) is not { } recipe)
+            return;
+
         foreach (var need in _ingredients.Plan(recipe.RecipeId, count, _held))
-            if (need.Missing > 0)
-                parts.Add($"{need.Missing} × {need.Name}");
-        return string.Join(", ", parts);
+        {
+            if (need.Missing <= 0)
+                continue;
+
+            // Craftable and missing: what is really short is whatever making it needs. Recursing
+            // and finding nothing is not a reason to name it — it means its own materials are all
+            // there, so the loop can simply make it.
+            if (depth < MaxCraftDepth && RecipeFor(need.ItemId) is not null)
+            {
+                Collect(need.ItemId, need.Missing, depth + 1, into);
+                continue;
+            }
+
+            into.TryGetValue(need.ItemId, out var have);
+            into[need.ItemId] = (need.Name, have.Missing + need.Missing);
+        }
     }
 
     public bool GathererReady => _gatherer.Available;

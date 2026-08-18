@@ -52,6 +52,8 @@ public sealed class StepExecutor
         Craft,
         /// <summary>GatherBuddy is switched on; watch the bag until it is covered.</summary>
         Gather,
+        /// <summary>Equip submitted, waiting for the item to actually be worn.</summary>
+        Equip,
         Finish,
     }
 
@@ -101,6 +103,11 @@ public sealed class StepExecutor
     private static readonly TimeSpan ShopMax = TimeSpan.FromSeconds(30);
     /// <summary>How long a handoff may sit having done nothing before we call it stuck. Progress resets it.</summary>
     private static readonly TimeSpan MakeIdle = TimeSpan.FromSeconds(60);
+    /// <summary>
+    /// Artisan is asked and answers later — it has to open the crafting log and start its endurance
+    /// loop. Judging it on the next frame declared a craft dead before it had begun.
+    /// </summary>
+    private static readonly TimeSpan CraftStartGrace = TimeSpan.FromSeconds(10);
     /// <summary>How long a pathfind is given to answer before the attempt is judged.</summary>
     private static readonly TimeSpan PathSettle = TimeSpan.FromSeconds(2);
     private const int MaxMoveRetries = 3;
@@ -118,13 +125,33 @@ public sealed class StepExecutor
     private DateTime _handOverLastTry;
     /// <summary>The shop the current PurchaseItem step buys from; learned from the window when the step names none.</summary>
     private uint _shopId;
-    /// <summary>How many of the step's item the bag should hold when the purchase is done.</summary>
+    /// <summary>How many of the item being bought the bag should hold when the purchase is done.</summary>
     private int _buyTarget;
+    /// <summary>What is being bought — the step's own item, or a material a craft turned out to need.</summary>
+    private uint _buyItem;
+    /// <summary>The purchase is feeding a craft, so go back to crafting rather than finishing.</summary>
+    private bool _shopThenCraft;
+    /// <summary>Materials already bought for this step; each is tried once so a stall cannot loop.</summary>
+    private readonly System.Collections.Generic.HashSet<uint> _boughtForCraft = [];
+    /// <summary>The NPC whose shop is being opened.</summary>
+    private uint _vendorDataId;
+    /// <summary>A detour: walk here rather than to the step's own point, then go to <see cref="_detourThen"/>.</summary>
+    private Vector3? _detourTo;
+    private Phase _detourThen;
     private DateTime _lastBuy;
+    private DateTime _lastShopOpen;
     /// <summary>The ClassJob a SwitchClass step is waiting to land on.</summary>
     private uint _switchTarget;
+    /// <summary>An aethernet hop the route resolver added, for a zone with no aetheryte of its own.</summary>
+    private string? _autoAethernet;
+    /// <summary>The zone the current hop should land in; 0 when the sheet does not know it.</summary>
+    private uint _aethernetTerritory;
     /// <summary>The handoff has been asked; a second ask would queue another batch on top.</summary>
     private bool _makeAsked;
+    /// <summary>The item last handed to Artisan — the target, or a sub-component of it.</summary>
+    private uint _craftAsked;
+    /// <summary>How many of it were held when it was asked for, so "did anything arrive" is answerable.</summary>
+    private int _craftHeldAtAsk;
     private Phase _phase = Phase.None;
     private DateTime _phaseStart;
     private DateTime _stepStart;
@@ -136,13 +163,6 @@ public sealed class StepExecutor
     private bool _skipTeleport;
     /// <summary>The instance this step hands off has been run; arriving again means finish, not re-enter.</summary>
     private bool _handoffDone;
-    /// <summary>An aethernet hop the route resolver added, for a zone with no aetheryte of its own.</summary>
-    private string? _autoAethernet;
-    /// <summary>The zone the current hop should land in; 0 when the sheet does not know it.</summary>
-    private uint _aethernetTerritory;
-    /// <summary>A detour: walk here rather than to the step's own point, then go to <see cref="_detourThen"/>.</summary>
-    private Vector3? _detourTo;
-    private Phase _detourThen;
     private uint _teleportTarget;
     private uint _teleportTerritory;
     private bool _sawTravelBusy;
@@ -171,18 +191,25 @@ public sealed class StepExecutor
         _handOverSince = default;
         _shopId = 0;
         _buyTarget = 0;
+        _buyItem = 0;
+        _shopThenCraft = false;
+        _vendorDataId = 0;
+        _detourTo = null;
+        _boughtForCraft.Clear();
         _lastBuy = default;
+        _lastShopOpen = default;
         _switchTarget = 0;
+        _autoAethernet = null;
+        _aethernetTerritory = 0;
         _makeAsked = false;
+        _craftAsked = 0;
+        _craftHeldAtAsk = 0;
         _stepStart = _world.UtcNow;
         _moveRetries = 0;
         _sawOccupied = false;
         _sawCombat = false;
         _skipTeleport = skipTeleport;
         _sawTravelBusy = false;
-        _autoAethernet = null;
-        _aethernetTerritory = 0;
-        _detourTo = null;
         _handoffDone = false;
         FailReason = string.Empty;
         Status = StepStatus.Running;
@@ -201,9 +228,9 @@ public sealed class StepExecutor
         if (Status == StepStatus.Running)
             _world.StopMoving();
         // A handoff we switched on outlives the step unless it is switched back off.
-        if (_makeAsked && _step is { } running)
+        if ((_makeAsked || _craftAsked != 0) && _step is { } running)
         {
-            if (running.Kind == StepKind.Craft) _world.StopCrafting();
+            if (running.Kind == StepKind.Craft && _craftAsked != 0) _world.StopCrafting();
             if (running.Kind == StepKind.Gather) _world.StopGathering();
         }
         _world.ReleaseDialogue();
@@ -218,7 +245,11 @@ public sealed class StepExecutor
         or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent or StepKind.None
         or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem or StepKind.Say
         or StepKind.EquipRecommended or StepKind.Action or StepKind.Instruction or StepKind.StatusOff
-        or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Craft or StepKind.Gather;
+        or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Craft or StepKind.Gather
+        or StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset;
+
+    /// <summary>The step hands the character to another plugin for a whole instance.</summary>
+    public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
 
     /// <summary>
     /// Carried out on the character rather than in the world, so there is nowhere to be.
@@ -238,10 +269,6 @@ public sealed class StepExecutor
     public static bool IsPlaceless(StepKind kind) => kind is
         StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset or StepKind.SwitchClass
         or StepKind.Craft or StepKind.EquipRecommended or StepKind.Instruction or StepKind.StatusOff;
-
-
-    /// <summary>The step hands the character to another plugin for a whole instance.</summary>
-    public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
 
     /// <summary>
     /// Why a step cannot run — and the two reasons are not the same reason.
@@ -275,6 +302,7 @@ public sealed class StepExecutor
         // Inside a handoff the other plugin owns deaths and retries; outside one, dead means stop.
         if (_world.IsDead && _phase is not (Phase.SoloDutyRun or Phase.DutyRun))
             return Fail("player is dead");
+
 
         switch (_phase)
         {
@@ -449,7 +477,17 @@ public sealed class StepExecutor
                         Enter(Phase.ShopBuy);
                 }
                 else if (now - _phaseStart > ReadyWait)
-                    Fail($"the shop at {step.DataId} never opened");
+                {
+                    if (_shopThenCraft) { Enter(Phase.Craft); break; }
+                    Fail($"the shop at {_vendorDataId} never opened");
+                }
+                else if (now - _lastShopOpen >= ShopGap)
+                {
+                    // Interacting can bounce off a moment of being occupied, so it is retried
+                    // rather than issued once and hoped for.
+                    _lastShopOpen = now;
+                    _world.OpenShop(_vendorDataId, _shopId);
+                }
                 break;
 
             case Phase.ShopBuy:
@@ -460,7 +498,17 @@ public sealed class StepExecutor
                 if (_world.CurrentClassJob == _switchTarget)
                     Enter(Phase.Finish);
                 else if (now - _phaseStart > ReadyWait)
-                    Fail($"the class did not change to {step.TargetClass} in {ReadyWait.TotalSeconds:F0}s");
+                    // An EquipItem falling back to a gearset gets here too, and names no class.
+                    Fail($"the class did not change to {step.TargetClass ?? $"job {_switchTarget}"} " +
+                         $"in {ReadyWait.TotalSeconds:F0}s");
+                break;
+
+            case Phase.Equip:
+                // Equipping is a server round trip; the slot filling is the only signal.
+                if (_world.IsEquipped(step.ItemId!.Value))
+                    Enter(Phase.Finish);
+                else if (now - _phaseStart > ReadyWait)
+                    Fail($"item {step.ItemId} never reached an equipment slot");
                 break;
 
             case Phase.Craft:
@@ -597,7 +645,6 @@ public sealed class StepExecutor
         _detourThen = Phase.Aethernet;
         return Phase.Move;
     }
-
 
     private Phase NextAfterTravel()
     {
@@ -777,6 +824,35 @@ public sealed class StepExecutor
                 }
                 return Phase.Craft;
 
+            case StepKind.EquipItem:
+                return BeginEquip(step);
+
+            // Both of these exist for the moment a class is first unlocked: the quest hands you a
+            // tool and expects a gearset to exist for it. On a character that already plays the
+            // class there is nothing to do, and creating a second gearset for it would be worse
+            // than doing nothing — which is also what makes the step safe to replay.
+            case StepKind.CreateGearset:
+            {
+                var job = _world.CurrentClassJob;
+                foreach (var set in _world.Gearsets())
+                    if (set.ClassJobId == job)
+                        return Phase.Finish;
+                if (!_world.CreateGearset())
+                {
+                    Fail("no free gearset slot — all 100 are in use");
+                    return Phase.None;
+                }
+                return Phase.ActionSettle;
+            }
+
+            case StepKind.UpdateGearset:
+                if (!_world.UpdateGearset())
+                {
+                    Fail("no active gearset to update");
+                    return Phase.None;
+                }
+                return Phase.ActionSettle;
+
             case StepKind.Gather:
                 if (step.GatherItems is not { Count: > 0 })
                 {
@@ -838,8 +914,6 @@ public sealed class StepExecutor
             return;
         }
 
-
-
         if (now - _stepStart > MoveTotal)
         {
             Fail($"did not reach {Fmt(target)} in {MoveTotal.TotalSeconds:F0}s ({distance:F1}y left)");
@@ -879,8 +953,6 @@ public sealed class StepExecutor
             return;
         }
 
-
-
         var fly = step.Fly && _world.CanFlyHere;
         var ok = direct
             ? _world.MoveDirectTo(target, fly)
@@ -913,24 +985,21 @@ public sealed class StepExecutor
         }
 
         _buyTarget = Math.Max(1, step.ItemCount ?? 1);
+        _buyItem = item;
         if (_world.ItemCount(item) >= _buyTarget)
             return Phase.Finish;
 
         _shopId = step.PurchaseShopId ?? 0;
-        if (_world.IsShopOpen(_shopId))
-            return Phase.Shop; // already standing at an open window — that phase resolves the id
-
-        if (step.DataId is not { } vendor)
+        if (!_world.IsShopOpen(_shopId))
         {
-            Fail("PurchaseItem step names no vendor");
-            return Phase.None;
+            if (step.DataId is not { } named)
+            {
+                Fail("PurchaseItem step names no vendor");
+                return Phase.None;
+            }
+            _vendorDataId = named;
         }
-        if (!_world.OpenShop(vendor, _shopId))
-        {
-            Fail($"could not open the shop at {vendor}");
-            return Phase.None;
-        }
-        return Phase.Shop;
+        return Phase.Shop; // that phase opens it, retries, and resolves an unnamed shop's id
     }
 
     /// <summary>
@@ -940,13 +1009,22 @@ public sealed class StepExecutor
     /// </summary>
     private void TickPurchase(QuestStep step, DateTime now)
     {
-        var item = step.ItemId!.Value;
+        var item = _buyItem;
         var held = _world.ItemCount(item);
 
         if (held >= _buyTarget)
         {
             _world.CloseShop();
-            Enter(Phase.Finish);
+            if (!_shopThenCraft)
+            {
+                Enter(Phase.Finish);
+                return;
+            }
+            // The materials changed, so the last "Artisan made nothing" is stale — clearing it is
+            // what lets the craft be attempted again instead of being judged on the old attempt.
+            _craftAsked = 0;
+            _craftHeldAtAsk = 0;
+            Enter(Phase.Craft);
             return;
         }
 
@@ -974,6 +1052,7 @@ public sealed class StepExecutor
         if (!_world.BuyFromShop(_shopId, item, _buyTarget - held))
         {
             _world.CloseShop();
+            if (_shopThenCraft) { Enter(Phase.Craft); return; }
             Fail($"shop {_shopId:X} does not stock item {item}");
         }
     }
@@ -993,11 +1072,10 @@ public sealed class StepExecutor
     {
         var item = step.ItemId!.Value;
         var want = Math.Max(1, step.ItemCount ?? 1);
-        var short_ = want - _world.ItemCount(item);
 
-        if (short_ <= 0)
+        if (_world.ItemCount(item) >= want)
         {
-            if (_makeAsked && _world.IsCrafting)
+            if (_craftAsked != 0 && _world.IsCrafting)
                 _world.StopCrafting();
             Enter(Phase.Finish);
             return;
@@ -1009,29 +1087,127 @@ public sealed class StepExecutor
             return;
         }
 
-        if (_makeAsked)
-        {
-            var missing = _world.CraftShortfall(item, short_);
-            Fail($"Artisan stopped with {short_} × item {item} still to make" +
-                 (missing.Length > 0 ? $" — short of {missing}" : "") + ". Stock up, then Retry");
-            return;
-        }
-
         if (!_world.CrafterReady)
         {
-            Fail($"{short_} × item {item} needs crafting and Artisan is not loaded — " +
+            Fail($"{want - _world.ItemCount(item)} × item {item} needs crafting and Artisan is not loaded — " +
                  "make them yourself, then Retry");
             return;
         }
 
-        if (_world.StartCraft(item, short_) is not { } job)
+        // Artisan is idle. If the last thing we asked for did not arrive, the materials for it ran
+        // out — that is the end of the line, and the shortfall says what is missing.
+        // Nothing arrived — but only once Artisan has had time to start. Between the ask and its
+        // endurance loop reporting itself there is a window where "not crafting" means "not yet".
+        if (_craftAsked != 0 && now - _phaseStart > CraftStartGrace
+            && _world.ItemCount(_craftAsked) <= _craftHeldAtAsk)
         {
-            Fail($"no recipe for item {item}, or Artisan would not take the craft");
+            // Artisan produced nothing, so the materials ran out. A character new to the class has
+            // none of them, which is the ordinary case rather than the exceptional one — so if a
+            // merchant here sells what is missing, go and buy it instead of stopping.
+            if (TryBuyMaterials(item, want))
+                return;
+
+            var short_ = want - _world.ItemCount(item);
+            var missing = _world.CraftShortfall(item, short_);
+            // No shortfall means the materials are all there and something else stopped it — the
+            // recipe's level, or Artisan not being able to reach the log. Saying "stock up" there
+            // would send you looking for materials you already have.
+            Fail($"Artisan stopped with {short_} × item {item} still to make" +
+                 (missing.Count > 0
+                     ? $" — short of {Describe(missing)}. Get those, then Retry"
+                     : ", and the materials are all there — check the recipe's level and that Artisan can craft it"));
             return;
         }
-        _makeAsked = true;
+
+        // Nothing craftable is left to try: the item has no recipe, or what it is short of has to
+        // be bought or gathered rather than made.
+        // Something is already in flight; leave it alone until the grace above has run out.
+        if (_craftAsked != 0 && now - _phaseStart <= CraftStartGrace)
+            return;
+
+        if (_world.NextCraft(item, want) is not { } next)
+        {
+            if (TryBuyMaterials(item, want))
+                return;
+            var missing = _world.CraftShortfall(item, want - _world.ItemCount(item));
+            Fail($"no recipe for item {item}, or its materials cannot be crafted" +
+                 (missing.Count > 0 ? $" — short of {Describe(missing)}" : "") + ". Buy or gather the rest, then Retry");
+            return;
+        }
+
+        // Sampled before the ask, not after: this is the baseline that answers "did anything
+        // actually arrive", and reading it afterwards would compare the result against itself.
+        var heldBefore = _world.ItemCount(next.ItemId);
+        if (_world.StartCraft(next.ItemId, next.Count) is not { } job)
+        {
+            Fail($"no recipe for item {next.ItemId}, or Artisan would not take the craft");
+            return;
+        }
+        _craftAsked = next.ItemId;
+        _craftHeldAtAsk = heldBefore;
         _phaseStart = now;
-        _world.Log($"Asked Artisan for {short_} × item {item} as {job}.");
+        _world.Log(next.ItemId == item
+            ? $"Asked Artisan for {next.Count} × item {item} as {job}."
+            : $"Asked Artisan for {next.Count} × item {next.ItemId} first — item {item} is made from it.");
+    }
+
+    /// <summary>
+    /// Buy a base material the craft is short of, from a merchant standing here.
+    ///
+    /// <para>
+    /// The path data assumes you already own the materials, which is true of a character who has
+    /// run the class before and false of the one these quests are written for. Every crafting guild
+    /// keeps its material vendor beside the guildmaster, so the shop is usually a few paces away —
+    /// and this only ever buys from one already in reach, because a shop cannot be opened across a
+    /// zone.
+    /// </para>
+    ///
+    /// <para>
+    /// Each material is bought at most once per step. A second failure after buying means something
+    /// other than the shopping is wrong, and looping between the shop and the crafting log would
+    /// hide that.
+    /// </para>
+    /// </summary>
+    private bool TryBuyMaterials(uint item, int want)
+    {
+        foreach (var missing in _world.CraftShortfall(item, want - _world.ItemCount(item)))
+        {
+            if (!_boughtForCraft.Add(missing.ItemId))
+                continue; // already tried this one
+            if (_world.VendorNearbyFor(missing.ItemId) is not { } vendor)
+                continue;
+
+            _buyTarget = _world.ItemCount(missing.ItemId) + missing.Missing;
+            _buyItem = missing.ItemId;
+            _shopId = vendor.ShopId;
+            _vendorDataId = vendor.VendorDataId;
+            _shopThenCraft = true;
+            _lastShopOpen = default;
+            _world.Log($"Short of {missing.Missing} × {missing.Name} — buying from {vendor.VendorName}.");
+
+            // Being in the object table is not being in reach: a merchant across the guild hall is
+            // visible and still too far to talk to, which is what made the first attempt stand
+            // still. Walk over unless already beside them.
+            if (_world.PositionOfDataId(vendor.VendorDataId) is { } where
+                && Vector3.Distance(_world.PlayerPosition, where) > DefaultStopDistance + ArrivalSlack)
+            {
+                _detourTo = where;
+                _detourThen = Phase.Shop;
+                Enter(Phase.Move);
+                return true;
+            }
+            Enter(Phase.Shop);
+            return true;
+        }
+        return false;
+    }
+
+    private static string Describe(System.Collections.Generic.IReadOnlyList<MaterialShortfall> missing)
+    {
+        var parts = new string[missing.Count];
+        for (var i = 0; i < missing.Count; i++)
+            parts[i] = $"{missing[i].Missing} × {missing[i].Name}";
+        return string.Join(", ", parts);
     }
 
     /// <summary>
@@ -1117,6 +1293,69 @@ public sealed class StepExecutor
     }
 
     /// <summary>
+    /// Wear what the step names — or, when it is a class tool, be the class by any means.
+    ///
+    /// <para>
+    /// These steps come from the quest that unlocks a class, where the point of the weathered
+    /// hammer is that you own no Goldsmith tool at all. On a character who already plays the class
+    /// that premise is simply false: the tool may have been sold years ago, and equipping it would
+    /// be a downgrade even if it were still there. The game changes class off the main hand, so the
+    /// gearset satisfies the step exactly as the quest item would — the same swap Artisan makes to
+    /// reach a recipe's job.
+    /// </para>
+    ///
+    /// <para>
+    /// The fallback is deliberately narrow. It applies only to a main hand naming a single class,
+    /// never to gear that merely happens to be restricted — for those the item <i>is</i> the
+    /// requirement and no gearset stands in for it.
+    /// </para>
+    /// </summary>
+    private Phase BeginEquip(QuestStep step)
+    {
+        if (step.ItemId is not { } wear)
+        {
+            Fail("EquipItem step names no item");
+            return Phase.None;
+        }
+        if (_world.IsEquipped(wear))
+            return Phase.Finish;
+
+        var toolClass = _world.EquipClassOf(wear);
+
+        // Already that class: a tool for it is in your hand, which is all the step was ever after.
+        if (toolClass is { } already && _world.CurrentClassJob == already)
+            return Phase.Finish;
+
+        if (_world.EquipItem(wear))
+            return Phase.Equip;
+
+        // Not in the bags or the armoury. For a class tool that is recoverable.
+        if (toolClass is not { } job)
+        {
+            Fail($"item {wear} could not be equipped — not equipment, or not in the bags or armoury");
+            return Phase.None;
+        }
+        if (GearsetFor(job) is not { } set)
+        {
+            Fail($"item {wear} is not held and there is no gearset for its class — save one, then Retry");
+            return Phase.None;
+        }
+        if (_world.InCombat)
+        {
+            Fail("cannot change class in combat");
+            return Phase.None;
+        }
+        if (!_world.EquipGearset(set.Id))
+        {
+            Fail($"gearset {set.Id} was refused");
+            return Phase.None;
+        }
+        _switchTarget = set.ClassJobId;
+        _world.Log($"Item {wear} is not held; equipping gearset {set.Id} for its class instead.");
+        return Phase.ClassSwitch;
+    }
+
+    /// <summary>
     /// Equip the gearset a <c>SwitchClass</c> step means. Nothing here presses a class into being:
     /// if the character has no gearset for what the step asks, that is a stop with a name, because
     /// the alternative is a quest that silently cannot progress.
@@ -1160,12 +1399,10 @@ public sealed class StepExecutor
     /// </summary>
     private (GearsetInfo? Set, string Failure) ResolveSwitch(string target)
     {
-        var sets = _world.Gearsets();
-
         if (Same(target, "ConfiguredCombatJob"))
-            return (Highest(sets, JobKind.Combat), "no combat gearset exists — save one, then Retry");
+            return (Highest(_world.Gearsets(), JobKind.Combat), "no combat gearset exists — save one, then Retry");
         if (Same(target, "ConfiguredCraftingJob"))
-            return (Highest(sets, JobKind.Crafter), "no crafting gearset exists — save one, then Retry");
+            return (Highest(_world.Gearsets(), JobKind.Crafter), "no crafting gearset exists — save one, then Retry");
 
         var startJob = Same(target, "QuestStartJob");
         var wanted = startJob ? _world.QuestStartClassJob(_questId) : _world.ResolveClassJob(target);
@@ -1174,13 +1411,21 @@ public sealed class StepExecutor
                 ? $"quest {_questId} does not say which class it was accepted on"
                 : $"unknown class \"{target}\" in the path data");
 
-        // A job satisfies its own class, so a Conjurer step takes the White Mage gearset. Highest
-        // level wins when several match — a character with both keeps the one it actually plays.
+        return (GearsetFor(job), $"no gearset for {target} — save one, then Retry");
+    }
+
+    /// <summary>
+    /// The gearset for a class. A job satisfies the class it grew out of, so a Conjurer request
+    /// takes the White Mage gearset; highest level wins when several match, which keeps the one
+    /// actually played.
+    /// </summary>
+    private GearsetInfo? GearsetFor(uint job)
+    {
         GearsetInfo? best = null;
-        foreach (var s in sets)
+        foreach (var s in _world.Gearsets())
             if ((s.ClassJobId == job || s.ParentClassJobId == job) && (best is null || s.Level > best.Level))
                 best = s;
-        return (best, $"no gearset for {target} — save one, then Retry");
+        return best;
     }
 
     private static GearsetInfo? Highest(System.Collections.Generic.IReadOnlyList<GearsetInfo> sets, JobKind kind)

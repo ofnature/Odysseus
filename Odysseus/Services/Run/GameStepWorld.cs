@@ -200,6 +200,13 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     public bool Teleport(uint aetheryteId) => _lifestream.Teleport(aetheryteId);
 
+    /// <summary>
+    /// The path data spells destinations <c>"[Ul'dah] Goldsmiths' Guild"</c> — its own convention
+    /// for saying which city — while Lifestream and the Aetheryte sheet both call the place
+    /// <c>"Goldsmiths' Guild"</c>. Passing the bracketed form through matched nothing, so every
+    /// aethernet hop was refused; the city is stripped here, at the one place that talks to
+    /// Lifestream.
+    /// </summary>
     public uint? AethernetTerritoryOf(string destination)
         => _aetherytes.StopNamed(destination)?.TerritoryId;
 
@@ -282,7 +289,6 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
             ? destination[(close + 1)..].Trim()
             : destination.Trim();
     }
-
 
     public bool IsTravelBusy
         => _lifestream.IsBusy
@@ -410,6 +416,155 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         }
 
         static string Key(string text) => text.Replace(" ", string.Empty).Trim();
+    }
+
+    // ── Equipment ──
+    //
+    // All of this is RaptureGearsetModule and InventoryManager, never the GearSetList window. The
+    // window renders from the module, is virtualised (its rows are not separate nodes), and its
+    // node ids move between patches — reading the module is both simpler and steadier.
+
+    /// <summary>
+    /// Where a piece of equipment goes. <c>EquipSlotCategory</c> rows 1–11 are the ordinary slots
+    /// in order, 12 is a ring (either hand), 13 is a two-handed weapon (main hand) and 17 is a soul
+    /// crystal. Anything else is not equipment.
+    /// </summary>
+    private static ushort[]? EquipSlotsFor(uint equipSlotCategory) => equipSlotCategory switch
+    {
+        >= 1 and <= 11 => [(ushort)(equipSlotCategory - 1)],
+        12 => [11, 12],
+        13 => [0],
+        17 => [13],
+        _ => null,
+    };
+
+    /// <summary>Bags and armoury, in the order worth searching.</summary>
+    private static readonly InventoryType[] EquipSources =
+    [
+        InventoryType.ArmoryMainHand, InventoryType.ArmoryOffHand, InventoryType.ArmoryHead,
+        InventoryType.ArmoryBody, InventoryType.ArmoryHands, InventoryType.ArmoryLegs,
+        InventoryType.ArmoryFeets, InventoryType.ArmoryEar, InventoryType.ArmoryNeck,
+        InventoryType.ArmoryWrist, InventoryType.ArmoryRings, InventoryType.ArmorySoulCrystal,
+        InventoryType.Inventory1, InventoryType.Inventory2, InventoryType.Inventory3, InventoryType.Inventory4,
+    ];
+
+    public bool IsEquipped(uint itemId)
+    {
+        try
+        {
+            var manager = InventoryManager.Instance();
+            var container = manager == null ? null : manager->GetInventoryContainer(InventoryType.EquippedItems);
+            if (container == null) return false;
+            for (var slot = 0; slot < container->Size; slot++)
+            {
+                var item = container->GetInventorySlot(slot);
+                if (item != null && item->ItemId == itemId) return true;
+            }
+            return false;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// A main hand whose <c>ClassJobCategory</c> names exactly one class. That category's name is
+    /// the class abbreviation for single-class tools — "GSM" for a Chaser Hammer — so resolving it
+    /// through the same lookup a SwitchClass step uses both identifies the class and rules out the
+    /// broad categories ("All Classes", "Disciples of the Hand"), which resolve to nothing.
+    /// </summary>
+    public uint? EquipClassOf(uint itemId)
+    {
+        try
+        {
+            if (_data.GetExcelSheet<Item>().GetRowOrDefault(itemId) is not { } row)
+                return null;
+            // 1 and 13 are the main-hand slots; a class comes from the weapon, never from gear.
+            if (row.EquipSlotCategory.RowId is not (1 or 13))
+                return null;
+            var category = row.ClassJobCategory.ValueNullable?.Name.ExtractText();
+            return category is { Length: > 0 } name ? ResolveClassJob(name) : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public bool EquipItem(uint itemId)
+    {
+        try
+        {
+            if (_data.GetExcelSheet<Item>().GetRowOrDefault(itemId) is not { } row)
+                return false;
+            if (EquipSlotsFor(row.EquipSlotCategory.RowId) is not { } targets)
+            {
+                _log($"Item {itemId} is not a piece of equipment.");
+                return false;
+            }
+
+            var manager = InventoryManager.Instance();
+            if (manager == null) return false;
+
+            foreach (var source in EquipSources)
+            {
+                var container = manager->GetInventoryContainer(source);
+                if (container == null || !container->IsLoaded) continue;
+                for (ushort slot = 0; slot < container->Size; slot++)
+                {
+                    var item = container->GetInventorySlot(slot);
+                    if (item == null || item->ItemId != itemId) continue;
+                    // The first target slot free, else the first — swapping out what is there.
+                    var target = targets[0];
+                    foreach (var candidate in targets)
+                    {
+                        var occupant = manager->GetInventorySlot(InventoryType.EquippedItems, candidate);
+                        if (occupant == null || occupant->ItemId == 0) { target = candidate; break; }
+                    }
+                    manager->MoveItemSlot(source, slot, InventoryType.EquippedItems, target, true);
+                    return true;
+                }
+            }
+
+            _log($"Item {itemId} is not in the bags or the armoury.");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _log($"Equipping item {itemId} failed: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public bool CreateGearset()
+    {
+        try
+        {
+            var module = FFXIVClientStructs.FFXIV.Client.UI.Misc.RaptureGearsetModule.Instance();
+            return module != null && module->CreateGearset() >= 0;
+        }
+        catch (Exception ex)
+        {
+            _log($"Creating a gearset failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public bool UpdateGearset()
+    {
+        try
+        {
+            var module = FFXIVClientStructs.FFXIV.Client.UI.Misc.RaptureGearsetModule.Instance();
+            if (module == null) return false;
+            var current = module->CurrentGearsetIndex;
+            return current >= 0 && module->IsValidGearset(current) && module->UpdateGearset(current) >= 0;
+        }
+        catch (Exception ex)
+        {
+            _log($"Updating the gearset failed: {ex.Message}");
+            return false;
+        }
     }
 
     public uint? QuestStartClassJob(ushort questId)
@@ -615,11 +770,27 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     public bool IsCrafting => _making.IsCrafting;
 
+    public (uint ItemId, int Count)? NextCraft(uint itemId, int count) => _making.NextCraft(itemId, count);
+
     public string? StartCraft(uint itemId, int count) => _making.StartCraft(itemId, count);
 
     public void StopCrafting() => _making.StopCrafting();
 
-    public string CraftShortfall(uint itemId, int count) => _making.CraftShortfall(itemId, count);
+    public IReadOnlyList<MaterialShortfall> CraftShortfall(uint itemId, int count)
+        => _making.CraftShortfall(itemId, count);
+
+    /// <summary>
+    /// The first vendor the object table can actually see. Every candidate is considered, not just
+    /// the first in the sheet: seven NPCs sell Copper Ore and the Goldsmiths' Guild one is sixth,
+    /// so stopping at the first declined a sale from a merchant standing three paces away.
+    /// </summary>
+    public VendorOffer? VendorNearbyFor(uint itemId)
+    {
+        foreach (var vendor in _making.VendorsFor(itemId))
+            if (IsDataIdSpawned(vendor.VendorDataId))
+                return new VendorOffer(vendor.VendorDataId, vendor.ShopId, vendor.VendorName, vendor.Cost);
+        return null;
+    }
 
     public bool GathererReady => _making.GathererReady;
 
@@ -852,15 +1023,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
             var journal = (FFXIVClientStructs.FFXIV.Client.UI.AddonJournalResult*)addon.Address;
             var button = journal->CompleteButton;
             if (button == null || !button->IsEnabled)
-                return false;
-            var owner = button->AtkComponentBase.OwnerNode;
-            if (owner == null)
-                return false;
-            var evt = owner->AtkResNode.AtkEventManager.Event;
-            if (evt == null)
-                return false;
-            journal->AtkUnitBase.ReceiveEvent(evt->State.EventType, (int)evt->Param, evt, null);
-            return true;
+                return false;   // disabled means an optional reward still needs choosing
+            return AtkClick.Button(&journal->AtkUnitBase, button);
         }
         catch (Exception ex)
         {
@@ -971,14 +1135,7 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
             var button = request->HandOverButton;
             if (button == null || !button->IsEnabled)
                 return false;
-            var owner = button->AtkComponentBase.OwnerNode;
-            if (owner == null)
-                return false;
-            var evt = owner->AtkResNode.AtkEventManager.Event;
-            if (evt == null)
-                return false;
-            request->AtkUnitBase.ReceiveEvent(evt->State.EventType, (int)evt->Param, evt, null);
-            return true;
+            return AtkClick.Button(&request->AtkUnitBase, button);
         }
         catch (Exception ex)
         {
@@ -987,6 +1144,16 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         }
     }
 
+    /// <summary>
+    /// The high-quality trade confirmation. Its Yes is greyed until "Proceed with trade" is
+    /// ticked, so this ticks first and returns — the enable state settles a frame later — then
+    /// presses Yes on the following pass, force-enabling it because that gate is UI-only.
+    ///
+    /// <para>
+    /// Recognised by the checkbox, not by its text: a plain yes/no has no <c>ConfirmCheckBox</c>
+    /// and is left alone, which keeps this from answering prompts it was never meant to see.
+    /// </para>
+    /// </summary>
     public void HoldDialogue() => _textAdvance.Hold();
 
     public void ReleaseDialogue() => _textAdvance.Release();
