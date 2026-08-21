@@ -248,6 +248,80 @@ public class TravelExecutorTests
         Assert.True(hopped > walked, "hopped before reaching the access point");
     }
 
+    /// <summary>
+    /// The navmesh does not extend under a solid object, so a path to a shard ends a few yalms
+    /// short and stays there — which is why jumping made a stalled approach complete. The last
+    /// stretch is walked straight instead, because Lifestream has to interact with the shard and
+    /// stopping fifteen yalms out had the hop refused every time.
+    /// </summary>
+    [Fact]
+    public void A_mesh_path_that_ends_short_of_a_shard_is_finished_directly()
+    {
+        var w = World();
+        w.TerritoryId = 418;
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        w.AethernetAccess[418] = new Vector3(8, 0, 0);    // past interact range, inside the nudge
+        w.AethernetTerritories["The Last Vigil"] = 419;
+        w.MoveAccepted = true;
+        var ex = new StepExecutor(w);
+        var step = Interact(419, new Vector3(50, 0, 0));
+        step.AethernetShortcut = ["[Ishgard] Aetheryte Plaza", "The Last Vigil"];
+        ex.Begin(step);
+
+        // The mesh move is issued and leaves us where we are; the straight finish then closes it.
+        for (var i = 0; i < 12 && !w.Calls.Any(c => c.StartsWith("MoveDirect")); i++) { ex.Tick(); w.Advance(0.5); }
+
+        Assert.Contains(w.Calls, c => c.StartsWith("MoveDirect 8,0,0"));
+    }
+
+    /// <summary>
+    /// The Foundation case: the aethernet menu was open — the game plainly considered the player at
+    /// the shard — while a distance measured from the object's origin still read as too far, and the
+    /// approach stalled until the player jumped. Lifestream's own answer ends it instead.
+    /// </summary>
+    [Fact]
+    public void The_games_own_answer_ends_the_approach_whatever_the_distance_says()
+    {
+        var w = World();
+        w.TerritoryId = 418;
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        w.AethernetAccess[418] = new Vector3(40, 0, 0);   // far enough that the walk starts
+        w.AethernetTerritories["The Last Vigil"] = 419;
+        var ex = new StepExecutor(w);
+        var step = Interact(419, new Vector3(50, 0, 0));
+        step.AethernetShortcut = ["[Ishgard] Aetheryte Plaza", "The Last Vigil"];
+        ex.Begin(step);
+
+        ex.Tick();                       // walking
+        Assert.DoesNotContain("Aethernet The Last Vigil", w.Calls);
+
+        w.AtAethernetShard = true;       // the menu opens; we never got within the distance
+        ex.Tick();
+        w.Advance(0.5);
+        ex.Tick();
+
+        Assert.Contains("Aethernet The Last Vigil", w.Calls);
+    }
+
+    /// <summary>At one before the step even begins, there is nothing to walk.</summary>
+    [Fact]
+    public void Standing_at_a_shard_already_skips_the_walk()
+    {
+        var w = World();
+        w.TerritoryId = 418;
+        w.AtAethernetShard = true;
+        w.AethernetAccess[418] = new Vector3(40, 0, 0);
+        w.AethernetTerritories["The Last Vigil"] = 419;
+        var ex = new StepExecutor(w);
+        var step = Interact(419, new Vector3(50, 0, 0));
+        step.AethernetShortcut = ["[Ishgard] Aetheryte Plaza", "The Last Vigil"];
+        ex.Begin(step);
+        ex.Tick();
+
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Move 40,0,0"));
+        Assert.Contains("Aethernet The Last Vigil", w.Calls);
+    }
+
     /// <summary>Standing at the shard already, there is nothing to walk.</summary>
     [Fact]
     public void It_hops_straight_away_when_already_at_an_access_point()
@@ -283,6 +357,48 @@ public class TravelExecutorTests
         var (gotCity, gotName) = Odysseus.Services.Travel.AetheryteCatalog.SplitCity(data);
         Assert.Equal(city, gotCity);
         Assert.Equal(name, gotName);
+    }
+
+    /// <summary>
+    /// Every Goldsmith quest walked out of the guild and back in. Its NPC sits a few paces from the
+    /// Goldsmiths' Guild shard the step names, so taking the hop meant walking out to that shard,
+    /// teleporting to it, and walking back. The aethernet is for crossing a city, not for standing
+    /// still in one.
+    /// </summary>
+    [Fact]
+    public void A_hop_that_lands_where_you_already_are_is_not_taken()
+    {
+        var w = World();
+        w.TerritoryId = 131;
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        w.AethernetTerritories["Goldsmiths' Guild"] = 131;
+        w.AethernetAccess[131] = new Vector3(40, 0, 0);
+        var ex = new StepExecutor(w);
+        var step = Interact(131, new Vector3(20, 0, 0));           // the NPC, a short walk away
+        step.AethernetShortcut = ["[Ul'dah] Aetheryte Plaza", "Goldsmiths' Guild"];
+        ex.Begin(step);
+        Ticks(ex, w, 20);
+
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Aethernet"));
+        Assert.Contains(w.Calls, c => c.StartsWith("Move 20,0,0"));
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    /// <summary>Far enough across the same zone and the hop still earns its detour.</summary>
+    [Fact]
+    public void A_long_walk_in_the_same_zone_still_takes_the_hop()
+    {
+        var w = World();
+        w.TerritoryId = 131;
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        w.AethernetTerritories["Goldsmiths' Guild"] = 131;
+        var ex = new StepExecutor(w);
+        var step = Interact(131, new Vector3(900, 0, 0));
+        step.AethernetShortcut = ["[Ul'dah] Aetheryte Plaza", "Goldsmiths' Guild"];
+        ex.Begin(step);
+        ex.Tick();
+
+        Assert.Contains("Aethernet Goldsmiths' Guild", w.Calls);
     }
 
     /// <summary>Already in the other half of the city: the hop is the whole journey.</summary>
@@ -386,5 +502,111 @@ public class TravelExecutorTests
         w.TerritoryId = 101; // zoned, never "reached" the point
         Ticks(ex, w, 5);
         Assert.Equal(StepStatus.Done, ex.Status);
+    }
+}
+public class ZoneCrossingTests
+{
+    [Fact]
+    public void Landing_in_the_zone_the_step_crosses_into_is_arrival_not_the_wrong_zone()
+    {
+        // Highway Robbery's first step: starts in Limsa's Lower Decks (129), ends in the Upper
+        // Decks (128), and gets there by hopping the aethernet to The Aftcastle. Arriving is the
+        // whole step; reading 128 as "you are in the wrong zone" faulted the quest on arrival.
+        var step = new QuestStep
+        {
+            Kind = StepKind.None, KindName = "None",
+            TerritoryId = 129, TargetTerritoryId = 128,
+        };
+
+        var world = new FakeStepWorld { TerritoryId = 128 };
+        var ex = new StepExecutor(world);
+        ex.Begin(step);
+        for (var i = 0; i < 12 && ex.Status == StepStatus.Running; i++) { ex.Tick(); world.Advance(0.5); }
+
+        Assert.Equal(StepStatus.Done, ex.Status);
+        Assert.Equal(string.Empty, ex.FailReason);
+    }
+
+    [Fact]
+    public void Somewhere_else_entirely_still_says_so()
+    {
+        var step = new QuestStep
+        {
+            Kind = StepKind.None, KindName = "None",
+            TerritoryId = 129, TargetTerritoryId = 128,
+        };
+
+        var world = new FakeStepWorld { TerritoryId = 156 };
+        var ex = new StepExecutor(world);
+        ex.Begin(step);
+        for (var i = 0; i < 12 && ex.Status == StepStatus.Running; i++) { ex.Tick(); world.Advance(0.5); }
+
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.Contains("territory 129", ex.FailReason);
+    }
+}
+public class StallJumpTests
+{
+    private static QuestStep WalkTo(Vector3 where) => new()
+    {
+        Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 137, Position = where, Mount = false,
+    };
+
+    [Fact]
+    public void A_walk_that_stops_getting_closer_jumps_once()
+    {
+        var w = new FakeStepWorld { TerritoryId = 137, ArriveOnMove = false, IsMoving = true };
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        var ex = new StepExecutor(w);
+        ex.Begin(WalkTo(new Vector3(0, 0, 30)));
+
+        // Three seconds of running on the spot is not yet a stall.
+        for (var i = 0; i < 6; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.DoesNotContain(w.Calls, c => c.Contains("Jump"));
+
+        for (var i = 0; i < 6; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Single(w.Calls, c => c.Contains("Jump"));
+
+        // And it does not turn into a pogo stick while it stays stuck.
+        for (var i = 0; i < 8; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Single(w.Calls, c => c.Contains("Jump"));
+    }
+
+    [Fact]
+    public void A_walk_that_is_making_progress_is_left_alone()
+    {
+        var w = new FakeStepWorld { TerritoryId = 137, ArriveOnMove = false, IsMoving = true };
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        var ex = new StepExecutor(w);
+        ex.Begin(WalkTo(new Vector3(0, 0, 60)));
+
+        for (var i = 0; i < 20; i++)
+        {
+            ex.Tick();
+            w.Advance(0.5);
+            w.PlayerPosition = w.PlayerPosition with { Z = w.PlayerPosition.Z + 1f }; // a yalm a tick
+        }
+        Assert.DoesNotContain(w.Calls, c => c.Contains("Jump"));
+    }
+}
+public class StepDismountTests
+{
+    [Fact]
+    public void A_step_marked_dismount_gets_off_before_it_walks_and_stays_off()
+    {
+        var step = new QuestStep
+        {
+            Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 137,
+            Position = new Vector3(0, 0, 80), Dismount = true, // far enough that it would normally mount
+        };
+        var w = new FakeStepWorld { TerritoryId = 137, ArriveOnMove = false, IsMounted = true };
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+        for (var i = 0; i < 10; i++) { ex.Tick(); w.Advance(0.5); }
+
+        var off = w.Calls.FindIndex(c => c == "Dismount");
+        var moved = w.Calls.FindIndex(c => c.StartsWith("Move"));
+        Assert.True(off >= 0 && moved > off, string.Join(" | ", w.Calls));
+        Assert.DoesNotContain("Mount", w.Calls);
     }
 }

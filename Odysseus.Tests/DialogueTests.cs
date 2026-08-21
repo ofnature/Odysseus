@@ -33,6 +33,111 @@ public class DialogueTests
     }
 
     [Fact]
+    public void An_interaction_that_opened_nothing_is_asked_again()
+    {
+        // A sprint keybind firing on the same frame eats the keypress: the target is there, the
+        // interact goes out, and no conversation ever opens.
+        var w = new FakeStepWorld { TalksWhenInteracted = false };
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(7));
+        Ticks(ex, w, 30);
+
+        Assert.Equal(3, w.Calls.Count(c => c == "Interact 7")); // the first, then two more
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("asking again"));
+        Assert.Equal(StepStatus.Done, ex.Status); // and it still gives up rather than looping
+    }
+
+    [Fact]
+    public void An_interaction_from_out_of_reach_walks_to_the_npc_rather_than_pressing_again()
+    {
+        // Brotherhood of Ash seq 3: the walk finished on the lip above the NPC, inside the step's
+        // stop distance and nowhere near close enough to talk. Three presses, nothing opened.
+        var w = new FakeStepWorld { TalksWhenInteracted = false, ArriveOnMove = false };
+        w.Spawned.Add(1005578);
+        w.Positions[1005578] = new Vector3(0, -9, 0); // nine yalms below us
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(1005578));
+        Ticks(ex, w, 20);
+
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("walking to it before asking again"));
+        Assert.Contains(w.Calls, c => c.StartsWith("Move") || c.StartsWith("MoveClose"));
+        Assert.Equal(1, w.Calls.Count(c => c == "Interact 1005578")); // not pressed again from up there
+
+        // Once we are actually next to it, the interaction is asked again and lands.
+        w.PlayerPosition = new Vector3(0, -9, 0);
+        w.TalksWhenInteracted = true;
+        Ticks(ex, w, 20);
+        Assert.Equal(2, w.Calls.Count(c => c == "Interact 1005578"));
+    }
+
+    [Fact]
+    public void A_flight_that_ended_over_the_npcs_head_lands_before_trying_again()
+    {
+        // Questionable flies you to a great many of these, and a flight that finishes above the
+        // NPC can never talk to them: interacting from the air does nothing at all.
+        var w = new FakeStepWorld { TalksWhenInteracted = false, ArriveOnMove = false, IsMounted = true };
+        w.Spawned.Add(1005578);
+        w.Positions[1005578] = new Vector3(0, -20, 0);
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(1005578));
+        Ticks(ex, w, 20);
+
+        Assert.Contains("Dismount", w.Calls);
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("dismounting first"));
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("walking to it"));
+    }
+
+    [Fact]
+    public void The_descent_is_waited_out_rather_than_pressed_through()
+    {
+        // Dismounting in the air is a fall, and you are still Mounted all the way down. Both
+        // retries used to be spent halfway to the ground.
+        var w = new FakeStepWorld { TalksWhenInteracted = false, IsMounted = true, HoldsMount = true };
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(7));
+        Ticks(ex, w, 30); // fifteen seconds of falling
+
+        var pressedWhileFalling = w.Calls.Count(c => c == "Interact 7");
+        Assert.True(w.Calls.Count(c => c == "Dismount") > 1, "kept asking on the way down");
+
+        // Feet on the ground: now it interacts.
+        w.HoldsMount = false;
+        w.IsMounted = false;
+        w.TalksWhenInteracted = true;
+        Ticks(ex, w, 6);
+        Assert.Equal(pressedWhileFalling + 1, w.Calls.Count(c => c == "Interact 7"));
+    }
+
+    [Fact]
+    public void The_npc_is_faced_before_being_talked_to()
+    {
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(7));
+        Ticks(ex, w, 10);
+
+        var faced = w.Calls.FindIndex(c => c == "Face 7");
+        var talked = w.Calls.FindIndex(c => c == "Interact 7");
+        Assert.True(faced >= 0 && talked > faced, string.Join(" | ", w.Calls));
+    }
+
+    [Fact]
+    public void An_interaction_that_did_open_something_is_left_alone()
+    {
+        var w = new FakeStepWorld(); // talks when interacted, as the game does
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(7));
+        Ticks(ex, w, 30);
+
+        Assert.Equal(1, w.Calls.Count(c => c == "Interact 7"));
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    [Fact]
     public void List_choice_is_answered_by_resolved_text()
     {
         var texts = new Texts();
@@ -54,7 +159,7 @@ public class DialogueTests
     }
 
     [Fact]
-    public void Unresolvable_list_choice_leaves_the_menu_alone_and_says_why()
+    public void Unresolvable_list_choice_takes_the_first_option_and_says_why()
     {
         var w = new FakeStepWorld();
         w.Spawned.Add(7);
@@ -67,8 +172,58 @@ public class DialogueTests
         w.VisibleAddons.Add("SelectString");
         w.ListEntries.Add("Something");
         ex.Tick();
-        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Select "));
+        Assert.Contains(w.Calls, c => c == "Select 0");
         Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("could not be resolved"));
+    }
+
+    [Fact]
+    public void A_list_the_step_never_named_is_answered_after_a_grace()
+    {
+        // Quest 2601's three townspeople each open "what will you say?" and the path data names
+        // none of them. Left alone the player stays occupied and the step never ends.
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w, new Texts());
+        ex.Begin(Interact(7), questId: 2601);
+        Ticks(ex, w, 3);
+
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectString");
+        w.ListEntries.AddRange(["Ask about their strengths first.", "Task them with a finished product."]);
+        ex.Tick();
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Select ")); // TextAdvance gets first refusal
+
+        w.Advance(4);
+        ex.Tick();
+        Assert.Equal(1, w.Calls.Count(c => c == "Select 0"));
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("does not name"));
+
+        // Answered, the conversation ends and the step goes on to the next NPC.
+        w.IsOccupied = false;
+        w.VisibleAddons.Remove("SelectString");
+        w.Advance(1);
+        ex.Tick();
+        Assert.Equal(StepStatus.Done, ex.Tick());
+    }
+
+    [Fact]
+    public void An_empty_list_window_is_waited_on_rather_than_answered_blind()
+    {
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w, new Texts());
+        var step = Interact(7);
+        step.DialogueChoices = [new DialogueChoice("List", "Q", "A", null)];
+        ex.Begin(step, questId: 1);
+        Ticks(ex, w, 3);
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectString"); // up, but its entries have not filled in
+        ex.Tick();
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Select "));
+
+        w.ListEntries.Add("Something");
+        ex.Tick();
+        Assert.Contains(w.Calls, c => c == "Select 0");
     }
 
     [Fact]

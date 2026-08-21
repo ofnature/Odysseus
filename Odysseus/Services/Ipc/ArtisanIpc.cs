@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Ipc;
 
@@ -37,6 +38,16 @@ public sealed class ArtisanIpc : Deliveries.ICrafter
         _log = log;
     }
 
+    /// <summary>
+    /// Why Artisan cannot be used, or empty when it can. Worth telling apart: "not installed" is
+    /// something you fix in the plugin installer, "loaded but its gate refused" is something we
+    /// fix here, and the two used to look identical from the outside — one yellow chip either way,
+    /// with the exception swallowed.
+    /// </summary>
+    public string Unavailable { get; private set; } = string.Empty;
+
+    private const string EnduranceGate = "Artisan.GetEnduranceStatus";
+
     /// <summary>Artisan is loaded and answering.</summary>
     public bool Available
     {
@@ -44,9 +55,37 @@ public sealed class ArtisanIpc : Deliveries.ICrafter
         {
             try
             {
-                _endurance ??= _pluginInterface.GetIpcSubscriber<bool>("Artisan.GetEnduranceStatus");
+                _endurance ??= _pluginInterface.GetIpcSubscriber<bool>(EnduranceGate);
                 _endurance.InvokeFunc();
+                Unavailable = string.Empty;
+                _warned = false;
                 return true;
+            }
+            catch (Exception ex)
+            {
+                Unavailable = IsLoaded
+                    ? $"Artisan is loaded but {EnduranceGate} refused ({ex.GetType().Name})"
+                    : "Artisan is not loaded";
+                if (!_warned)
+                {
+                    _warned = true;
+                    _log?.Invoke($"{Unavailable}: {ex.Message}");
+                }
+                return false;
+            }
+        }
+    }
+
+    /// <summary>Dalamud's own answer, which does not depend on any gate being right.</summary>
+    private bool IsLoaded
+    {
+        get
+        {
+            try
+            {
+                return _pluginInterface.InstalledPlugins.Any(p =>
+                    string.Equals(p.InternalName, "Artisan", StringComparison.OrdinalIgnoreCase)
+                    && p.IsLoaded && !p.IsOutdated);
             }
             catch
             {

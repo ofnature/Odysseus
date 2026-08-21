@@ -45,6 +45,7 @@ public class QuestControllerTests : IDisposable
     private readonly Policy _policy = new();
     private readonly Dictionary<ushort, ushort> _chain = new();
     private readonly Dictionary<ushort, int> _levels = new();
+    private readonly HashSet<ushort> _handOrLand = [];
     private readonly RunLog _runLog = new(null);
 
     public QuestControllerTests()
@@ -53,7 +54,8 @@ public class QuestControllerTests : IDisposable
         _controller = new QuestController(_quests, _store, new StepExecutor(_world), _world, _world, _policy,
             id => _chain.TryGetValue(id, out var n) ? n : null,
             id => _levels.TryGetValue(id, out var l) ? l : 0,
-            _runLog, _log.Add);
+            _runLog, _log.Add,
+            needsHandOrLand: id => _handOrLand.Contains(id));
     }
 
     public void Dispose()
@@ -96,10 +98,137 @@ public class QuestControllerTests : IDisposable
     }
 
     [Fact]
+    public void A_step_that_did_not_take_is_retried_quickly_then_patiently()
+    {
+        // Accepting Brotherhood of Ash landed while the previous turn-in was still closing: the
+        // step reported its dialogue over, the game never moved, and the twenty seconds before
+        // anyone noticed was the pause between one quest and the next.
+        _world.Spawned.Add(1u);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+        _quests.Set(1622, 1);
+        _controller.Start(1622);
+
+        Assert.InRange(SecondsUntilReplay(), 0, 12); // the interaction plainly did not take
+        Assert.InRange(SecondsUntilReplay(), 15, 30); // now give the game its proper time
+    }
+
+    /// <summary>Run until the block is replayed, and say how long the game was given.</summary>
+    private double SecondsUntilReplay()
+    {
+        _log.Clear();
+        var started = _world.UtcNow;
+        for (var i = 0; i < 200 && !_log.Any(m => m.Contains("did not advance")); i++)
+            Ticks(1);
+        Assert.Contains(_log, m => m.Contains("did not advance"));
+        return (_world.UtcNow - started).TotalSeconds;
+    }
+
+    [Fact]
+    public void A_cutscene_still_playing_gets_the_full_wait()
+    {
+        _world.Spawned.Add(1u);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+        _quests.Set(1622, 1);
+        _controller.Start(1622);
+        Ticks(12);
+
+        _world.IsOccupied = true;
+        Ticks(10, seconds: 1);
+        Assert.DoesNotContain(_log, m => m.Contains("did not advance"));
+    }
+
+    [Fact]
+    public void Quest_markers_carry_a_part_done_block_past_the_npcs_that_are_finished()
+    {
+        // Quest 2601: talk to three townspeople, no completion flags to resume from.
+        var block = new QuestSequence
+        {
+            Sequence = 1,
+            Steps = [Interact(1021149), Interact(1021150), Interact(1021148)],
+        };
+        var marks = new Dictionary<uint, QuestController.Marker>
+        {
+            [1021149] = QuestController.Marker.Unmarked, // stood right there, nothing over its head
+            [1021150] = QuestController.Marker.Marked,
+        };
+        Assert.Equal(1, QuestController.SkipStepsAlreadyDealtWith(block, 0, id => marks.GetValueOrDefault(id)));
+
+        // An NPC we cannot see says nothing either way, so the block runs as written.
+        marks[1021149] = QuestController.Marker.Unknown;
+        Assert.Equal(0, QuestController.SkipStepsAlreadyDealtWith(block, 0, id => marks.GetValueOrDefault(id)));
+
+        // Not one icon anywhere is what a client that is not drawing them looks like. Without a
+        // single known-good reading, nothing is skipped on the strength of the missing ones.
+        marks[1021149] = marks[1021150] = marks[1021148] = QuestController.Marker.Unmarked;
+        Assert.Equal(0, QuestController.SkipStepsAlreadyDealtWith(block, 0, id => marks.GetValueOrDefault(id)));
+    }
+
+    [Fact]
     public void Resume_with_no_tags_replays_from_the_top()
     {
         var block = new QuestSequence { Sequence = 1, Steps = [Interact(1), Interact(2)] };
         Assert.Equal(0, QuestController.SelectResumeIndex(block, new QuestSnapshot(1622, 1, new byte[] { 1, 2, 3, 4, 5, 6 })));
+    }
+
+    [Fact]
+    public void A_crafter_only_quest_switches_class_before_it_starts()
+    {
+        // All twelve custom delivery unlocks are "Disciples of the Land or Hand": on a combat class
+        // the NPC will not offer the quest at all.
+        _world.SavedGearsets.AddRange([
+            new GearsetInfo(0, 34, 0, 100, JobKind.Combat),
+            new GearsetInfo(3, 9, 0, 90, JobKind.Crafter),
+        ]);
+        _world.CurrentJobKind = JobKind.Combat;
+        _handOrLand.Add(1622);
+        _levels[1622] = 90;
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+
+        Assert.True(_controller.Start(1622));
+        Assert.Contains(_world.Calls, c => c == "Gearset 3");
+        Assert.Contains(_log, m => m.Contains("Disciple of the Hand or Land"));
+    }
+
+    [Fact]
+    public void Without_a_crafter_gearset_it_says_so_rather_than_walking_to_an_npc_who_will_not_talk()
+    {
+        _world.SavedGearsets.Add(new GearsetInfo(0, 34, 0, 100, JobKind.Combat));
+        _world.CurrentJobKind = JobKind.Combat;
+        _handOrLand.Add(1622);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+
+        Assert.False(_controller.Start(1622));
+        Assert.Contains("no crafter or gatherer gearset", _controller.StatusLine);
+    }
+
+    [Fact]
+    public void A_crafter_below_the_quests_level_is_named_rather_than_the_class_you_were_standing_as()
+    {
+        _world.SavedGearsets.AddRange([
+            new GearsetInfo(0, 34, 0, 100, JobKind.Combat), // a level 100 combat job would pass the usual gate
+            new GearsetInfo(3, 9, 0, 62, JobKind.Crafter),
+        ]);
+        _world.CurrentJobKind = JobKind.Combat;
+        _handOrLand.Add(1622);
+        _levels[1622] = 90;
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+
+        Assert.False(_controller.Start(1622));
+        Assert.Contains("level 90", _controller.StatusLine);
+        Assert.Contains("level 62", _controller.StatusLine);
+    }
+
+    [Fact]
+    public void Already_a_crafter_means_nothing_to_switch()
+    {
+        _world.SavedGearsets.Add(new GearsetInfo(3, 9, 0, 90, JobKind.Crafter));
+        _world.CurrentJobKind = JobKind.Crafter;
+        _handOrLand.Add(1622);
+        _levels[1622] = 90;
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+
+        Assert.True(_controller.Start(1622));
+        Assert.DoesNotContain(_world.Calls, c => c.StartsWith("Gearset "));
     }
 
     // ── controller ──
@@ -448,8 +577,8 @@ public class QuestControllerTests : IDisposable
     [Fact]
     public void Skip_and_retry_clear_a_fault_on_that_step()
     {
-        _world.Spawned.UnionWith([2u]);
-        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(404), Interact(2)] });
+        // The last step of a block: nothing left to go on to, so a missing NPC is a fault.
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(404)] });
         _quests.Set(1622, 1);
         _controller.Start(1622);
         Ticks(100, seconds: 1);
@@ -462,6 +591,21 @@ public class QuestControllerTests : IDisposable
 
         Assert.True(_controller.SkipStep());
         Ticks(12);
+        Assert.NotEqual(RunState.Faulted, _controller.State);
+    }
+
+    [Fact]
+    public void An_npc_that_is_not_there_is_taken_as_done_while_the_block_has_more_to_run()
+    {
+        // Quest 2601 again: picked up part-done, the first townsperson has gone. Faulting there
+        // costs the whole quest, and the ones left are those with something still to say.
+        _world.Spawned.Add(2u);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(404), Interact(2)] });
+        _quests.Set(1622, 1);
+        _controller.Start(1622);
+        Ticks(100, seconds: 1);
+
+        Assert.NotEqual(RunState.Faulted, _controller.State);
         Assert.Contains("Interact 2", _world.Calls);
     }
 

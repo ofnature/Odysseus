@@ -38,6 +38,7 @@ public sealed class ConfigWindow : OdysseusWindow
     private readonly PluginPresence _presence;
     private readonly PathStore _pathStore;
     private readonly string _defaultBundlePath;
+    private readonly string? _packTarget;
     private readonly PriorityList _priority;
     private readonly IPriorityWorld _priorityWorld;
     private readonly QuestCatalog _catalog;
@@ -50,6 +51,7 @@ public sealed class ConfigWindow : OdysseusWindow
     private string _prioritySearch = string.Empty;
 
     public ConfigWindow(OdysseusConfig config, Action save, PluginPresence presence, PathStore pathStore, string defaultBundlePath,
+        string? packTarget,
         PriorityList priority, IPriorityWorld priorityWorld, QuestCatalog catalog, Func<int> pendingSales)
         : base("Odysseus Settings##OdysseusConfig")
     {
@@ -58,6 +60,7 @@ public sealed class ConfigWindow : OdysseusWindow
         _presence = presence;
         _pathStore = pathStore;
         _defaultBundlePath = defaultBundlePath;
+        _packTarget = packTarget;
         _bundlePath = defaultBundlePath;
         _priority = priority;
         _priorityWorld = priorityWorld;
@@ -262,6 +265,18 @@ public sealed class ConfigWindow : OdysseusWindow
         }
         OdysseusTheme.HelpMarker("Which company to join when the ARR story asks. Ignored once the character has joined one.");
 
+        var chocobo = _config.KeepChocoboOut;
+        if (ImGui.Checkbox("Keep the chocobo companion out", ref chocobo))
+        {
+            _config.KeepChocoboOut = chocobo;
+            _save();
+        }
+        OdysseusTheme.HelpMarker(
+            "Feeds it a Gysahl Green whenever the summon has under five minutes left, so it never " +
+            "vanishes mid-fight. Only in the field — never in a city or a duty, where a companion is " +
+            "refused and the green would be wasted — and nothing happens at all until \"My Little " +
+            "Chocobo\" is done on this character.");
+
         var pickRewards = _config.PickQuestRewards;
         if (ImGui.Checkbox("Pick quest rewards automatically", ref pickRewards))
         {
@@ -414,7 +429,28 @@ public sealed class ConfigWindow : OdysseusWindow
             "once, and runs from the converted copy. Nothing is downloaded and nothing leaves this PC.");
         ImGui.Spacing();
 
-        ImGui.TextColored(OdysseusTheme.TextSecondary, $"{_pathStore.Count} quest paths stored in {_pathStore.Directory}");
+        var shipped = _pathStore.FromPack;
+        var mine = _pathStore.FromFolder;
+        ImGui.TextColored(OdysseusTheme.TextSecondary, shipped == 0
+            ? $"{_pathStore.Count} quest paths stored in {_pathStore.Directory}"
+            : mine == 0
+                ? $"{_pathStore.Count} quest paths, all shipped with the build"
+                : $"{_pathStore.Count} quest paths — {shipped} shipped with the build, {mine} of your own on top");
+        if (ImGui.IsItemHovered() && shipped > 0)
+            ImGui.SetTooltip(string.Join('\u000A',
+                "The library travels with the plugin, so every account has it without importing.",
+                $"Anything in {_pathStore.Directory} is laid over the top and wins."));
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Rescan"))
+        {
+            _pathStore.Reload();
+            _importStatus = $"Read the folder again: {_pathStore.Count} quest paths.";
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(string.Join('\u000A',
+                "The folder is read once when the plugin loads. Importing from another client,",
+                "or on another character, leaves this one holding the old count — which reads",
+                "as \"no path\" on quests that have one. This looks again."));
         ImGui.Spacing();
 
         ImGui.SetNextItemWidth(-1f);
@@ -436,6 +472,34 @@ public sealed class ConfigWindow : OdysseusWindow
         }
         OdysseusTheme.HelpMarker(
             "MSQ only is ~1,000 quests and is all v1 runs. Everything is ~4,700; harmless, just more files.");
+
+        // Only where there is a source tree to write into — see PathPack.SourceAssetPath. This is
+        // how the library gets from one dev client to every account: pack it here, commit it, and
+        // the next build carries it.
+        if (_packTarget is not null)
+        {
+            ImGui.Spacing();
+            if (ImGui.Button("Pack for release"))
+            {
+                try
+                {
+                    _pathStore.Pack(_packTarget);
+                    var size = new FileInfo(_packTarget).Length / 1024d / 1024d;
+                    _importStatus = $"Packed {_pathStore.Count} paths into {_packTarget} ({size:F2} MB). " +
+                                    "Commit it and every build ships with them.";
+                }
+                catch (Exception ex)
+                {
+                    _importStatus = $"Pack failed: {ex.Message}";
+                }
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(string.Join('\u000A',
+                    "Writes everything loaded here into the build's asset folder as one file.",
+                    "Shown only in a build running from its own source tree — an installed",
+                    "copy has nowhere to put it.",
+                    _packTarget));
+        }
 
         if (_importStatus.Length > 0)
         {

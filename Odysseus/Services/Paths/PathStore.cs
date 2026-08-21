@@ -28,19 +28,43 @@ public sealed class PathStore
         Converters = { new JsonStringEnumConverter() },
     };
 
+    /// <summary>The same shape without the indenting — the pack is read by machines only.</summary>
+    internal static readonly JsonSerializerOptions PackJsonOptions = new(JsonOptions) { WriteIndented = false };
+
     private readonly string _directory;
+    private readonly string? _packFile;
     private readonly Action<string>? _log;
     private readonly Dictionary<ushort, QuestPath> _paths = [];
     private bool _loaded;
     private int _outdated;
+    private int _fromPack;
+    private int _fromFolder;
 
-    public PathStore(string directory, Action<string>? log = null)
+    /// <param name="directory">Where this client's own paths live — imported, recorded, edited.</param>
+    /// <param name="packFile">
+    /// The library shipped with the build, read first so a fresh install has every quest without
+    /// importing anything. The folder is laid over it, so anything here can still be replaced.
+    /// </param>
+    public PathStore(string directory, Action<string>? log = null, string? packFile = null)
     {
         _directory = directory;
         _log = log;
+        _packFile = packFile;
     }
 
     public string Directory => _directory;
+
+    /// <summary>How many paths came with the build.</summary>
+    public int FromPack
+    {
+        get { EnsureLoaded(); return _fromPack; }
+    }
+
+    /// <summary>How many came from this client's own folder — some of which replace a shipped one.</summary>
+    public int FromFolder
+    {
+        get { EnsureLoaded(); return _fromFolder; }
+    }
 
     public int Count
     {
@@ -123,10 +147,57 @@ public sealed class PathStore
 
     private string FileFor(ushort questId) => Path.Combine(_directory, $"{questId}.json");
 
+    /// <summary>
+    /// Read the folder again next time it is asked for.
+    ///
+    /// <para>
+    /// The store is read once per plugin load and then held. That is fine for one client, and
+    /// wrong for two: importing on one leaves the other still holding whatever the folder had when
+    /// it first looked — usually nothing — so every quest reads as "no path" on a character that
+    /// has a full folder sitting on disk.
+    /// </para>
+    /// </summary>
+    public void Reload()
+    {
+        _paths.Clear();
+        _outdated = 0;
+        _fromPack = 0;
+        _fromFolder = 0;
+        _loaded = false;
+    }
+
+    /// <summary>Write everything currently loaded out as a shipping pack.</summary>
+    public void Pack(string file)
+    {
+        EnsureLoaded();
+        PathPack.WriteFile(file, _paths.Values.OrderBy(p => p.QuestId));
+    }
+
     private void EnsureLoaded()
     {
         if (_loaded) return;
         _loaded = true;
+
+        // The shipped library first: the folder is an overlay on it, so a path this client imported
+        // or recorded for a quest wins over the one that came with the build.
+        if (_packFile is not null && File.Exists(_packFile))
+        {
+            try
+            {
+                using var stream = File.OpenRead(_packFile);
+                foreach (var path in PathPack.Read(stream, _log))
+                {
+                    if (path.NeedsReconvert) _outdated++;
+                    _paths[path.QuestId] = path;
+                }
+                _fromPack = _paths.Count;
+            }
+            catch (Exception ex)
+            {
+                _log?.Invoke($"Shipped path library unreadable ({ex.GetType().Name}: {ex.Message}) — falling back to imported paths.");
+            }
+        }
+
         if (!System.IO.Directory.Exists(_directory)) return;
 
         var failed = 0;
@@ -138,6 +209,7 @@ public sealed class PathStore
                 if (path is null || path.QuestId == 0) { failed++; continue; }
                 if (path.NeedsReconvert) _outdated++;
                 _paths[path.QuestId] = path;
+                _fromFolder++;
             }
             catch (Exception ex)
             {

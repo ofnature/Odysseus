@@ -66,6 +66,12 @@ public interface IStepWorld
     /// <summary>The zone's navmesh is built. Movement before this silently does nothing.</summary>
     bool NavmeshReady { get; }
 
+    /// <summary>
+    /// How far through building this zone's mesh the pathfinder is, or negative when it is not
+    /// building. A mesh on its way is worth waiting for; one that is not coming is a fault.
+    /// </summary>
+    float NavmeshBuildProgress { get; }
+
     /// <summary>A path is being computed or followed.</summary>
     bool IsMoving { get; }
 
@@ -92,8 +98,24 @@ public interface IStepWorld
     /// <summary>Summon a mount (mount roulette). Async — poll <see cref="IsMounted"/>.</summary>
     void Mount();
 
+    /// <summary>
+    /// Put the mount away. Async, like <see cref="Mount"/>. Needed because a flight that ends over
+    /// an NPC's head cannot talk to it: interacting from the air does nothing at all.
+    /// </summary>
+    void Dismount();
+
     /// <summary>Flying is available in the current zone (aether currents attuned).</summary>
     bool CanFlyHere { get; }
+
+    /// <summary>A zone from the base game, where the path data's flying gets caught on the scenery.</summary>
+    bool InBaseGameZone { get; }
+
+    /// <summary>
+    /// Mounts are allowed in the current zone. The cities forbid them, and asking anyway puts an
+    /// error on screen and leaves the run standing there having waited for a mount that is never
+    /// coming.
+    /// </summary>
+    bool CanMountHere { get; }
 
     // ── Travel ──
 
@@ -119,8 +141,15 @@ public interface IStepWorld
     /// <summary>Start a teleport. False when refused outright (no Lifestream, unknown/locked aetheryte).</summary>
     bool Teleport(uint aetheryteId);
 
-    /// <summary>Start an aethernet hop to a shard by its display name. False when refused.</summary>
-    bool AethernetTeleport(string destination);
+    /// <summary>
+    /// Start an aethernet hop. False when refused outright.
+    /// </summary>
+    /// <param name="byNameOnly">
+    /// Skip the id-addressed route and ask by display name. The two take different paths inside
+    /// Lifestream, and a hop refused one way has been seen to work the other, so a retry uses this
+    /// rather than repeating an attempt that already failed.
+    /// </param>
+    bool AethernetTeleport(string destination, bool byNameOnly = false);
 
     /// <summary>
     /// The zone an aethernet destination sits in, or null when the sheet does not know the name.
@@ -133,6 +162,13 @@ public interface IStepWorld
     /// Null when the zone has none, or none whose position the sheet records.
     /// </summary>
     Vector3? NearestAethernetAccess(uint territoryId, Vector3 near);
+
+    /// <summary>
+    /// Standing at an aetheryte or aethernet shard, as the game reckons it rather than as a
+    /// distance. False also when Lifestream cannot say, so it is only ever used to <i>allow</i> a
+    /// hop, never to refuse one.
+    /// </summary>
+    bool AtAethernetShard { get; }
 
     /// <summary>A teleport or aethernet hop is in progress (Lifestream busy, or the player is between areas).</summary>
     bool IsTravelBusy { get; }
@@ -157,6 +193,9 @@ public interface IStepWorld
 
     /// <summary>The ClassJob row the character is on right now; 0 when unreadable.</summary>
     uint CurrentClassJob { get; }
+
+    /// <summary>What sort of class is being played right now — combat, crafter, gatherer.</summary>
+    JobKind CurrentJobKind { get; }
 
     /// <summary>ClassJob row id for a class name as the path data spells it, or null when unknown.</summary>
     uint? ResolveClassJob(string name);
@@ -208,6 +247,18 @@ public interface IStepWorld
 
     /// <summary>The object with this data id is present in the object table (spawned).</summary>
     bool IsDataIdSpawned(uint dataId);
+
+    /// <summary>
+    /// Turn to face an object. The walk that gets us there ends pointed wherever the last leg of
+    /// the path happened to be going, which is often past the target rather than at it.
+    /// </summary>
+    void FaceDataId(uint dataId);
+
+    /// <summary>
+    /// Whether the object is wearing a quest marker — the icon over its head that says it has
+    /// something for you. Reads false for one that is not loaded, so absence proves nothing.
+    /// </summary>
+    bool HasQuestMarker(uint dataId);
 
     /// <summary>Distance from the player to the nearest object with this data id, or null when absent.</summary>
     float? DistanceToDataId(uint dataId);

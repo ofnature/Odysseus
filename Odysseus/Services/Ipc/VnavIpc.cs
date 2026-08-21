@@ -16,6 +16,7 @@ public sealed class VnavIpc
     private readonly Action<string>? _log;
 
     private ICallGateSubscriber<bool>? _isReady;
+    private ICallGateSubscriber<float>? _buildProgress;
     private ICallGateSubscriber<bool>? _pathIsRunning;
     private ICallGateSubscriber<bool>? _pathfindInProgress;
     private ICallGateSubscriber<Vector3, bool, bool>? _moveTo;
@@ -37,6 +38,27 @@ public sealed class VnavIpc
     /// <summary>The navmesh for this zone is built and usable.</summary>
     public bool IsReady => Try(() =>
         (_isReady ??= _pluginInterface.GetIpcSubscriber<bool>("vnavmesh.Nav.IsReady")).InvokeFunc());
+
+    /// <summary>
+    /// How far through building the zone's mesh it is, 0..1 — or a negative number when it is not
+    /// building at all. That distinction is the point: "not ready" covers both a mesh a minute away
+    /// from being usable and one that is never coming, and only the second is a fault.
+    /// </summary>
+    public float BuildProgress
+    {
+        get
+        {
+            try
+            {
+                return (_buildProgress ??= _pluginInterface.GetIpcSubscriber<float>("vnavmesh.Nav.BuildProgress"))
+                    .InvokeFunc();
+            }
+            catch
+            {
+                return -1f;
+            }
+        }
+    }
 
     /// <summary>
     /// A path is being followed right now.

@@ -18,6 +18,22 @@ public sealed record QuestListing(ushort QuestId, string Name, ushort ClassJobLe
         : this(questId, name, classJobLevel, expansionId, isMainScenario, previous, previousJoin, [], 0) { }
 
     /// <summary>
+    /// <c>ClassJobCategory0</c> — which classes may take the quest at all. Kept as the id rather
+    /// than the name because the wide categories are the interesting ones here and
+    /// <see cref="JobName"/> deliberately throws those away.
+    /// </summary>
+    public uint ClassCategoryId { get; init; }
+
+    /// <summary>
+    /// The quest can only be taken as a Disciple of the Hand or Land. Category 35, which is what
+    /// every custom delivery client's unlock quest carries (checked 2026-08-20 across all twelve).
+    /// </summary>
+    public bool NeedsHandOrLand => ClassCategoryId == DisciplesOfLandOrHand;
+
+    /// <summary><c>ClassJobCategory</c> row for "Disciples of the Land or Hand".</summary>
+    public const uint DisciplesOfLandOrHand = 35;
+
+    /// <summary>
     /// The journal grouping this quest sits under — "Chronicles of a New Era", "Sidequests" and so
     /// on. Kept because it is the only thing that identifies a raid or trial unlock chain as such;
     /// the engine runs any quest, but nothing could <i>find</i> them without this.
@@ -145,6 +161,7 @@ public sealed class QuestCatalog
                     Section = sectionName,
                     Category = categoryName,
                     JobName = JobOf(row, jobNames),
+                    ClassCategoryId = row.ClassJobCategory0.RowId,
                 });
             }
             Load(rows);

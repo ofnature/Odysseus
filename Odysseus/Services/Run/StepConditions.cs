@@ -9,11 +9,35 @@ public interface IConditionWorld
 {
     uint TerritoryId { get; }
     bool CanFlyHere { get; }
+
+    /// <summary>A zone from the base game — where the path data's flying is not to be trusted.</summary>
+    bool InBaseGameZone { get; }
     bool IsQuestComplete(ushort questId);
     bool IsQuestAccepted(ushort questId);
 
     /// <summary>How many of an item are held, both qualities — HQ counts, the game accepts it.</summary>
     int ItemCount(uint itemId);
+}
+
+/// <summary>
+/// The same world with flight declared off.
+///
+/// <para>
+/// An allied society path in a base-game zone is run on the ground, and the path data is written in
+/// terms the game uses: waypoints authored for a flight carry
+/// <c>SkipConditions.StepIf.Flying = Locked</c>. Answering "locked" here is what drops them, so the
+/// ground route the author wrote underneath is the one that runs — telling the executor not to fly
+/// while still claiming flight is unlocked would leave it walking to waypoints in mid-air.
+/// </para>
+/// </summary>
+public sealed class GroundedWorld(IConditionWorld inner) : IConditionWorld
+{
+    public uint TerritoryId => inner.TerritoryId;
+    public bool CanFlyHere => false;
+    public bool InBaseGameZone => inner.InBaseGameZone;
+    public bool IsQuestComplete(ushort questId) => inner.IsQuestComplete(questId);
+    public bool IsQuestAccepted(ushort questId) => inner.IsQuestAccepted(questId);
+    public int ItemCount(uint itemId) => inner.ItemCount(itemId);
 }
 
 /// <summary>Evaluates <see cref="StepCondition"/> against live state. Pure; the only inputs are the interface and the snapshot.</summary>

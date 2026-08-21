@@ -16,6 +16,17 @@
     <OutputPath>$(MSBuildProjectDirectory)\bin\$(Configuration)\</OutputPath>
   </PropertyGroup>
 
+  <!--
+    The shipped quest-path library. Packed from a dev client (Settings > Pack for release) and
+    committed, so a release build carries every path and nobody has to import anything. Optional at
+    build time: without it the plugin still runs, it just starts empty until someone imports.
+  -->
+  <ItemGroup>
+    <Content Include="Assets\paths.pak" Condition="Exists('Assets\paths.pak')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <!-- Allow the test assembly to access internal types -->
   <ItemGroup>
     <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">

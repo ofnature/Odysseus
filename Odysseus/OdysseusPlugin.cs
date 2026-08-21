@@ -65,6 +65,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private System.DateTime _lastPrune;
     private readonly RunLog _runLog;
     private readonly FleetPublisher _fleet;
+    private readonly Services.Run.ChocoboKeeper _chocobo;
     private readonly OdysseusIpc _ipc;
     private readonly ConfigWindow _configWindow;
     private readonly MainWindow _mainWindow;
@@ -92,9 +93,13 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _quests = new QuestStateReader(fault => Log.Warning($"Quest state read failed. {fault}"));
         _catalog = new QuestCatalog(DataManager, message => Log.Warning(message));
 
+        // The library ships beside the DLL, so four accounts in four folders get the same 4,240
+        // quests from the build rather than four imports kept in step by hand. Anything this client
+        // imported or recorded still wins: the config folder is laid over the pack, not under it.
         _pathStore = new PathStore(
             System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "paths"),
-            message => Log.Information(message));
+            message => Log.Information(message),
+            Services.Paths.PathPack.ShippedPath(PluginInterface.AssemblyLocation.DirectoryName));
 
         var aetherytes = new Services.Travel.AetheryteCatalog(DataManager, message => Log.Warning(message));
         var duties = new DutyCatalog(DataManager, message => Log.Warning(message));
@@ -130,7 +135,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             id => _catalog.ById(id)?.ClassJobLevel ?? 0,
             _runLog, message => Log.Information(message),
             // Lets a purchase step see whether the craft it feeds is already made.
-            itemId => making.Ingredients(itemId, 1).Select(i => i.ItemId).ToList());
+            itemId => making.Ingredients(itemId, 1).Select(i => i.ItemId).ToList(),
+            // Custom delivery unlocks can only be taken as a crafter or gatherer.
+            id => _catalog.ById(id)?.NeedsHandOrLand ?? false);
 
         // Priority list: saved in config only while the persist toggle is on.
         _priority = new PriorityList(_catalog, _config.PriorityQuests, _config.PersistPriorityList, ids =>
@@ -175,6 +182,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // Published once the controller exists, so the gate never reports on a half-built run.
         _ipc = new OdysseusIpc(PluginInterface, () => _config.Enabled && _controller.State.IsDriving());
 
+        _chocobo = new Services.Run.ChocoboKeeper(_world, () => _config.KeepChocoboOut, ChocoboUnlocked);
+
         _fleet = new FleetPublisher(
             new RelayIpc(PluginInterface, message => Log.Warning(message)),
             BuildFleetStatus,
@@ -182,6 +191,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         _configWindow = new ConfigWindow(_config, SaveConfig, _presence, _pathStore,
             QuestionableImporter.DefaultBundlePath(PluginInterface.ConfigDirectory.Parent?.FullName ?? string.Empty),
+            Services.Paths.PathPack.SourceAssetPath(PluginInterface.AssemblyLocation.DirectoryName),
             _priority, _priorityWorld, _catalog,
             () => _rewardLedger.Pending.Sum(p => p.Quantity));
         _pathEditorWindow = new PathEditorWindow(
@@ -341,10 +351,22 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _ipc.Dispose();
     }
 
+    /// <summary>
+    /// "My Little Chocobo" is three quests, one per Grand Company. Nothing to summon before one of
+    /// them is done, and which one depends on who you signed with.
+    /// </summary>
+    private bool ChocoboUnlocked()
+    {
+        var quest = Services.Run.ChocoboKeeper.UnlockQuestFor(_quests.Character().GrandCompany);
+        return quest != 0 && _quests.IsComplete(quest);
+    }
+
     private void OnFrameworkUpdate(IFramework framework)
     {
         // The dashboard is useful even with the runner off: it says who is where.
         _fleet.Tick();
+
+        _chocobo.Tick();
 
         // Auto-remove completed priority entries — quests finished by hand count too, so poll.
         var now = System.DateTime.UtcNow;

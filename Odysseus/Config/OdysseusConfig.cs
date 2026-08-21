@@ -112,6 +112,13 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>Scrips left untouched when spending, so it makes room rather than stripping the balance.</summary>
     public int SpendReserve { get; set; } = 500;
 
+    /// <summary>
+    /// Keep the chocobo companion summoned while running, feeding it a Gysahl Green whenever the
+    /// timer runs low. Does nothing until "My Little Chocobo" is done, and never spends a green in
+    /// a city or a duty, where the companion is not allowed anyway.
+    /// </summary>
+    public bool KeepChocoboOut { get; set; }
+
     /// <summary>Keep the priority list across sessions. Off = it lasts until the client closes.</summary>
     public bool PersistPriorityList { get; set; } = true;
 

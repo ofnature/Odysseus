@@ -140,7 +140,18 @@ public sealed class DeliveriesWindow : OdysseusWindow
         if (_artisan.Available)
             OdysseusTheme.StateChip("Artisan ready");
         else
-            OdysseusTheme.Chip("Artisan missing", OdysseusTheme.YellowDark, OdysseusTheme.TextPrimary);
+        {
+            var why = _artisan.Unavailable;
+            var loaded = why.StartsWith("Artisan is loaded", StringComparison.Ordinal);
+            OdysseusTheme.Chip(loaded ? "Artisan not answering" : "Artisan missing",
+                OdysseusTheme.YellowDark, OdysseusTheme.TextPrimary);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(why.Length == 0
+                    ? "Artisan is not available."
+                    : why + '\u000A' + (loaded
+                        ? "Nothing to install — the handoff itself is at fault."
+                        : "Install or enable Artisan, then reopen this window."));
+        }
 
         ImGui.SameLine(0f, 6f);
         if (_gatherer.Available)

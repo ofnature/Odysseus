@@ -38,7 +38,23 @@ public interface IRunPolicy
 
 public sealed class QuestController
 {
+    /// <summary>
+    /// How long the game gets to move a sequence on once every step in it has run, before the
+    /// block is replayed.
+    ///
+    /// <para>
+    /// Two of them, because the two cases look nothing alike. A cutscene or a conversation is
+    /// still playing out and the quest state trails behind it — that wants patience. Standing idle
+    /// in a field means the interaction did not take: an "accept quest" that landed while the
+    /// previous turn-in was still closing gets swallowed, the step reports its dialogue over, and
+    /// nothing has happened. Waiting twenty seconds to find that out is the pause between one
+    /// quest and the next (measured 2026-08-20: 21.2s between accepting Brotherhood of Ash and
+    /// actually accepting it). The first retry is therefore quick, and only if that one does not
+    /// take does it fall back to waiting properly.
+    /// </para>
+    /// </summary>
     private static readonly TimeSpan AdvanceGrace = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan AdvanceGraceIdle = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan NoBlockMax = TimeSpan.FromMinutes(5);
     private const int MaxReplays = 3;
 
@@ -50,6 +66,7 @@ public sealed class QuestController
     private readonly IRunPolicy _policy;
     private readonly Func<ushort, ushort?> _nextQuest;
     private readonly Func<ushort, int> _questLevel;
+    private readonly Func<ushort, bool> _needsHandOrLand;
     /// <summary>What a craft consumes — lets a purchase see whether anything downstream still needs it.</summary>
     private readonly PurchasePlan.IngredientsOf _ingredientsOf;
     private readonly IStepLog _stepLog;
@@ -91,8 +108,9 @@ public sealed class QuestController
         IQuestStateReader quests, PathStore paths, StepExecutor executor,
         IStepWorld world, IConditionWorld conditions, IRunPolicy policy,
         Func<ushort, ushort?> nextQuest, Func<ushort, int> questLevel, IStepLog stepLog, Action<string> log,
-        PurchasePlan.IngredientsOf? ingredientsOf = null)
+        PurchasePlan.IngredientsOf? ingredientsOf = null, Func<ushort, bool>? needsHandOrLand = null)
     {
+        _needsHandOrLand = needsHandOrLand ?? (_ => false);
         _ingredientsOf = ingredientsOf ?? (_ => []);
         _quests = quests;
         _paths = paths;
@@ -232,11 +250,42 @@ public sealed class QuestController
 
     private bool Begin(ushort questId, QuestPath path)
     {
+        // The class gate. A custom delivery client's unlock quest can only be taken as a Disciple
+        // of the Hand or Land — all twelve of them — and on a combat class the NPC simply will not
+        // offer it. Switching is the whole fix, and the level that matters is the crafter's, not
+        // whatever the character happens to be standing there as.
+        var handOrLand = _needsHandOrLand(questId) && !_quests.IsAccepted(questId);
+        if (handOrLand && _world.CurrentJobKind is not (JobKind.Crafter or JobKind.Gatherer))
+        {
+            var set = BestHandOrLand();
+            var needed = _questLevel(questId);
+            if (set is null)
+            {
+                Stop();
+                StatusLine = $"{path.Name} can only be taken as a Disciple of the Hand or Land, and there is no " +
+                             "crafter or gatherer gearset to switch to. Save one, then Start.";
+                _log(StatusLine);
+                return false;
+            }
+            if (needed > 0 && set.Level < needed)
+            {
+                Stop();
+                StatusLine = $"{path.Name} needs a Disciple of the Hand or Land at level {needed}; your highest " +
+                             $"gearset for one is level {set.Level}. Level up, then Start.";
+                _log(StatusLine);
+                return false;
+            }
+            _log($"{path.Name} can only be taken as a Disciple of the Hand or Land — switching to gearset {set.Id}.");
+            _world.EquipGearset(set.Id);
+        }
+
         // The level gate: a quest the character cannot accept yet is a stop with a reason, not a
         // walk to an NPC who will not talk. (QuestFlow does the same.)
+        // Not for a Hand-or-Land quest: the level that counts there is the crafter's, checked
+        // above against the gearset, and PlayerLevel still reads whatever we were standing there as.
         var required = _questLevel(questId);
         var have = _world.PlayerLevel;
-        if (required > 0 && have > 0 && required > have && !_quests.IsAccepted(questId))
+        if (!handOrLand && required > 0 && have > 0 && required > have && !_quests.IsAccepted(questId))
         {
             Stop();
             StatusLine = $"{path.Name} needs level {required}; you are {have}. Level up, then Start.";
@@ -371,8 +420,11 @@ public sealed class QuestController
             // Every step ran. The sequence should move; give it a moment, then replay the block.
             State = RunState.Advance;
             _waitingSince ??= _world.UtcNow;
-            StatusLine = $"Sequence {sequence}: all {_block.Steps.Count} steps done, waiting for the game";
-            if (_world.UtcNow - _waitingSince > AdvanceGrace)
+            var grace = _replays == 0 && !_world.IsOccupied ? AdvanceGraceIdle : AdvanceGrace;
+            var left = grace - (_world.UtcNow - _waitingSince.Value);
+            StatusLine = $"Sequence {sequence}: all {_block.Steps.Count} steps done, waiting for the game" +
+                         (left > TimeSpan.Zero ? $" ({left.TotalSeconds:F0}s until retry)" : "");
+            if (_world.UtcNow - _waitingSince > grace)
             {
                 if (_replays >= MaxReplays)
                 {
@@ -393,7 +445,7 @@ public sealed class QuestController
         if (_activeStepIndex != _stepIndex || _executor.Status == StepStatus.Idle)
         {
             _activeStepIndex = _stepIndex;
-            if (StepConditions.ShouldSkipStep(step, _conditions, snap))
+            if (StepConditions.ShouldSkipStep(step, Conditions, snap))
             {
                 _log($"Skip step {_stepIndex} ({step}) — condition holds.");
                 _stepStarted = _world.UtcNow;
@@ -435,11 +487,11 @@ public sealed class QuestController
                 Fault("dungeon or trial ahead and the Theseus handoff is off — run it yourself, then Retry");
                 return;
             }
-            var skipTeleport = StepConditions.ShouldSkipAetheryte(step, _conditions, snap);
+            var skipTeleport = StepConditions.ShouldSkipAetheryte(step, Conditions, snap);
             _stepStarted = _world.UtcNow;
             if (step.Kind == StepKind.CompleteQuest)
                 QuestCompleting?.Invoke(_questId);
-            _executor.Begin(step, skipTeleport, _questId);
+            _executor.Begin(step, skipTeleport, _questId, GroundOnly);
             _log($"Step {_stepIndex + 1}/{_block.Steps.Count} in seq {sequence}: {step}" +
                  (step.AetheryteShortcut is { } a ? $" via {a}{(skipTeleport ? " (skipped)" : "")}" : ""));
         }
@@ -469,6 +521,17 @@ public sealed class QuestController
                 break;
             case StepStatus.Failed:
                 LogStep(step, "Failed", _executor.FailReason);
+                // An NPC that is not there, with more of this sequence still to run, reads as one
+                // already dealt with — a "talk to each of these three" block resumed part-done
+                // leaves nothing standing where its first name says. Move on rather than fault: if
+                // the others are missing too, the block runs out and the replay above says so.
+                if (_executor.TargetMissing && _stepIndex + 1 < _block.Steps.Count)
+                {
+                    _log($"Step {_stepIndex + 1} ({step}) — {_executor.FailReason}; taking it as already done and going on.");
+                    _stepIndex++;
+                    _waitingSince = null;
+                    break;
+                }
                 Fault($"step {_stepIndex + 1} ({step}) failed: {_executor.FailReason}");
                 break;
         }
@@ -500,6 +563,16 @@ public sealed class QuestController
     }
 
     /// <summary>After a quest completes: stop, or begin the next one the story allows.</summary>
+    /// <summary>The highest crafter or gatherer gearset the character has, or null if there is none.</summary>
+    private GearsetInfo? BestHandOrLand()
+    {
+        GearsetInfo? best = null;
+        foreach (var set in _world.Gearsets())
+            if (set.Kind is JobKind.Crafter or JobKind.Gatherer && (best is null || set.Level > best.Level))
+                best = set;
+        return best;
+    }
+
     private void RollOn(ushort completed)
     {
         var elapsed = _world.UtcNow - _runStarted;
@@ -555,6 +628,19 @@ public sealed class QuestController
         Begin(next.Value, path); // a level gate inside leaves us stopped with its own reason
     }
 
+    /// <summary>
+    /// Run this path on the ground: an allied society circuit in a base-game zone. The daily
+    /// rounds are written to fly, and A Realm Reborn's zones were built before flight existed —
+    /// a flight through them gets caught on scenery the later ones do not have.
+    /// </summary>
+    private bool GroundOnly => _path?.IsAlliedSociety == true && _world.InBaseGameZone;
+
+    /// <summary>
+    /// Conditions as the run sees them. On a grounded path this reports flight locked, which is
+    /// how the data's own mid-air waypoints drop out instead of being walked to.
+    /// </summary>
+    private IConditionWorld Conditions => GroundOnly ? new GroundedWorld(_conditions) : _conditions;
+
     private void EnterSequence(int sequence, QuestSnapshot snap)
     {
         _executor.Cancel();
@@ -564,10 +650,75 @@ public sealed class QuestController
         _replays = 0;
         _waitingSince = null;
         _stepIndex = _block is null ? 0 : SelectResumeIndex(_block, snap);
+        if (_block is not null)
+            _stepIndex = SkipStepsAlreadyDealtWith(_block, _stepIndex, MarkerOf);
         WakeNote = _stepIndex > 0 && _block is not null
             ? $"Resumed sequence {sequence} at step {_stepIndex + 1}/{_block.Steps.Count} from the quest's own variables"
             : string.Empty;
         _log($"Sequence {sequence}: {(_block is null ? "no block" : $"{_block.Steps.Count} steps")}, starting at step {_stepIndex}. {snap}");
+    }
+
+    /// <summary>What the game's own quest marker says about an NPC we are about to be sent to.</summary>
+    public enum Marker
+    {
+        /// <summary>Too far, or not loaded — the icon proves nothing either way.</summary>
+        Unknown,
+
+        /// <summary>Wearing a quest icon: it still has something for us.</summary>
+        Marked,
+
+        /// <summary>Stood right there with no icon: whatever this step wanted of it is done.</summary>
+        Unmarked,
+    }
+
+    /// <summary>Only trust a missing icon on an NPC close enough to be drawn properly.</summary>
+    private const float MarkerTrustDistance = 30f;
+
+    private Marker MarkerOf(uint dataId)
+    {
+        if (_world.HasQuestMarker(dataId))
+            return Marker.Marked;
+        var distance = _world.DistanceToDataId(dataId);
+        return distance is { } d && d <= MarkerTrustDistance ? Marker.Unmarked : Marker.Unknown;
+    }
+
+    /// <summary>
+    /// Step past the NPCs at the head of a block that visibly have nothing left to say.
+    ///
+    /// <para>
+    /// A "talk to each of these three" sequence carries no completion flags to resume from, so
+    /// picking it up part-done starts at the first name again — and that NPC has usually despawned
+    /// or gone quiet, which costs the wait and then the whole quest. The icon over their head is
+    /// the game answering the question directly.
+    /// </para>
+    ///
+    /// <para>
+    /// Only an NPC we can see, close enough for the icon to mean something, is skipped: a missing
+    /// icon on someone unloaded or across the zone says nothing, so it stops there and the step runs
+    /// as written. And nothing at all is skipped unless some step in the block reads as
+    /// <i>marked</i> — a bare icon is also what a client that is not drawing them looks like, and
+    /// without one known-good reading the absence of the rest proves nothing. Public and pure so it
+    /// can be pinned by tests.
+    /// </para>
+    /// </summary>
+    public static int SkipStepsAlreadyDealtWith(QuestSequence block, int from, Func<uint, Marker> marker)
+    {
+        var anyMarked = false;
+        for (var j = from; j < block.Steps.Count && !anyMarked; j++)
+            if (block.Steps[j].DataId is { } id && marker(id) == Marker.Marked)
+                anyMarked = true;
+        if (!anyMarked)
+            return from;
+
+        var i = from;
+        while (i < block.Steps.Count - 1)
+        {
+            var step = block.Steps[i];
+            if (step.Kind != StepKind.Interact || step.DataId is not { } id || marker(id) != Marker.Unmarked)
+                break;
+            i++;
+        }
+        return i;
     }
 
     /// <summary>

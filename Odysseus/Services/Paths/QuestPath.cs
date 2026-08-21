@@ -164,6 +164,13 @@ public sealed class QuestStep
     public bool Fly { get; set; }
     public bool? Mount { get; set; }
     public bool DisableNavmesh { get; set; }
+
+    /// <summary>
+    /// Get off the mount before this step, and do not get back on for it. For the places where
+    /// being mounted is the problem — a walk that has to thread somewhere a chocobo will not fit,
+    /// or an interaction the game refuses from the saddle.
+    /// </summary>
+    public bool Dismount { get; set; }
     public string? AetheryteShortcut { get; set; }
     /// <summary>[from, to] aethernet shard names within a city.</summary>
     public string[]? AethernetShortcut { get; set; }
@@ -335,6 +342,19 @@ public sealed class QuestPath
     /// its name) or one of the kinds that has since gained fields.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// An allied society path — the bundle files them under "Allied Societies" per expansion and
+    /// "Allied Society Quests (…)" for the repeatable dailies.
+    ///
+    /// <para>
+    /// Worth knowing because these are run on the ground in base-game zones: the daily circuits
+    /// were written to fly, and the zones they fly over were built before flight existed, so a
+    /// flight path through them snags on scenery that later zones do not have.
+    /// </para>
+    /// </summary>
+    public bool IsAlliedSociety
+        => Category is { } c && c.Contains("Allied Societ", StringComparison.OrdinalIgnoreCase);
+
     public bool NeedsReconvert
     {
         get

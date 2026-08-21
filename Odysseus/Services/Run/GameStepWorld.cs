@@ -22,7 +22,7 @@ namespace Odysseus.Services.Run;
 /// the thing" or "report the fact", and all judgement lives in <see cref="StepExecutor"/> and
 /// <see cref="QuestController"/> where it can be tested.
 /// </summary>
-public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IRecorderWorld
+public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocoboWorld, Paths.IRecorderWorld
 {
     /// <summary>GeneralAction 9 — Mount Roulette (verified against the sheet 2026-08-15).</summary>
     private const uint MountRouletteGeneralAction = 9;
@@ -93,6 +93,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     public bool NavmeshReady => _vnav.IsReady;
 
+    public float NavmeshBuildProgress => _vnav.BuildProgress;
+
     public bool IsMoving => _vnav.IsBusy;
 
     public int PathWaypointCount => _vnav.WaypointCount;
@@ -121,6 +123,47 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         }
     }
 
+    /// <summary>GeneralAction 23, "Dismount" (read off the sheet 2026-08-20).</summary>
+    private const uint DismountGeneralAction = 23;
+
+    public void Dismount()
+    {
+        try
+        {
+            var manager = ActionManager.Instance();
+            if (manager != null)
+                manager->UseAction(ActionType.GeneralAction, DismountGeneralAction);
+        }
+        catch (Exception ex)
+        {
+            _log($"Dismount failed: {ex.Message}");
+        }
+    }
+
+    // ── Chocobo companion ──
+
+    public float CompanionTimeLeft
+    {
+        get
+        {
+            try
+            {
+                var ui = UIState.Instance();
+                return ui == null ? 0f : ui->Buddy.CompanionInfo.TimeLeft;
+            }
+            catch
+            {
+                return 0f;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The field, not a city and not a duty. <see cref="CanMountHere"/> carries the first half:
+    /// <c>TerritoryType.Mount</c> is false for exactly the zones a companion is refused in.
+    /// </summary>
+    public bool CanSummonHere => CanMountHere && !InDuty;
+
     public bool CanFlyHere
     {
         get
@@ -135,6 +178,41 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
                     return false; // zone has no currents — no flying (ARR zones fly freely only after the MSQ unlock, handled by the game refusing the mount)
                 var state = PlayerState.Instance();
                 return state != null && state->IsAetherCurrentZoneComplete(set);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A zone from the base game. <c>TerritoryType.ExVersion</c> is 0 for every one of them
+    /// (checked 2026-08-20 across Thanalan, Coerthas, the Fringes, Lakeland and Urqopacha).
+    /// </summary>
+    public bool InBaseGameZone
+    {
+        get
+        {
+            try
+            {
+                return _data.GetExcelSheet<TerritoryType>().GetRowOrDefault(_clientState.TerritoryType)?.ExVersion.RowId == 0;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>Straight off <c>TerritoryType.Mount</c> — false for every city zone.</summary>
+    public bool CanMountHere
+    {
+        get
+        {
+            try
+            {
+                return _data.GetExcelSheet<TerritoryType>().GetRowOrDefault(_clientState.TerritoryType)?.Mount ?? false;
             }
             catch
             {
@@ -266,18 +344,19 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         }
     }
 
-    public bool AethernetTeleport(string destination)
+    public bool AethernetTeleport(string destination, bool byNameOnly = false)
     {
         // By id when the sheet knows the destination — both sides then read the same row and there
         // is no spelling to disagree about. The name gate stays as the fallback.
-        if (_aetherytes.StopNamed(destination) is { } stop && stop.PlaceNameId != 0)
+        if (!byNameOnly && _aetherytes.StopNamed(destination) is { } stop && stop.PlaceNameId != 0)
         {
+            _log($"Aethernet to {stop.Name} by id {stop.PlaceNameId}.");
             if (_lifestream.AethernetTeleportByPlaceName(stop.PlaceNameId))
                 return true;
             _log($"Aethernet to {stop.Name} by id was refused; trying by name.");
         }
         var place = StripCity(destination);
-        _log($"Aethernet destination \"{destination}\" is not in the Aetheryte sheet; asking Lifestream by name.");
+        _log($"Aethernet to \"{place}\" by name.");
         return _lifestream.AethernetTeleport(place);
     }
 
@@ -289,6 +368,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
             ? destination[(close + 1)..].Trim()
             : destination.Trim();
     }
+
+    public bool AtAethernetShard => _lifestream.ActiveAetheryte != 0;
 
     public bool IsTravelBusy
         => _lifestream.IsBusy
@@ -379,6 +460,22 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
         };
 
     public uint CurrentClassJob => _objectTable.LocalPlayer?.ClassJob.RowId ?? 0;
+
+    public JobKind CurrentJobKind
+    {
+        get
+        {
+            try
+            {
+                var job = _objectTable.LocalPlayer?.ClassJob.ValueNullable;
+                return job is { } j ? KindOf(j) : JobKind.Other;
+            }
+            catch
+            {
+                return JobKind.Other;
+            }
+        }
+    }
 
     private Dictionary<string, uint>? _classJobsByName;
 
@@ -706,6 +803,23 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     public bool IsDataIdSpawned(uint dataId) => NearestWithDataId(dataId) is not null;
 
+    /// <summary>
+    /// The nameplate icon ids the game uses for quest markers. 71343 is one, read off an NPC
+    /// mid-quest (2026-08-19); the ids around it are the rest of the family — available, in
+    /// progress, ready to turn in, and the same again for the main scenario. The whole 71xxx block
+    /// is taken as "quest", which is why nothing is ever <i>skipped</i> on the strength of it.
+    /// </summary>
+    private const uint QuestMarkerFirst = 71000, QuestMarkerLast = 71999;
+
+    public bool HasQuestMarker(uint dataId)
+    {
+        var obj = NearestWithDataId(dataId);
+        if (obj is null)
+            return false;
+        var icon = ((FFXIVClientStructs.FFXIV.Client.Game.Character.Character*)obj.Address)->NamePlateIconId;
+        return icon >= QuestMarkerFirst && icon <= QuestMarkerLast;
+    }
+
     public float? DistanceToDataId(uint dataId)
     {
         var obj = NearestWithDataId(dataId);
@@ -713,6 +827,36 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
     }
 
     public Vector3? PositionOfDataId(uint dataId) => NearestWithDataId(dataId)?.Position;
+
+    /// <summary>
+    /// Point the player at an object.
+    ///
+    /// <para>
+    /// The game's own yaw convention: zero faces south (+Z) and it turns anticlockwise, which is
+    /// <c>atan2(dx, dz)</c> rather than the usual <c>atan2(dz, dx)</c>.
+    /// </para>
+    /// </summary>
+    public void FaceDataId(uint dataId)
+    {
+        try
+        {
+            var target = NearestWithDataId(dataId);
+            var player = _objectTable.LocalPlayer;
+            if (target is null || player is null)
+                return;
+
+            var delta = target.Position - player.Position;
+            if (delta.LengthSquared() < 0.01f)
+                return;
+
+            ((FFXIVClientStructs.FFXIV.Client.Game.Object.GameObject*)player.Address)
+                ->SetRotation(MathF.Atan2(delta.X, delta.Z));
+        }
+        catch (Exception ex)
+        {
+            _log($"Facing {dataId} failed: {ex.Message}");
+        }
+    }
 
     public bool TryInteractWithDataId(uint dataId)
     {
@@ -817,10 +961,39 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     public void SendChatCommand(string command) => _chat.Send(command);
 
+    /// <summary>
+    /// Use an item, on the current target where the item wants one.
+    ///
+    /// <para>
+    /// Two different mechanisms behind one verb. An ordinary item is used out of the bags through
+    /// the inventory agent. An <b>event item</b> — the quest key items, ids from 2,000,000 up, like
+    /// the 2001288 that treats the survivors in "They Came from the Deep" — is not in the bags at
+    /// all: it is an action, and putting it through the inventory agent silently does nothing,
+    /// which is exactly how four steps of that quest ran in ten seconds and changed nothing.
+    /// </para>
+    /// </summary>
     public bool UseItem(uint itemId)
     {
         try
         {
+            if (itemId >= EventItemBase)
+            {
+                var actions = ActionManager.Instance();
+                if (actions == null)
+                    return false;
+
+                // The target explicitly rather than "whatever is targeted": the placeholder is
+                // resolved by the game at a moment we do not control, and a targeted quest item
+                // refused for having no target is indistinguishable from one refused for range.
+                var target = _targets.Target?.GameObjectId ?? CurrentTarget;
+                if (actions->UseAction(ActionType.EventItem, itemId, target))
+                    return true;
+
+                var status = actions->GetActionStatus(ActionType.EventItem, itemId, target, false, false);
+                _log($"Event item {itemId} refused (status {status}{(status == OutOfRange ? " — out of range" : "")}).");
+                return false;
+            }
+
             var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentInventoryContext.Instance();
             if (agent == null)
                 return false;
@@ -833,6 +1006,15 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
             return false;
         }
     }
+
+    /// <summary>Event item ids start here; below it is an ordinary inventory item.</summary>
+    private const uint EventItemBase = 2_000_000;
+
+    /// <summary>The game's "whatever is targeted" placeholder, used only when nothing is targeted.</summary>
+    private const ulong CurrentTarget = 0xE000_0000;
+
+    /// <summary>The action-status code for "target is too far away".</summary>
+    private const uint OutOfRange = 566;
 
     private Dictionary<string, uint>? _actionsByName;
 
@@ -957,23 +1139,69 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, Paths.IR
 
     public void SelectYesNo(bool yes) => FireAddonCallback("SelectYesno", yes ? 0 : 1);
 
-    public void SelectStringIndex(int index) => FireAddonCallback("SelectString", index);
+    public void SelectStringIndex(int index)
+    {
+        if (IsAddonVisible("SelectString"))
+        {
+            FireAddonCallback("SelectString", index);
+            return;
+        }
+        FireAddonCallback(CutsceneChoice, index);
+    }
 
+    /// <summary>
+    /// The options of whichever list dialogue is up.
+    ///
+    /// <para>
+    /// Two windows ask the same question. <c>SelectString</c> is the plain menu; a choice put to you
+    /// mid-conversation is <c>CutSceneSelectString</c>, which holds its options as AtkValues rather
+    /// than in a PopupMenu — reading only the first left every in-conversation choice unanswered
+    /// even though the path data named it.
+    /// </para>
+    /// </summary>
     public IReadOnlyList<string> SelectStringEntries()
     {
         try
         {
-            var addon = _gameGui.GetAddonByName("SelectString");
-            if (addon.IsNull || !addon.IsVisible)
-                return Array.Empty<string>();
-            var select = (FFXIVClientStructs.FFXIV.Client.UI.AddonSelectString*)addon.Address;
-            return ReadPopupMenu(&select->PopupMenu.PopupMenu);
+            var plain = _gameGui.GetAddonByName("SelectString");
+            if (!plain.IsNull && plain.IsVisible)
+            {
+                var select = (FFXIVClientStructs.FFXIV.Client.UI.AddonSelectString*)plain.Address;
+                return ReadPopupMenu(&select->PopupMenu.PopupMenu);
+            }
+
+            var cutscene = _gameGui.GetAddonByName(CutsceneChoice);
+            if (!cutscene.IsNull && cutscene.IsVisible)
+                return ReadCutsceneOptions((AtkUnitBase*)cutscene.Address);
+
+            return Array.Empty<string>();
         }
         catch (Exception ex)
         {
-            _log($"SelectString read failed: {ex.Message}");
+            _log($"List dialogue read failed: {ex.Message}");
             return Array.Empty<string>();
         }
+    }
+
+    /// <summary>The in-conversation choice window.</summary>
+    public const string CutsceneChoice = "CutSceneSelectString";
+
+    /// <summary>
+    /// Its options are the string AtkValues, in order. The prompt lives in the window's own text
+    /// node rather than among them, so every string here is an option — and the index of one is the
+    /// index the callback takes.
+    /// </summary>
+    private static IReadOnlyList<string> ReadCutsceneOptions(AtkUnitBase* addon)
+    {
+        var options = new List<string>();
+        for (var i = 0; i < addon->AtkValuesCount; i++)
+        {
+            var value = addon->AtkValues[i];
+            if (value.Type is not (AtkValueType.String or AtkValueType.ManagedString) || value.String.Value == null)
+                continue;
+            options.Add(Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue);
+        }
+        return options;
     }
 
     public IReadOnlyList<string> SelectIconStringEntries()

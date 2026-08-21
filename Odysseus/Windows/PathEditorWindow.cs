@@ -202,6 +202,18 @@ public sealed class PathEditorWindow : OdysseusWindow
         _status = $"Recording saved: {path.StepCount} steps.";
     }
 
+    /// <summary>
+    /// The step the run is on right now, so the list reads as a live view rather than a document.
+    /// Only when the loaded path is the quest actually running — the editor is often open on
+    /// something else entirely.
+    /// </summary>
+    private bool IsRunning(int sequence, int stepIndex)
+        => _path is not null
+           && _controller.State is not (RunState.Idle or RunState.Faulted)
+           && _controller.QuestId == _path.QuestId
+           && _controller.Sequence == sequence
+           && _controller.StepIndex == stepIndex;
+
     private void DrawStepList()
     {
         if (_path is null)
@@ -219,14 +231,19 @@ public sealed class PathEditorWindow : OdysseusWindow
             {
                 var step = block.Steps[i];
                 var selected = s == _selectedSeq && i == _selectedStep;
-                var color = StepExecutor.IsSupported(step.Kind) ? OdysseusTheme.TextPrimary : OdysseusTheme.StatusYellow;
+                var running = IsRunning(block.Sequence, i);
+                var color = running ? OdysseusTheme.WakeFoam
+                    : StepExecutor.IsSupported(step.Kind) ? OdysseusTheme.TextPrimary
+                    : OdysseusTheme.StatusYellow;
                 ImGui.PushStyleColor(ImGuiCol.Text, color);
-                if (ImGui.Selectable($"  {i + 1}. {step}##s{s}i{i}", selected))
+                if (ImGui.Selectable($"{(running ? "▶" : " ")} {i + 1}. {step}##s{s}i{i}", selected))
                 {
                     _selectedSeq = s;
                     _selectedStep = i;
                 }
                 ImGui.PopStyleColor();
+                if (running && ImGui.IsItemHovered())
+                    ImGui.SetTooltip($"Running now — {_controller.StatusLine}");
             }
             if (block.Steps.Count == 0)
                 ImGui.TextColored(OdysseusTheme.TextDisabled, "  (game advances this one)");
@@ -306,6 +323,14 @@ public sealed class PathEditorWindow : OdysseusWindow
         ImGui.SameLine();
         var noNav = step.DisableNavmesh;
         if (ImGui.Checkbox("No navmesh", ref noNav)) { step.DisableNavmesh = noNav; _dirty = true; }
+        ImGui.SameLine();
+        var dismount = step.Dismount;
+        if (ImGui.Checkbox("Dismount", ref dismount)) { step.Dismount = dismount; _dirty = true; }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(string.Join('\u000A',
+                "Get off the mount before this step and stay off for it.",
+                "For a walk that has to thread somewhere a chocobo will not,",
+                "or something the game refuses from the saddle."));
 
         var aetheryte = step.AetheryteShortcut ?? string.Empty;
         ImGui.SetNextItemWidth(260f);
@@ -338,15 +363,22 @@ public sealed class PathEditorWindow : OdysseusWindow
                 if (!_controller.StepOnce(step)) _status = "Cannot run: a quest is in progress.";
             }
             ImGui.SameLine();
-            if (ImGui.Button("Insert WalkTo here after"))
-                InsertWalkToHere();
-            ImGui.SameLine();
             if (ImGui.Button("Delete step"))
             {
                 _path.Sequences[_selectedSeq].Steps.RemoveAt(_selectedStep);
                 _selectedStep = Math.Min(_selectedStep, _path.Sequences[_selectedSeq].Steps.Count - 1);
                 _dirty = true;
             }
+
+            if (ImGui.Button("Insert WalkTo before"))
+                InsertWalkToHere(before: true);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip(string.Join('\u000A', "A waypoint on the way to this step, at your feet.", "This is the one that unsticks a step that will not path."));
+            ImGui.SameLine();
+            if (ImGui.Button("Insert WalkTo after"))
+                InsertWalkToHere(before: false);
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("A waypoint for once this step is done.");
         }
         if (running)
         {
@@ -356,7 +388,26 @@ public sealed class PathEditorWindow : OdysseusWindow
         }
     }
 
-    private void InsertWalkToHere()
+    /// <summary>
+    /// Where an inserted step lands. "Before" takes the selected step's own place and pushes it
+    /// down; "after" goes one past it. Both are clamped, because nothing is selected when the
+    /// sequence is empty and <c>_selectedStep</c> is -1 then.
+    /// </summary>
+    internal static int InsertIndex(int selectedStep, int stepCount, bool before)
+        => before
+            ? Math.Clamp(selectedStep, 0, stepCount)
+            : Math.Clamp(selectedStep + 1, 0, stepCount);
+
+    /// <summary>
+    /// Put a waypoint at the player's feet, before or after the selected step.
+    ///
+    /// <para>
+    /// Before is the one that gets used: a step that will not path — an NPC in a cave, a route the
+    /// author expected you to fly — needs the waypoint on the way <i>to</i> it, and a sequence of
+    /// one step has no "after" worth having.
+    /// </para>
+    /// </summary>
+    private void InsertWalkToHere(bool before = false)
     {
         if (_path is null || _selectedSeq < 0) return;
         var steps = _path.Sequences[_selectedSeq].Steps;
@@ -365,7 +416,7 @@ public sealed class PathEditorWindow : OdysseusWindow
             Kind = StepKind.WalkTo, KindName = "WalkTo", Position = _playerPosition(), TerritoryId = _territory(),
             Comment = "added in editor",
         };
-        var at = Math.Min(steps.Count, _selectedStep + 1);
+        var at = InsertIndex(_selectedStep, steps.Count, before);
         steps.Insert(at, step);
         _selectedStep = at;
         _dirty = true;

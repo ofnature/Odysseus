@@ -26,6 +26,7 @@ public sealed class LifestreamIpc
     private ICallGateSubscriber<string, bool>? _aethernetTeleport;
     private ICallGateSubscriber<uint, bool>? _aethernetById;
     private ICallGateSubscriber<bool>? _isBusy;
+    private ICallGateSubscriber<uint>? _activeAetheryte;
     private ICallGateSubscriber<object>? _abort;
     private bool _warned;
 
@@ -55,6 +56,31 @@ public sealed class LifestreamIpc
     public bool AethernetTeleportByPlaceName(uint placeNameRowId) => Try(() =>
         (_aethernetById ??= _pluginInterface.GetIpcSubscriber<uint, bool>("Lifestream.AethernetTeleportByPlaceNameId"))
             .InvokeFunc(placeNameRowId));
+
+    /// <summary>
+    /// The aetheryte or aethernet shard Lifestream considers you to be at, or 0 for none.
+    ///
+    /// <para>
+    /// Its answer to "are you close enough", which is the only one that matters: the shard's menu
+    /// can be open while a distance measured from the object's origin still reads as too far, and
+    /// that disagreement stalled an approach in Foundation until the player jumped.
+    /// </para>
+    /// </summary>
+    public uint ActiveAetheryte
+    {
+        get
+        {
+            try
+            {
+                return (_activeAetheryte ??= _pluginInterface.GetIpcSubscriber<uint>("Lifestream.GetActiveAetheryte"))
+                    .InvokeFunc();
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+    }
 
     /// <summary>Lifestream is mid-task (walking to a shard, waiting on a teleport).</summary>
     public bool IsBusy => Try(() =>

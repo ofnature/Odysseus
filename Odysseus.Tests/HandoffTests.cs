@@ -190,7 +190,7 @@ public class HandoffTests
         var step = Step(StepKind.UseItem, dataId: 11);
         step.ItemId = 2002199;
         ex.Begin(step);
-        Ticks(ex, w, 1);
+        Ticks(ex, w, 2);
         Assert.Contains("Target 11", w.Calls);
         Assert.Contains("UseItem 2002199", w.Calls);
 
@@ -208,7 +208,7 @@ public class HandoffTests
         step.ItemId = 30362;
         step.EnemySpawnType = EnemySpawnType.AfterItemUse;
         ex.Begin(step);
-        Ticks(ex, w, 6);
+        Ticks(ex, w, 8);
         Assert.Equal("CombatWait", ex.PhaseName);
     }
 
@@ -235,7 +235,7 @@ public class HandoffTests
         var step = Step(StepKind.UseItem, dataId: 12);
         step.ItemId = 1;
         ex.Begin(step);
-        Ticks(ex, w, 2);
+        Ticks(ex, w, 30); // a target that is not there is asked for a few times before giving up
         Assert.Equal(StepStatus.Failed, ex.Status);
         Assert.Contains("12", ex.FailReason);
     }

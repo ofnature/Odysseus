@@ -42,6 +42,10 @@ public sealed class StepExecutor
         DutyRun,
         /// <summary>Emote / jump / item: fired, brief settle.</summary>
         ActionSettle,
+        /// <summary>Off the mount before doing something that needs both feet on the ground.</summary>
+        Dismount,
+        /// <summary>Use a quest item on a target, and try again if the game refuses.</summary>
+        ItemUse,
         /// <summary>Vendor interacted with, waiting for the shop window.</summary>
         Shop,
         /// <summary>Shop open: buy the shortfall and watch the bag until it is covered.</summary>
@@ -67,6 +71,21 @@ public sealed class StepExecutor
     public const float DefaultStopDistance = 3f;
     /// <summary>WalkTo without a StopDistance: land on the point.</summary>
     public const float WalkToStopDistance = 0.5f;
+    /// <summary>
+    /// Close enough to an aethernet shard to use it. Lifestream has to <i>interact</i> with the
+    /// shard, so this is interact range plus the object's own bulk — not "somewhere near it". A
+    /// wider reach stopped the approach fifteen yalms out, where the hop was refused every time.
+    /// </summary>
+    public const float AethernetReachDistance = 6f;
+
+    /// <summary>
+    /// Inside this, a detour that the mesh cannot finish is closed in a straight line. The navmesh
+    /// does not extend under a solid object, so a path to a shard ends a few yalms short and stays
+    /// there — which is why jumping, which nudges you off the mesh edge, made a stalled approach
+    /// complete.
+    /// </summary>
+    private const float DetourNudgeDistance = 12f;
+
     /// <summary>Distances past this are worth a mount.</summary>
     public const float MountWorthDistance = 30f;
     /// <summary>Overworld enemies farther than this are not "ours".</summary>
@@ -79,9 +98,47 @@ public sealed class StepExecutor
 
     private static readonly TimeSpan MoveStall = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan MoveTotal = TimeSpan.FromSeconds(180);
-    private static readonly TimeSpan MountWait = TimeSpan.FromSeconds(4);
+    /// <summary>
+    /// How long to keep asking for a mount before walking instead. Longer than it looks like it
+    /// needs to be: the seconds after a teleport are a lock, and a mount asked for inside it is
+    /// dropped without a word.
+    /// </summary>
+    private static readonly TimeSpan MountWait = TimeSpan.FromSeconds(12);
+    private static readonly TimeSpan MountRetry = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan ReadyWait = TimeSpan.FromSeconds(30);
     private static readonly TimeSpan DialogueSettle = TimeSpan.FromSeconds(3);
+
+    /// <summary>Closing this much counts as progress; anything less is standing still.</summary>
+    private const float StallProgress = 0.5f;
+
+    /// <summary>How long without getting closer before a jump is worth a try.</summary>
+    private static readonly TimeSpan StallJumpAfter = TimeSpan.FromSeconds(4);
+
+    /// <summary>And how long before another one.</summary>
+    private static readonly TimeSpan StallJumpGap = TimeSpan.FromSeconds(8);
+
+    /// <summary>How long to leave a refused item use before trying it again.</summary>
+    private static readonly TimeSpan ItemUseRetry = TimeSpan.FromSeconds(1.5);
+
+    /// <summary>How many refusals before believing the game means it.</summary>
+    private const int MaxItemUseTries = 4;
+
+    /// <summary>How often to ask again while a dismount is still coming down.</summary>
+    private static readonly TimeSpan DismountRetry = TimeSpan.FromSeconds(2);
+
+    /// <summary>How many times an interaction that opened nothing is asked again before moving on.</summary>
+    private const int MaxInteractRetries = 2;
+
+    /// <summary>
+    /// Close enough for a keypress to land on an NPC. Measured against the object itself rather
+    /// than the step's recorded position, and in three dimensions, because the way this fails is
+    /// vertical: the walk finishes on the lip above the NPC, well inside the step's stop distance
+    /// on the map, and every interact from up there does nothing at all.
+    /// </summary>
+    private const float InteractReach = 3.5f;
+
+    /// <summary>How long a list the step does not name is left to TextAdvance, or to you, before we take it.</summary>
+    private static readonly TimeSpan UndeclaredListGrace = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan DialogueMax = TimeSpan.FromSeconds(120);
     /// <summary>How long the reward window may sit before we press Complete ourselves — TextAdvance gets first go.</summary>
     private static readonly TimeSpan RewardWindowGrace = TimeSpan.FromSeconds(2.5);
@@ -94,6 +151,12 @@ public sealed class StepExecutor
     private static readonly TimeSpan CombatMax = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan TravelStart = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan TravelMax = TimeSpan.FromSeconds(90);
+    /// <summary>
+    /// A hop idle this long has not worked. Short on purpose — it fires before the "never started"
+    /// verdict, and it only applies while Lifestream is doing nothing, so a hop mid-cast is never
+    /// interrupted by it.
+    /// </summary>
+    private static readonly TimeSpan AethernetRetry = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan DutyEnterMax = TimeSpan.FromSeconds(120);
     private static readonly TimeSpan SoloDutyMax = TimeSpan.FromMinutes(30);
     private static readonly TimeSpan DutyMax = TimeSpan.FromMinutes(90);
@@ -118,6 +181,7 @@ public sealed class StepExecutor
     private QuestStep? _step;
     private ushort _questId;
     private bool _listAnswered;
+    private DateTime _listOpenedAt;
     private DateTime _rewardWindowSince;
     private DateTime _rewardLastTry;
     private bool _rewardNeedsChoiceLogged;
@@ -138,6 +202,12 @@ public sealed class StepExecutor
     /// <summary>A detour: walk here rather than to the step's own point, then go to <see cref="_detourThen"/>.</summary>
     private Vector3? _detourTo;
     private Phase _detourThen;
+    /// <summary>How close the detour has to get — interact range for a merchant, a shard's bulk for a shard.</summary>
+    private float _detourTolerance = DefaultStopDistance;
+    /// <summary>The straight-line finish has been used for this detour; it gets one go.</summary>
+    private bool _detourNudged;
+    /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
+    private bool _detourNeedsShard;
     private DateTime _lastBuy;
     private DateTime _lastShopOpen;
     /// <summary>The ClassJob a SwitchClass step is waiting to land on.</summary>
@@ -146,6 +216,8 @@ public sealed class StepExecutor
     private string? _autoAethernet;
     /// <summary>The zone the current hop should land in; 0 when the sheet does not know it.</summary>
     private uint _aethernetTerritory;
+    /// <summary>How many times this step has re-asked for its hop.</summary>
+    private int _aethernetRetries;
     /// <summary>The handoff has been asked; a second ask would queue another batch on top.</summary>
     private bool _makeAsked;
     /// <summary>The item last handed to Artisan — the target, or a sub-component of it.</summary>
@@ -156,8 +228,20 @@ public sealed class StepExecutor
     private DateTime _phaseStart;
     private DateTime _stepStart;
     private DateTime _lastMoveIssue;
+    private DateTime _lastMountTry;
     private int _moveRetries;
     private bool _sawOccupied;
+    private bool _groundOnly;
+    private bool _dismountAsked;
+    private bool _itemReachTried;
+    private int _itemUseTries;
+    private DateTime _lastItemTry;
+    private float _closestSeen;
+    private DateTime _stalledSince;
+    private DateTime _lastStallJump;
+    private Phase _dismountThen;
+    private DateTime _lastDismountTry;
+    private int _interactRetries;
     private bool _sawCombat;
     private DateTime _lastCombatSeen;
     private bool _skipTeleport;
@@ -176,16 +260,29 @@ public sealed class StepExecutor
 
     public StepStatus Status { get; private set; } = StepStatus.Idle;
     public string FailReason { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// The step failed because the thing it wanted was not in the world. Worth telling apart from
+    /// every other failure: an NPC that is not there is often one already dealt with, which is what
+    /// a sequence of "talk to each of these three" looks like when it is resumed part-done.
+    /// </summary>
+    public bool TargetMissing { get; private set; }
     public QuestStep? Current => _step;
     public string PhaseName => _phase.ToString();
 
     /// <param name="skipTeleport">The step's <c>AetheryteShortcutIf</c> holds — walk instead of teleporting.</param>
     /// <param name="questId">The quest this step belongs to — needed to resolve dialogue text keys. 0 for a bare step.</param>
-    public void Begin(QuestStep step, bool skipTeleport = false, ushort questId = 0)
+    /// <param name="groundOnly">
+    /// Ignore the step's <c>Fly</c> flag and walk. Set for an allied society path in a base-game
+    /// zone, where the flight the data asks for catches on scenery.
+    /// </param>
+    public void Begin(QuestStep step, bool skipTeleport = false, ushort questId = 0, bool groundOnly = false)
     {
+        _groundOnly = groundOnly;
         _step = step;
         _questId = questId;
         _listAnswered = false;
+        _listOpenedAt = default;
         _rewardWindowSince = default;
         _rewardNeedsChoiceLogged = false;
         _handOverSince = default;
@@ -201,17 +298,28 @@ public sealed class StepExecutor
         _switchTarget = 0;
         _autoAethernet = null;
         _aethernetTerritory = 0;
+        _aethernetRetries = 0;
         _makeAsked = false;
         _craftAsked = 0;
         _craftHeldAtAsk = 0;
         _stepStart = _world.UtcNow;
         _moveRetries = 0;
         _sawOccupied = false;
+        _interactRetries = 0;
+        _dismountAsked = false;
+        _lastDismountTry = default;
+        _itemReachTried = false;
+        _itemUseTries = 0;
+        _lastItemTry = default;
+        _closestSeen = float.MaxValue;
+        _stalledSince = default;
+        _lastStallJump = default;
         _sawCombat = false;
         _skipTeleport = skipTeleport;
         _sawTravelBusy = false;
         _handoffDone = false;
         FailReason = string.Empty;
+        TargetMissing = false;
         Status = StepStatus.Running;
 
         if (!IsSupported(step.Kind))
@@ -356,22 +464,58 @@ public sealed class StepExecutor
                 break;
 
             case Phase.AethernetWait:
+            {
                 // Judged by where it landed, not merely by Lifestream having gone quiet. A hop that
                 // matched nothing stops being busy immediately, and calling that "arrived" reported
                 // the wrong failure two phases later.
-                TickTravelWait(now,
-                    arrived: !_world.IsTravelBusy && _world.IsReady
-                             && (_aethernetTerritory == 0 || _world.TerritoryId == _aethernetTerritory),
+                var landed = !_world.IsTravelBusy && _world.IsReady
+                             && (_aethernetTerritory == 0 || _world.TerritoryId == _aethernetTerritory);
+
+                // The two ways of asking take different routes inside Lifestream, and one has been
+                // seen to refuse a destination the other reaches. So a hop still in the air is asked
+                // for the other way rather than waited out for a minute and a half.
+                if (!landed && !_world.IsTravelBusy && _aethernetRetries == 0
+                    && now - _phaseStart > AethernetRetry && AethernetDestination is { } again)
+                {
+                    _aethernetRetries++;
+                    _world.Log($"Aethernet to {again} has not landed in {AethernetRetry.TotalSeconds:F0}s " +
+                               "and Lifestream is idle; asking again by name.");
+                    _world.AethernetTeleport(again, byNameOnly: true);
+                    _phaseStart = now;
+                    _sawTravelBusy = false;
+                    break;
+                }
+
+                TickTravelWait(now, arrived: landed,
                     what: $"aethernet to {AethernetDestination}", next: NextAfterTravel);
                 break;
+            }
 
             case Phase.Mount:
                 if (_world.IsMounted || now - _phaseStart > MountWait)
-                    Enter(Phase.Move);
+                {
+                    Enter(Phase.Move); // mounted, or long enough — walking is always an option
+                    break;
+                }
+                // Asked here rather than once on the way in, because the request only lands when the
+                // character can act, and after a teleport that is not straight away.
+                if (_world.IsReady && !_world.InCombat && now - _lastMountTry >= MountRetry)
+                {
+                    _lastMountTry = now;
+                    _world.Mount();
+                }
                 break;
 
             case Phase.Move:
                 TickMove(step, now);
+                break;
+
+            case Phase.Dismount:
+                TickDismount(now);
+                break;
+
+            case Phase.ItemUse:
+                TickItemUse(step, now);
                 break;
 
             case Phase.WaitReady:
@@ -622,9 +766,33 @@ public sealed class StepExecutor
 
     private Phase NextAfterTeleport()
     {
-        if (AethernetDestination is not null)
+        if (AethernetDestination is { } hop && WorthHopping(hop))
             return BeginAethernet();
         return NextAfterTravel();
+    }
+
+    /// <summary>
+    /// Whether the hop is worth making at all.
+    ///
+    /// <para>
+    /// The aethernet is for crossing a city. Standing in the half the step is already in, taking it
+    /// walks you out to a shard, teleports you to the shard you were standing beside, and walks you
+    /// back — which is what every Goldsmith quest did, because its NPC sits a few paces from the
+    /// Goldsmiths' Guild shard the step names.
+    /// </para>
+    ///
+    /// <para>
+    /// A destination in another zone is always taken: that is the only way across. In the same one
+    /// it is taken only when the walk would be long enough to be worth the detour, on the same
+    /// reasoning as <see cref="TeleportWorthDistance"/>.
+    /// </para>
+    /// </summary>
+    private bool WorthHopping(string destination)
+    {
+        if (_world.AethernetTerritoryOf(destination) is not { } lands || lands != _world.TerritoryId)
+            return true;
+        return _step!.Position is { } target
+               && Vector3.Distance(_world.PlayerPosition, target) > TeleportWorthDistance;
     }
 
     /// <summary>
@@ -639,15 +807,20 @@ public sealed class StepExecutor
     /// </summary>
     private Phase BeginAethernet()
     {
+        if (_world.AtAethernetShard)
+            return Phase.Aethernet; // the game says we are at one; nothing to walk
+
         if (_world.NearestAethernetAccess(_world.TerritoryId, _world.PlayerPosition) is not { } access)
             return Phase.Aethernet; // nothing placed in this zone; let the hop try anyway
 
-        if (Vector3.Distance(_world.PlayerPosition, access) <= DefaultStopDistance + ArrivalSlack)
+        if (Vector3.Distance(_world.PlayerPosition, access) <= AethernetReachDistance)
             return Phase.Aethernet;
 
         _world.Log($"Walking to the aethernet at {Fmt(access)} before hopping to {AethernetDestination}.");
         _detourTo = access;
         _detourThen = Phase.Aethernet;
+        _detourTolerance = AethernetReachDistance;
+        _detourNeedsShard = true;
         return Phase.Move;
     }
 
@@ -657,6 +830,13 @@ public sealed class StepExecutor
 
         // Nothing to reach and nowhere to be — do it where you stand.
         if (IsPlaceless(step.Kind))
+            return Phase.WaitReady;
+
+        // A step that crosses a zone line names both ends: TerritoryId is where it starts and
+        // TargetTerritoryId is where it finishes. Standing in the far one means the crossing has
+        // already happened — which is what an aethernet hop into it does — so it is arrival, not
+        // the wrong zone. (Highway Robbery's first step: starts in 129, ends in 128, hops there.)
+        if (step.TargetTerritoryId is { } crossedInto && _world.TerritoryId == crossedInto)
             return Phase.WaitReady;
 
         if (step.TerritoryId != 0 && _world.TerritoryId != step.TerritoryId)
@@ -676,11 +856,17 @@ public sealed class StepExecutor
         if (distance <= StopDistanceFor(step) + ArrivalSlack)
             return Phase.WaitReady;
 
-        // Mount for long legs unless the step forbids it; the executor never dismounts.
-        var wantMount = step.Mount == true || (step.Mount != false && distance > MountWorthDistance);
-        if (wantMount && !_world.IsMounted && !_world.InCombat)
+        // A step that says to get off the mount does so before it walks anywhere, and does not get
+        // back on for this leg.
+        if (step.Dismount && _world.IsMounted)
+            return BeginDismount(Phase.Move);
+
+        // Mount for long legs unless the step forbids it.
+        var wantMount = !step.Dismount
+                        && (step.Mount == true || (step.Mount != false && distance > MountWorthDistance));
+        if (wantMount && _world.CanMountHere && !_world.IsMounted)
         {
-            _world.Mount();
+            _lastMountTry = default;   // the phase does the asking, and keeps asking
             return Phase.Mount;
         }
         return Phase.Move;
@@ -870,36 +1056,138 @@ public sealed class StepExecutor
                 return BeginClassSwitch(step);
 
             case StepKind.UseItem:
-                if (step.ItemId is not { } itemId)
+                if (step.ItemId is null)
                 {
                     Fail("UseItem step names no item");
                     return Phase.None;
                 }
-                if (step.DataId is { } itemTarget && !_world.TryTargetDataId(itemTarget))
+                if (step.DataId is { } itemTarget)
                 {
-                    Fail($"item target {itemTarget} is not here");
-                    return Phase.None;
+                    // Using an item on someone is a targeted action with the same reach as talking
+                    // to them, and the step's recorded position is not always inside it. Close the
+                    // gap once, measured against where the target actually is.
+                    if (!_itemReachTried && _world.DistanceToDataId(itemTarget) is { } far && far > InteractReach
+                        && _world.PositionOfDataId(itemTarget) is { } where)
+                    {
+                        _itemReachTried = true;
+                        _world.Log($"Item target {itemTarget} is {far:F1}y away — walking into range first.");
+                        _detourTo = where;
+                        _detourThen = Phase.WaitReady;
+                        _detourTolerance = InteractReach - ArrivalSlack;
+                        _detourNudged = false;
+                        _detourNeedsShard = false;
+                        return Phase.Move;
+                    }
                 }
-                _world.HoldDialogue();
-                if (!_world.UseItem(itemId))
-                {
-                    Fail($"could not use item {itemId}");
-                    return Phase.None;
-                }
-                return Phase.ActionSettle;
+
+                // A quest item cannot be used from the back of a chocobo. Same reason a flight that
+                // ends over an NPC cannot talk to them, and the same remedy.
+                if (_world.IsMounted)
+                    return BeginDismount(Phase.ItemUse);
+
+                return Phase.ItemUse;
 
             default:
                 return Phase.Interact;
         }
     }
 
+    /// <summary>Ask to get off the mount, and go to <paramref name="then"/> once we are actually off it.</summary>
+    private Phase BeginDismount(Phase then)
+    {
+        _dismountThen = then;
+        _lastDismountTry = default;
+        return Phase.Dismount;
+    }
+
+    /// <summary>
+    /// Waiting for both feet on the ground. Dismounting in the air is a descent and you stay
+    /// mounted the whole way down, so this keeps asking rather than assuming it took.
+    /// </summary>
+    private void TickDismount(DateTime now)
+    {
+        if (!_world.IsMounted)
+        {
+            Enter(_dismountThen);
+            return;
+        }
+        if (now - _lastDismountTry > DismountRetry)
+        {
+            _lastDismountTry = now;
+            _world.Dismount();
+        }
+        if (now - _phaseStart > ReadyWait)
+            Fail("could not get off the mount");
+    }
+
+    /// <summary>
+    /// Use the step's item on its target.
+    ///
+    /// <para>
+    /// The game refuses this for reasons that pass on their own — an animation still playing, the
+    /// last of a dismount, a target that has not finished spawning — so a refusal is retried before
+    /// it is believed. <see cref="IStepWorld.UseItem"/> logs the game's own status code for the
+    /// refusal, which is the only way to tell those apart from a genuine one.
+    /// </para>
+    /// </summary>
+    private void TickItemUse(QuestStep step, DateTime now)
+    {
+        if (now - _lastItemTry < ItemUseRetry && _itemUseTries > 0)
+            return;
+
+        if (step.DataId is { } target && !_world.TryTargetDataId(target))
+        {
+            if (_itemUseTries >= MaxItemUseTries)
+            {
+                Fail($"item target {target} is not here");
+                return;
+            }
+            _itemUseTries++;
+            _lastItemTry = now;
+            return;
+        }
+
+        // Face them before using it. The walk ends pointed along its last leg — which, after the
+        // straight-line finish, is usually past the target rather than at it — and an item used on
+        // someone you are not looking at does nothing.
+        if (step.DataId is { } facing)
+            _world.FaceDataId(facing);
+
+        _lastItemTry = now;
+        _world.HoldDialogue();
+        if (_world.UseItem(step.ItemId!.Value))
+        {
+            Enter(Phase.ActionSettle);
+            return;
+        }
+
+        if (++_itemUseTries >= MaxItemUseTries)
+        {
+            Fail($"the game would not let us use item {step.ItemId} here — see the log for its reason");
+            return;
+        }
+        _world.Log($"Item {step.ItemId} was refused — trying again ({_itemUseTries}/{MaxItemUseTries}).");
+    }
+
     private void TickMove(QuestStep step, DateTime now)
     {
+        // A cutscene or a conversation owns the character: it cannot move, and the mesh is not
+        // dependable while one plays — a step failed with "navmesh not ready" for no reason but
+        // that. None of the clocks should run through it, including the overall one, because the
+        // step is not being attempted.
+        if (_world.IsOccupied)
+        {
+            _phaseStart = now;
+            _stepStart = now;
+            _lastMoveIssue = now;
+            return;
+        }
+
         // A detour — walking to a merchant the craft turned out to need — borrows this phase and
         // lands somewhere other than the step's own destination.
         var detour = _detourTo;
         var target = detour ?? step.Position!.Value;
-        var tolerance = detour is null ? StopDistanceFor(step) : DefaultStopDistance;
+        var tolerance = detour is null ? StopDistanceFor(step) : _detourTolerance;
         var distance = Vector3.Distance(_world.PlayerPosition, target);
 
         // A walk across a zone line arrives by changing zone, not by reaching the point.
@@ -910,11 +1198,23 @@ public sealed class StepExecutor
             return;
         }
 
-        if (distance <= tolerance + ArrivalSlack)
+        // A detour to a shard is finished by the game's own answer as readily as by the distance:
+        // the menu can be open while a range measured from the object's origin still reads as far.
+        if (_stalledSince == default)
+        {
+            _stalledSince = now;
+            _closestSeen = distance;
+        }
+
+        var arrived = distance <= tolerance + ArrivalSlack
+                      || (_detourNeedsShard && _world.AtAethernetShard);
+        if (arrived)
         {
             _world.StopMoving();
             var next = detour is null ? Phase.WaitReady : _detourThen;
             _detourTo = null;
+            _detourNudged = false;
+            _detourNeedsShard = false;
             Enter(next);
             return;
         }
@@ -931,6 +1231,14 @@ public sealed class StepExecutor
 
         if (!direct && !_world.NavmeshReady)
         {
+            // A mesh still building is a wait, not a fault: a fresh zone takes far longer than the
+            // stall clock, which is there for a mesh that is not coming at all. Progress resets it,
+            // the same way an active handoff does, and MoveTotal above remains the backstop.
+            if (_world.NavmeshBuildProgress >= 0f)
+            {
+                _phaseStart = now;
+                return;
+            }
             if (now - _phaseStart > MoveStall)
                 Fail("navmesh not ready");
             return;
@@ -939,6 +1247,23 @@ public sealed class StepExecutor
         if (_world.IsMoving)
         {
             _lastMoveIssue = now;
+
+            // Moving but not getting anywhere: running into scenery the mesh thinks is passable, or
+            // caught on the lip of something. A jump clears most of it, and it is what a person does
+            // without thinking. Once per stall, with a long gap, so a genuinely slow leg is not
+            // turned into a pogo stick.
+            if (distance < _closestSeen - StallProgress)
+            {
+                _closestSeen = distance;
+                _stalledSince = now;
+            }
+            else if (now - _stalledSince > StallJumpAfter && now - _lastStallJump > StallJumpGap)
+            {
+                _lastStallJump = now;
+                _stalledSince = now;
+                _world.Log($"Not getting any closer to {Fmt(target)} ({distance:F1}y for {StallJumpAfter.TotalSeconds:F0}s) — jumping.");
+                _world.SendChatCommand("/generalaction Jump");
+            }
             return;
         }
 
@@ -950,6 +1275,18 @@ public sealed class StepExecutor
         // signal but not a reliable one — a mesh still loading, or a fresh area, answers zero for a
         // moment — so it is asked again before it is believed. Exhausting the retries is still far
         // quicker than waiting out the three-minute movement timeout, which is why the check exists.
+        // The mesh has done all it can and we are nearly there: close the gap directly. Only for a
+        // detour, where the target is an object the mesh cannot path onto rather than a step's own
+        // destination, and only once — a second failure is a real one.
+        if (detour is not null && !_detourNudged && distance <= DetourNudgeDistance)
+        {
+            _detourNudged = true;
+            _lastMoveIssue = now;
+            _world.Log($"Mesh path to {Fmt(target)} ended {distance:F1}y short; walking the rest directly.");
+            _world.MoveDirectTo(target, false);
+            return;
+        }
+
         if (_moveRetries >= MaxMoveRetries)
         {
             Fail(!direct && _world.PathWaypointCount == 0
@@ -958,7 +1295,7 @@ public sealed class StepExecutor
             return;
         }
 
-        var fly = step.Fly && _world.CanFlyHere;
+        var fly = step.Fly && _world.CanFlyHere && !_groundOnly;
         var ok = direct
             ? _world.MoveDirectTo(target, fly)
             : tolerance > WalkToStopDistance
@@ -1198,6 +1535,7 @@ public sealed class StepExecutor
             {
                 _detourTo = where;
                 _detourThen = Phase.Shop;
+                _detourTolerance = DefaultStopDistance;
                 Enter(Phase.Move);
                 return true;
             }
@@ -1460,13 +1798,33 @@ public sealed class StepExecutor
             return;
         }
 
+        // Asked to get off the mount and still on it — a dismount from the air is a descent, and it
+        // was pressing again halfway down that wasted both retries. Wait for the ground, asking
+        // again as it goes, and let the phase clock be the limit.
+        if (_dismountAsked && _world.IsMounted)
+        {
+            if (now - _lastDismountTry > DismountRetry)
+            {
+                _lastDismountTry = now;
+                _world.Dismount();
+            }
+            if (now - _phaseStart > ReadyWait)
+                Fail($"could not get off the mount to interact with {dataId}");
+            return;
+        }
+        _dismountAsked = false;
+
         if (!_world.IsDataIdSpawned(dataId))
         {
             if (now - _phaseStart > ReadyWait)
+            {
+                TargetMissing = true;
                 Fail($"object {dataId} never appeared");
+            }
             return;
         }
 
+        _world.FaceDataId(dataId);
         _world.HoldDialogue();
         if (!_world.TryInteractWithDataId(dataId))
         {
@@ -1484,7 +1842,7 @@ public sealed class StepExecutor
         if (occupied)
         {
             _sawOccupied = true;
-            AnswerDialogue(step);
+            AnswerDialogue(step, now);
         }
 
         var rewardWindow = _world.IsAddonVisible("JournalResult");
@@ -1517,6 +1875,49 @@ public sealed class StepExecutor
         var settled = _sawOccupied ? !occupied : now - _phaseStart > DialogueSettle;
         if (!settled)
             return;
+
+        // Nothing opened at all. The interaction did not take — a sprint keybind firing on the same
+        // frame will do it, and so will an NPC turned away at the wrong moment. Ask again rather
+        // than report a conversation that never happened: the alternative is every step of this
+        // kind finishing "successfully", the sequence not moving, and the block being replayed
+        // twenty seconds later to do the same thing.
+        if (!_sawOccupied && step.DataId is { } target && _interactRetries < MaxInteractRetries)
+        {
+            _interactRetries++;
+
+            // Airborne is the commonest way this fails and the one that never recovers on its own:
+            // the path data flies you to the NPC, the flight ends above their head, and every
+            // interact from up there does nothing. Land first — the walk below then has somewhere
+            // to start from.
+            if (_world.IsMounted)
+            {
+                _world.Log($"Nothing opened after interacting with {target} — dismounting first.");
+                _dismountAsked = true;
+                _lastDismountTry = now;
+                _world.Dismount();
+            }
+
+            // Out of reach means the keypress was never going to land, and pressing it again from
+            // the same spot will not change that. Close on the object itself — its own position,
+            // not the one the step was recorded at, which is what put us out of reach.
+            if (_world.DistanceToDataId(target) is { } distance && distance > InteractReach
+                && _world.PositionOfDataId(target) is { } where)
+            {
+                _world.Log($"Nothing opened after interacting with {target} — {distance:F1}y away, " +
+                           $"walking to it before asking again ({_interactRetries}/{MaxInteractRetries}).");
+                _detourTo = where;
+                _detourThen = Phase.Interact;
+                _detourTolerance = InteractReach - ArrivalSlack;
+                _detourNudged = false;
+                _detourNeedsShard = false;
+                Enter(Phase.Move);
+                return;
+            }
+
+            _world.Log($"Nothing opened after interacting with {target} — asking again ({_interactRetries}/{MaxInteractRetries}).");
+            Enter(Phase.Interact);
+            return;
+        }
 
         switch (step.Kind)
         {
@@ -1626,46 +2027,81 @@ public sealed class StepExecutor
         return string.Join(", ", parts);
     }
 
-    private void AnswerDialogue(QuestStep step)
+    /// <summary>
+    /// Answer whatever the conversation is asking.
+    ///
+    /// <para>
+    /// Most of these are named by the step, but not all of them: quest 2601's "ask the townspeople"
+    /// sequence opens a "what will you say?" menu at every one of its three NPCs and the path data
+    /// declares none of them. TextAdvance does not pick list entries either, so the menu simply sat
+    /// there — the player stays occupied, the dialogue never ends, and the step never finishes. The
+    /// run got to the first NPC of that quest and no further.
+    /// </para>
+    ///
+    /// <para>
+    /// So an undeclared list is answered too, taking the first entry after a grace long enough for
+    /// TextAdvance or you to get there first. These asides are flavour: the wording changes what is
+    /// said back, not what happens. The choices that decide something — taking up a class, taking on
+    /// a first DoH or DoL quest — are YesNo, and those are answered only where the step names them.
+    /// </para>
+    /// </summary>
+    private void AnswerDialogue(QuestStep step, DateTime now)
     {
-        if (step.DialogueChoices is null)
-            return;
-
-        var listVisible = _world.IsAddonVisible("SelectString");
-        if (!listVisible)
-            _listAnswered = false; // a new list later in the same interaction gets its own answer
-
-        foreach (var choice in step.DialogueChoices)
+        DialogueChoice? listChoice = null;
+        foreach (var choice in (System.Collections.Generic.IEnumerable<DialogueChoice>?)step.DialogueChoices ?? Array.Empty<DialogueChoice>())
         {
             if (choice.Type.Equals("YesNo", StringComparison.OrdinalIgnoreCase) && _world.IsAddonVisible("SelectYesno"))
-            {
                 _world.SelectYesNo(choice.Yes ?? true);
-                continue;
-            }
-
-            if (!choice.Type.Equals("List", StringComparison.OrdinalIgnoreCase) || !listVisible || _listAnswered)
-                continue;
-
-            // The data carries text keys; the menu shows text. Resolve the answer key against the
-            // quest's dialogue sheet and pick the entry that says it.
-            var wanted = choice.Answer is { } key ? _texts?.Resolve(_questId, key) : null;
-            if (wanted is null)
-            {
-                _world.Log($"List choice {choice.Answer ?? "?"} could not be resolved for quest {_questId} — leaving the menu to TextAdvance/you.");
-                _listAnswered = true;
-                continue;
-            }
-            var entries = _world.SelectStringEntries();
-            var index = FindEntry(entries, wanted);
-            if (index < 0)
-            {
-                _world.Log($"List choice \"{wanted}\" not among [{string.Join(" | ", entries)}] — leaving the menu.");
-                _listAnswered = true;
-                continue;
-            }
-            _world.SelectStringIndex(index);
-            _listAnswered = true;
+            else if (choice.Type.Equals("List", StringComparison.OrdinalIgnoreCase))
+                listChoice ??= choice;
         }
+
+        // Either window asks the same question; a choice put mid-conversation uses the second.
+        var listVisible = _world.IsAddonVisible("SelectString") || _world.IsAddonVisible("CutSceneSelectString");
+        if (!listVisible)
+        {
+            _listAnswered = false; // a new list later in the same interaction gets its own answer
+            _listOpenedAt = default;
+            return;
+        }
+
+        if (_listOpenedAt == default)
+            _listOpenedAt = now;
+
+        if (_listAnswered)
+            return;
+
+        var entries = _world.SelectStringEntries();
+        if (entries.Count == 0)
+            return; // the window is up but has not filled in yet
+
+        if (listChoice is null)
+        {
+            if (now - _listOpenedAt < UndeclaredListGrace)
+                return;
+            _world.Log($"A list choice is open that quest {_questId} does not name — [{string.Join(" | ", entries)}]; taking the first option.");
+            _world.SelectStringIndex(0);
+            _listAnswered = true;
+            return;
+        }
+
+        // The data carries text keys; the menu shows text. Resolve the answer key against the
+        // quest's dialogue sheet and pick the entry that says it.
+        var wanted = listChoice.Answer is { } key ? _texts?.Resolve(_questId, key) : null;
+        var index = wanted is null ? -1 : FindEntry(entries, wanted);
+
+        // Falling back to the first option rather than leaving the menu hanging, on the same
+        // reasoning as an undeclared one: an answer is expected here and the wording is flavour.
+        if (index < 0)
+        {
+            _world.Log(wanted is null
+                ? $"List choice {listChoice.Answer ?? "?"} could not be resolved for quest {_questId}; taking the first option."
+                : $"List choice \"{wanted}\" not among [{string.Join(" | ", entries)}]; taking the first option.");
+            index = 0;
+        }
+
+        _world.SelectStringIndex(index);
+        _listAnswered = true;
     }
 
     /// <summary>Exact match first, then a case-insensitive contains either way — menu text can carry a trailing marker.</summary>

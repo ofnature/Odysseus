@@ -10,10 +10,15 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Vector3 PlayerPosition { get; set; }
     public uint TerritoryId { get; set; } = 400;
     public bool NavmeshReady { get; set; } = true;
+    /// <summary>0..1 while the mesh builds; negative means it is not building.</summary>
+    public float NavmeshBuildProgress { get; set; } = -1f;
     public bool IsMoving { get; set; }
     public int PathWaypointCount { get; set; } = 5;
     public bool IsMounted { get; set; }
     public bool CanFlyHere { get; set; }
+    public bool InBaseGameZone { get; set; }
+    /// <summary>Cities forbid mounts; the sheet says which.</summary>
+    public bool CanMountHere { get; set; } = true;
     public int PlayerLevel { get; set; } = 54;
     public bool IsCasting { get; set; }
     public bool IsCombatJob { get; set; } = true;
@@ -34,6 +39,7 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     /// <summary>Equipping a gearset moves the class immediately; clear it to test the wait.</summary>
     public bool EquipLands { get; set; } = true;
     public uint CurrentClassJob { get; set; }
+    public JobKind CurrentJobKind { get; set; } = JobKind.Combat;
     public Dictionary<string, uint> ClassJobs { get; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<ushort, uint> QuestStartJobs { get; } = new();
     public IReadOnlyList<GearsetInfo> Gearsets() => SavedGearsets;
@@ -68,7 +74,30 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public void SelectIconStringIndex(int index) => Calls.Add($"IconSelect {index}");
     public bool InCombat { get; set; }
     public bool IsReady { get; set; } = true;
-    public bool IsOccupied { get; set; }
+    private bool _occupied;
+    private DateTime _talkingUntil;
+
+    /// <summary>
+    /// Interacting opens a conversation, the way it does in game. Without this the fake models an
+    /// interaction that produces nothing at all — which is the one case the executor now treats as
+    /// a failed interaction and asks again, so a fake that never talks makes every route test look
+    /// like a sprint keybind eating the keypress. Tests that drive the dialogue themselves turn it
+    /// off and set <see cref="IsOccupied"/> by hand.
+    /// </summary>
+    public bool TalksWhenInteracted { get; set; } = true;
+
+    /// <summary>Long enough to still be talking on the next tick, whatever a test's tick size is.</summary>
+    public TimeSpan TalkLength { get; set; } = TimeSpan.FromSeconds(2);
+
+    public bool IsOccupied
+    {
+        get => _occupied || UtcNow < _talkingUntil;
+        set
+        {
+            _occupied = value;
+            if (!value) _talkingUntil = default;
+        }
+    }
     public bool IsDead { get; set; }
 
     public HashSet<uint> Spawned { get; } = [];
@@ -108,6 +137,8 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Dictionary<uint, uint> AetheryteTerritories { get; } = new();
     public bool TeleportAccepted { get; set; } = true;
     public bool IsTravelBusy { get; set; }
+    /// <summary>The game says we are at a shard, whatever the distance says.</summary>
+    public bool AtAethernetShard { get; set; }
     /// <summary>When set, a Teleport lands the player in the aetheryte's territory immediately.</summary>
     public bool ArriveOnTeleport { get; set; } = true;
     public uint? ResolveAetheryte(string name) => Aetherytes.TryGetValue(name, out var id) ? id : null;
@@ -139,13 +170,22 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Dictionary<uint, Vector3> AethernetAccess { get; } = new();
     public Vector3? NearestAethernetAccess(uint territoryId, Vector3 near)
         => AethernetAccess.TryGetValue(territoryId, out var p) ? p : null;
-    public bool AethernetTeleport(string destination)
+    public bool AethernetTeleport(string destination, bool byNameOnly = false)
     {
-        Calls.Add($"Aethernet {destination}");
+        Calls.Add($"Aethernet {destination}{(byNameOnly ? " byname" : "")}");
         if (!TeleportAccepted) return false;
         if (ArriveOnTeleport && AethernetTerritories.TryGetValue(destination, out var t)) TerritoryId = t;
         return true;
     }
+    /// <summary>True models a dismount from the air: asked for, but still coming down.</summary>
+    public bool HoldsMount { get; set; }
+
+    public void Dismount()
+    {
+        Calls.Add("Dismount");
+        if (!HoldsMount) IsMounted = false;
+    }
+
     public void Mount() { Calls.Add("Mount"); IsMounted = true; }
     public bool IsQuestComplete(ushort questId) => CompletedQuests.Contains(questId);
     public bool IsQuestAccepted(ushort questId) => AcceptedQuests.Contains(questId);
@@ -156,15 +196,27 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Dictionary<uint, int> FcChest { get; } = new();
     public int FreeCompanyChestCount(uint itemId) => FcChest.GetValueOrDefault(itemId);
     public bool IsDataIdSpawned(uint dataId) => Spawned.Contains(dataId);
-    public float? DistanceToDataId(uint dataId) => Spawned.Contains(dataId) ? 1f : null;
+    /// <summary>Read off the same placement as <see cref="PositionOfDataId"/>, so the two agree.</summary>
+    public float? DistanceToDataId(uint dataId)
+        => PositionOfDataId(dataId) is { } where ? Vector3.Distance(where, PlayerPosition) : null;
+
+    public HashSet<uint> QuestMarked { get; } = new();
+
+    public bool HasQuestMarker(uint dataId) => QuestMarked.Contains(dataId);
     /// <summary>Spawned objects sit on the player unless a test places them somewhere.</summary>
     public Dictionary<uint, Vector3> Positions { get; } = new();
     public Vector3? PositionOfDataId(uint dataId)
         => Spawned.Contains(dataId) ? Positions.GetValueOrDefault(dataId, PlayerPosition) : null;
+    public void FaceDataId(uint dataId) => Calls.Add($"Face {dataId}");
+
     public bool TryInteractWithDataId(uint dataId)
     {
         Calls.Add($"Interact {dataId}");
-        return Spawned.Contains(dataId);
+        if (!Spawned.Contains(dataId))
+            return false;
+        if (TalksWhenInteracted)
+            _talkingUntil = UtcNow + TalkLength;
+        return true;
     }
     public bool AttackNearestEnemy(IReadOnlyCollection<uint> dataIds, float radius)
     {

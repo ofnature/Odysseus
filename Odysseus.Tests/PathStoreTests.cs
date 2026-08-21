@@ -13,6 +13,21 @@ public class PathStoreTests : IDisposable
     }
 
     [Fact]
+    public void Rescanning_picks_up_paths_another_client_wrote_after_we_looked()
+    {
+        // Two clients share the folder. This one looked first and found nothing.
+        var store = new PathStore(_dir);
+        Assert.False(store.Has(3729));
+        Assert.Equal(0, store.Count);
+
+        new PathStore(_dir).Save(new QuestPath { QuestId = 3729, Name = "Oh, Beehive Yourself" });
+        Assert.False(store.Has(3729)); // still holding what it read the first time
+
+        store.Reload();
+        Assert.True(store.Has(3729));
+    }
+
+    [Fact]
     public void A_path_round_trips_through_disk_with_positions_flags_and_enums_intact()
     {
         var store = new PathStore(_dir);
