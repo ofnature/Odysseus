@@ -1499,11 +1499,13 @@ public sealed class StepExecutor
             && IsObjectStep(step.Kind) && _world.PositionOfDataId(objectId) is { } objectAt)
         {
             var flat = objectAt with { Y = _world.PlayerPosition.Y };
-            // Horizontal reach with a forgiving vertical: a flight that ends hovering over the
-            // object has arrived — the dismount on the way in is a descent, and that is what
-            // pins the interaction to the floor.
+            // Horizontal reach with a one-sided vertical: hovering ABOVE the object is arrival —
+            // the dismount descends onto its floor — but standing UNDER its ledge is not, however
+            // close it looks through the rock. Symmetric tolerance cut the ride to Kurobana short
+            // a floor below him, with nothing the dismount could do about it.
+            var above = _world.PlayerPosition.Y - objectAt.Y;
             arrived = Vector3.Distance(flat, _world.PlayerPosition) <= InteractReach
-                      && Math.Abs(objectAt.Y - _world.PlayerPosition.Y) <= HoverAboveObject;
+                      && above >= -2f && above <= HoverAboveObject;
         }
         if (arrived)
         {

@@ -322,6 +322,21 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void Standing_under_the_objects_ledge_is_not_arrival()
+    {
+        // Kurobana stands on a ledge at Y=86; the ride ended a floor below him and the symmetric
+        // vertical tolerance called it arrived. Below the object's floor, keep travelling.
+        var world = new FakeStepWorld { TerritoryId = 614, PathWaypointCount = 5, ArriveOnMove = true };
+        world.PlayerPosition = new Vector3(635, 77, -147);   // nine yalms under the ledge
+        world.Spawned.Add(1022421);
+        world.Positions[1022421] = new Vector3(635, 86, -147);
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 1022421, TerritoryId = 614, Position = new Vector3(635, 86, -147) });
+        for (var i = 0; i < 20 && !world.Calls.Any(c => c.StartsWith("Move ")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Move 635,86,-147"));   // still riding to the mark up top
+    }
+
+    [Fact]
     public void An_interact_reached_mounted_lands_and_dismounts_before_it_acts()
     {
         // "Pin to the floor": the flight ends hovering eight yalms over the succulent. That is
