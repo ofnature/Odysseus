@@ -16,14 +16,14 @@
       "multibox"
     ],
     "RepoUrl": "https://github.com/ofnature/Odysseus",
-    "AssemblyVersion": "0.2.1.0",
+    "AssemblyVersion": "0.2.2.0",
     "DalamudApiLevel": 15,
     "IconUrl": "https://raw.githubusercontent.com/ofnature/Odysseus/main/images/icon.png",
     "ImageUrls": [],
     "IsHide": false,
     "IsTestingExclusive": false,
-    "DownloadLinkInstall": "https://github.com/ofnature/Odysseus/releases/download/v0.2.1/Odysseus.zip",
-    "DownloadLinkTesting": "https://github.com/ofnature/Odysseus/releases/download/v0.2.1/Odysseus.zip",
-    "DownloadLinkUpdate": "https://github.com/ofnature/Odysseus/releases/download/v0.2.1/Odysseus.zip"
+    "DownloadLinkInstall": "https://github.com/ofnature/Odysseus/releases/download/v0.2.2/Odysseus.zip",
+    "DownloadLinkTesting": "https://github.com/ofnature/Odysseus/releases/download/v0.2.2/Odysseus.zip",
+    "DownloadLinkUpdate": "https://github.com/ofnature/Odysseus/releases/download/v0.2.2/Odysseus.zip"
   }
 ]
