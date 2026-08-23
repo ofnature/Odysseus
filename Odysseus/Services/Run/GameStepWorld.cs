@@ -1502,28 +1502,56 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     private string[]? _overcapPrompts;
 
+    private DateTime _overcapProbeLogged;
+
+    private void ProbeLog(string message)
+    {
+        if (DateTime.UtcNow - _overcapProbeLogged < TimeSpan.FromSeconds(5)) return;
+        _overcapProbeLogged = DateTime.UtcNow;
+        _log(message);
+    }
+
+    /// <summary>Letters and digits only, lowercased — the part of a prompt no payload can vary.</summary>
+    private static string Squash(string text)
+        => new(text.Where(char.IsLetterOrDigit).Select(char.ToLowerInvariant).ToArray());
+
     public bool ConfirmOvercapDialog()
     {
         try
         {
             var addon = _gameGui.GetAddonByName("SelectYesno");
             if (addon.IsNull || !addon.IsVisible)
+            {
+                ProbeLog("Overcap check: SelectYesno addon not found/visible by name.");
                 return false;
+            }
             var yesno = (FFXIVClientStructs.FFXIV.Client.UI.AddonSelectYesno*)addon.Address;
             if (yesno->PromptText == null)
+            {
+                ProbeLog("Overcap check: the window has no PromptText node — reading the text another way is the next move.");
                 return false;
+            }
 
+            // The live window drops its line-break payloads outright while the sheet renders
+            // them as control characters, so nothing about whitespace can be trusted on either
+            // side. The sheet text is cut at its first control character — the first sentence is
+            // the stable part — and both sides are squashed to bare letters and digits before
+            // comparing.
             _overcapPrompts ??= OvercapWarningRows
                 .Select(row => _data.GetExcelSheet<Addon>().GetRowOrDefault(row)?.Text.ExtractText() ?? string.Empty)
-                .Select(text => text.Split((char)10)[0].Trim())
+                .Select(text => Squash(new string(text.TakeWhile(c => !char.IsControl(c)).ToArray())))
                 .Where(line => line.Length > 0)
                 .ToArray();
             if (_overcapPrompts.Length == 0)
                 return false; // no sheet, no guess — the dialog is left for the player
 
-            var prompt = yesno->PromptText->NodeText.ToString();
-            if (!_overcapPrompts.Any(line => prompt.Contains(line, StringComparison.OrdinalIgnoreCase)))
+            var prompt = Squash(yesno->PromptText->NodeText.ToString());
+            if (!_overcapPrompts.Any(line => prompt.Contains(line, StringComparison.Ordinal)))
+            {
+                ProbeLog($"Overcap check: prompt did not match. prompt=[{prompt}] vs [{string.Join(" | ", _overcapPrompts)}]");
                 return false;
+            }
+            _log("Overcap check: prompt matched — answering yes by callback.");
 
             // The callback, not the button: this window comes in more than one skin — the field
             // dump of a live one showed no plain Button components at all, and the YesButton
