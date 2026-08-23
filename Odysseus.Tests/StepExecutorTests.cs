@@ -281,6 +281,21 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void Standing_on_the_platform_a_few_yalms_short_it_just_walks_there()
+    {
+        // Off-mesh feet: the pathfind cannot start, and the nearest-point query finds the edge a
+        // yalm away so it does not say so. Close enough to walk blind — so walk.
+        var target = new Vector3(107, 15, -361);
+        var world = new FakeStepWorld { PathWaypointCount = 0, PlayerPosition = new Vector3(101, 15, -358) };
+        var ex = new StepExecutor(world);
+        ex.Begin(Step(StepKind.WalkTo, target));
+        for (var i = 0; i < 12 && !world.Calls.Any(c => c.StartsWith("MoveDirect")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("MoveDirect 107,15,-361"));
+        world.PlayerPosition = target;
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+    }
+
+    [Fact]
     public void Interact_walks_up_interacts_waits_out_the_dialogue_and_is_done()
     {
         var world = new FakeStepWorld { ArriveOnMove = true };

@@ -1423,9 +1423,20 @@ public sealed class StepExecutor
         // nearer than here, and keeps its failure below.
         if (!direct && _moveRetries > 0 && _world.PathWaypointCount == 0)
         {
+            // Close enough to walk blind: do that first. It is also what gets us off a platform
+            // the mesh disowns — a pathfind cannot start from off-mesh feet even when the mesh's
+            // edge is a yalm away, and the nearest-point query will not say so.
+            if (!_offMeshNudged && distance <= OffMeshDirectMax)
+            {
+                _offMeshNudged = true;
+                _lastMoveIssue = now;
+                _world.Log($"Walking the last {distance:F1}y to {Fmt(target)} directly — the mesh gave no path.");
+                _world.MoveDirectTo(target, false);
+                return;
+            }
             if (_offMeshSnap is null
                 && _world.NearestReachablePoint(target, OffMeshSnapRange) is { } snap
-                && Vector3.Distance(snap, target) > tolerance + ArrivalSlack
+                && Vector3.Distance(snap, target) > ArrivalSlack          // the mesh reaches the target itself: a snap is just the same ask again
                 && Vector3.Distance(snap, _world.PlayerPosition) > ArrivalSlack)
             {
                 _offMeshSnap = snap;
@@ -1433,14 +1444,6 @@ public sealed class StepExecutor
                 _world.Log($"{Fmt(target)} is off the mesh; going to the nearest point it reaches " +
                            $"({Vector3.Distance(snap, target):F1}y short) and walking the rest.");
                 _world.MoveTo(snap, fly);
-                return;
-            }
-            if (_offMeshSnap is not null && !_offMeshNudged && distance <= OffMeshDirectMax)
-            {
-                _offMeshNudged = true;
-                _lastMoveIssue = now;
-                _world.Log($"Walking the last {distance:F1}y to {Fmt(target)} directly — the mesh does not cover it.");
-                _world.MoveDirectTo(target, false);
                 return;
             }
         }
