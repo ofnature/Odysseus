@@ -276,6 +276,21 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void An_accept_step_presses_the_offer_windows_own_accept()
+    {
+        // Kurobana vs. the Arrowheads sat at its offer for ninety seconds: TextAdvance's accept
+        // toggle was off, and only the society loop knew how to press the button.
+        var w = new FakeStepWorld { ArriveOnMove = true, TalkLength = TimeSpan.FromSeconds(60), TerritoryId = 614 };
+        w.PlayerPosition = new Vector3(474, 58, -183);
+        w.Spawned.Add(1019312);
+        w.VisibleAddons.Add("JournalAccept");
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.AcceptQuest, KindName = "AcceptQuest", DataId = 1019312, TerritoryId = 614, Position = new Vector3(474, 58, -183) });
+        for (var i = 0; i < 30 && !w.Calls.Contains("AcceptQuestOffer"); i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains("AcceptQuestOffer", w.Calls);
+    }
+
+    [Fact]
     public void The_reward_overcap_warning_is_answered_yes_unless_the_toggle_says_wait()
     {
         // Capped tomestones at a turn-in: "you will not be able to receive all the following" sat

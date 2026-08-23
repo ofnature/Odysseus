@@ -247,6 +247,7 @@ public sealed class StepExecutor
     private bool _meshRebuilt;
     private readonly Func<bool> _acceptOvercap;
     private DateTime _lastOvercapYes;
+    private DateTime _lastOfferAccept;
     private bool _flyFallback;
     private bool _combatLanded;
     private bool _landedToFinish;
@@ -2282,6 +2283,19 @@ public sealed class StepExecutor
             _sawOccupied = true;
             _phaseStart = now;
             _world.Log("Reward overcap warning — proceeding without the excess (Settings has the toggle).");
+            return;
+        }
+
+        // The quest offer itself: TextAdvance's accept function may be off (it is a global
+        // toggle over there), and an AcceptQuest step's whole purpose is this window. Press its
+        // own Accept — the same press the society accept loop makes.
+        if (step.Kind == StepKind.AcceptQuest && _world.IsAddonVisible("JournalAccept")
+            && now - _lastOfferAccept > TimeSpan.FromSeconds(1) && _world.AcceptOfferedQuest())
+        {
+            _lastOfferAccept = now;
+            _sawOccupied = true;
+            _phaseStart = now;
+            _world.Log("Quest offer accepted.");
             return;
         }
 
