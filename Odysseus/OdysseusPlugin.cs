@@ -260,7 +260,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             ingredients,
             gatheringSource,
             gatherBuddy,
-            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap),
+            // Never through the overcap warning here: the delivery runner plans its scrip payouts
+            // and stops short of the cap on purpose — a Yes at this window throws scrips away.
+            new StepExecutor(_world, dialogue, () => false),
             () => _config.DeliveryCraftJob,
             message => Say(message)
 #if DEBUG
