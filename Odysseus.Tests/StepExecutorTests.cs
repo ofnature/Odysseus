@@ -243,7 +243,8 @@ public class StepExecutorTests
         // Third Kobold hand-in: the second quest's chain was still up (ending at the overcap
         // warning), the interact phase waited behind it for thirty seconds, and the daily was
         // dropped one Yes away from done. An open conversation IS the turn-in — join it.
-        var w = new FakeStepWorld { ArriveOnMove = true };
+        var w = new FakeStepWorld { ArriveOnMove = true, TerritoryId = 180 };
+        w.PlayerPosition = new Vector3(7, 16, -189);
         w.Spawned.Add(1005928);
         w.IsOccupied = true;                       // the previous hand-in's chain, still open
         w.VisibleAddons.Add("SelectYesno");

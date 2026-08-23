@@ -579,6 +579,13 @@ public sealed class StepExecutor
             case Phase.WaitReady:
                 if (_world.IsReady && !_world.IsOccupied)
                     Enter(NextAfterArrival(step));
+                else if (_world.IsOccupied && step.Kind is StepKind.CompleteQuest or StepKind.AcceptQuest)
+                {
+                    // The previous hand-in's chain is still open, and for an accept or turn-in
+                    // that conversation IS the step — join it rather than waiting behind it.
+                    _sawOccupied = true;
+                    Enter(Phase.Dialogue);
+                }
                 else if (now - _phaseStart > ReadyWait)
                     Fail("player never became ready");
                 break;
