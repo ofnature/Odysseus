@@ -974,6 +974,7 @@ public sealed class StepExecutor
         {
             _dismountRechoose = true;
             _lastDismountTry = default;
+            _dismountedAt = default;
             return Phase.Dismount;
         }
 
@@ -1186,7 +1187,24 @@ public sealed class StepExecutor
         _dismountThen = then;
         _dismountRechoose = false;
         _lastDismountTry = default;
+        _dismountedAt = default;
         return Phase.Dismount;
+    }
+
+    /// <summary>How long after the mounted flag clears before anything is pressed.</summary>
+    private static readonly TimeSpan DismountSettle = TimeSpan.FromSeconds(0.8);
+
+    private DateTime _dismountedAt;
+
+    /// <summary>Feet down long enough to act. First call starts the clock.</summary>
+    private bool DismountSettled(DateTime now)
+    {
+        if (_dismountedAt == default)
+        {
+            _dismountedAt = now;
+            return false;
+        }
+        return now - _dismountedAt >= DismountSettle;
     }
 
     /// <summary>
@@ -1197,6 +1215,10 @@ public sealed class StepExecutor
     {
         if (!_world.IsMounted)
         {
+            // The flag clears before the animation ends, and a press in that gap is eaten
+            // silently. Both feet on the ground, then a beat.
+            if (!DismountSettled(now))
+                return;
             if (_dismountRechoose)
             {
                 _dismountRechoose = false;
@@ -2095,6 +2117,8 @@ public sealed class StepExecutor
                 Fail($"could not get off the mount to interact with {dataId}");
             return;
         }
+        if (_dismountAsked && !DismountSettled(now))
+            return; // off the mount but the animation is still playing; a press now is eaten
         _dismountAsked = false;
 
         if (!_world.IsDataIdSpawned(dataId))
@@ -2223,6 +2247,7 @@ public sealed class StepExecutor
                 _world.Log($"Nothing opened after interacting with {target} — dismounting first.");
                 _dismountAsked = true;
                 _lastDismountTry = now;
+                _dismountedAt = default;
                 _world.Dismount();
             }
 
