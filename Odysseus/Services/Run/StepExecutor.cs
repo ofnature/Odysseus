@@ -198,6 +198,9 @@ public sealed class StepExecutor
 
     /// <summary>"Moving" with the position frozen this long is a wedge, not a walk.</summary>
     private static readonly TimeSpan FrozenStallLimit = TimeSpan.FromSeconds(12);
+
+    /// <summary>A mid-air dismount still airborne after this long is a descent with no floor.</summary>
+    private static readonly TimeSpan BlockedDescentAfter = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan CombatMax = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan TravelStart = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan TravelMax = TimeSpan.FromSeconds(90);
@@ -271,6 +274,7 @@ public sealed class StepExecutor
     private bool _detourFly;
     private Vector3 _frozenAt;
     private DateTime _frozenSince;
+    private bool _descentRerouted;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -398,6 +402,7 @@ public sealed class StepExecutor
         _detourFly = false;
         _frozenAt = default;
         _frozenSince = default;
+        _descentRerouted = false;
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
@@ -1266,6 +1271,29 @@ public sealed class StepExecutor
     /// </summary>
     private void TickDismount(QuestStep step, DateTime now)
     {
+        // A descent with no floor beneath it never lands: hovering against Gyorin's ledge, two
+        // yalms under his feet, the dismount fell for thirty seconds and then faulted. Abort a
+        // descent that is not landing and fly over the step's own business point — the object,
+        // or the mark — to come down where a floor exists.
+        if (_world.IsMounted && _world.IsInFlight && !_descentRerouted && _world.CanFlyHere
+            && now - _phaseStart > BlockedDescentAfter)
+        {
+            var goal = step.DataId is { } id && _world.PositionOfDataId(id) is { } objectAt ? objectAt : step.Position;
+            if (goal is { } g && Vector3.Distance(g, _world.PlayerPosition) > 0.5f)
+            {
+                _descentRerouted = true;
+                _world.Log($"The descent is not landing (at {Fmt(_world.PlayerPosition)}) — flying over {Fmt(g)} to come down on its floor.");
+                _detourTo = g;
+                _detourThen = Phase.Dismount;
+                _detourTolerance = InteractReach - ArrivalSlack;
+                _detourNudged = false;
+                _detourNeedsShard = false;
+                _detourFly = true;
+                Enter(Phase.Move);
+                return;
+            }
+        }
+
         if (!_world.IsMounted)
         {
             // The flag clears before the animation ends, and a press in that gap is eaten
