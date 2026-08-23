@@ -448,6 +448,17 @@ public sealed class MainWindow : OdysseusWindow
             if (ImGui.SmallButton("Stop test")) Ctl.Stop();
         }
         if (ImGui.SmallButton("Open editor / recorder")) _d.OpenEditor(_selectedQuest);
+
+        // Where the character stands right now — the number every mark edit starts from.
+        var here = _d.PlayerPosition();
+        ImGui.TextColored(OdysseusTheme.TextDisabled,
+            $"Here: ({here.X:F1}, {here.Y:F1}, {here.Z:F1}) · territory {_d.Territory()}");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Copy##herepos"))
+            ImGui.SetClipboardText(FormattableString.Invariant(
+                $"\"Position\": {{ \"X\": {here.X:F3}, \"Y\": {here.Y:F3}, \"Z\": {here.Z:F3} }}"));
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Copies the position as a path-step JSON snippet.");
     }
 
     private void DrawRemainingSection()
