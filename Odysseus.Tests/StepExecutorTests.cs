@@ -238,6 +238,24 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_turn_in_joins_a_conversation_the_previous_hand_in_left_open()
+    {
+        // Third Kobold hand-in: the second quest's chain was still up (ending at the overcap
+        // warning), the interact phase waited behind it for thirty seconds, and the daily was
+        // dropped one Yes away from done. An open conversation IS the turn-in — join it.
+        var w = new FakeStepWorld { ArriveOnMove = true };
+        w.Spawned.Add(1005928);
+        w.IsOccupied = true;                       // the previous hand-in's chain, still open
+        w.VisibleAddons.Add("SelectYesno");
+        w.OvercapDialogUp = true;
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.CompleteQuest, KindName = "CompleteQuest", DataId = 1005928, TerritoryId = 180, Position = new Vector3(7, 16, -189) });
+        for (var i = 0; i < 20 && !w.Calls.Contains("OvercapYes"); i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains("OvercapYes", w.Calls);    // answered from the joined dialogue, not timed out
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Interact "));  // no press into an open window
+    }
+
+    [Fact]
     public void The_reward_overcap_warning_is_answered_yes_unless_the_toggle_says_wait()
     {
         // Capped tomestones at a turn-in: "you will not be able to receive all the following" sat

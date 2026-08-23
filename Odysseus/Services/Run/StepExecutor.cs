@@ -2098,6 +2098,17 @@ public sealed class StepExecutor
 
         if (!_world.IsReady || _world.IsOccupied)
         {
+            // A hand-in chain left open by the previous quest — its reward window, the overcap
+            // warning — occupies the player, and for an accept or turn-in that conversation IS
+            // the step: join it and let the dialogue machinery answer it, rather than waiting
+            // behind it for thirty seconds and calling the player not ready. The third Kobold
+            // hand-in of the day sat exactly there, one Yes away from done.
+            if (_world.IsOccupied && step.Kind is StepKind.CompleteQuest or StepKind.AcceptQuest)
+            {
+                _sawOccupied = true;
+                Enter(Phase.Dialogue);
+                return;
+            }
             if (now - _phaseStart > ReadyWait)
                 Fail("player never became ready to interact");
             return;
