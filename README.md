@@ -269,5 +269,9 @@ Odysseus is one of several plugins that share the Daedalus relay:
 
 ## Licence
 
-**GNU Lesser General Public License v3.0** — see [COPYING](COPYING) (the GPL-3.0 text) and
-[COPYING.LESSER](COPYING.LESSER) (the additional LGPL permissions).
+**GNU Affero General Public License v3.0** — see [COPYING](COPYING).
+
+Odysseus was LGPL-3.0 until 2026-08-21. It is AGPL now because the quest paths it runs are converted
+from [Questionable](https://github.com/PunishXIV/Questionable), which is AGPL-3.0, and a licence that
+carries less than its sources cannot honour them. Everything Odysseus draws on and the terms it
+draws on them under are listed in [NOTICE.md](NOTICE.md).

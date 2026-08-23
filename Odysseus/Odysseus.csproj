@@ -17,12 +17,23 @@
   </PropertyGroup>
 
   <!--
-    The shipped quest-path library. Packed from a dev client (Settings > Pack for release) and
-    committed, so a release build carries every path and nobody has to import anything. Optional at
-    build time: without it the plugin still runs, it just starts empty until someone imports.
+    No path library is shipped. The converted paths are a derivative of Questionable's bundle, which
+    is AGPL-3.0; importing it on your own machine is your business, and putting it in our download
+    would be us redistributing their data. A pack dropped in beside the DLL by hand is still read —
+    see PathPack.ShippedPath — so a user can carry their own between their own installs.
+  -->
+
+  <!--
+    GatherBuddy's node coordinates, shipped verbatim and gzipped, under Apache 2.0. Verbatim on
+    purpose: an unmodified copy is the simplest thing to attribute honestly, and it keeps their file
+    the authority rather than a transcription of it. The licence travels beside it. See NOTICE.md.
   -->
   <ItemGroup>
-    <Content Include="Assets\paths.pak" Condition="Exists('Assets\paths.pak')">
+    <Content Include="Assets\gatherbuddy-world_locations.json.gz" Condition="Exists('Assets\gatherbuddy-world_locations.json.gz')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="..\licenses\Apache-2.0.txt" Condition="Exists('..\licenses\Apache-2.0.txt')">
+      <Link>licenses\Apache-2.0.txt</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
   </ItemGroup>
