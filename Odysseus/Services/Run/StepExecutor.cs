@@ -201,6 +201,9 @@ public sealed class StepExecutor
 
     /// <summary>A mid-air dismount still airborne after this long is a descent with no floor.</summary>
     private static readonly TimeSpan BlockedDescentAfter = TimeSpan.FromSeconds(10);
+
+    /// <summary>Wedge re-paths before the leg is declared unservable and the fault says where.</summary>
+    private const int MaxFrozenStops = 6;
     private static readonly TimeSpan CombatMax = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan TravelStart = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan TravelMax = TimeSpan.FromSeconds(90);
@@ -277,6 +280,7 @@ public sealed class StepExecutor
     private bool _descentRerouted;
     private bool _groundFallback;
     private bool _lastIssuedFly;
+    private int _frozenStops;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -407,6 +411,7 @@ public sealed class StepExecutor
         _descentRerouted = false;
         _groundFallback = false;
         _lastIssuedFly = false;
+        _frozenStops = 0;
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
@@ -1620,10 +1625,22 @@ public sealed class StepExecutor
                 // A flown leg that wedges reissues on the ground once: the volume path is what
                 // snags on rooflines and branches, and the walk beneath them often just works —
                 // the user proved it by flipping Fly off by hand, step after step.
+                if (++_frozenStops > MaxFrozenStops)
+                {
+                    Fail($"the leg keeps wedging near {Fmt(_world.PlayerPosition)} — {_frozenStops} re-paths went "
+                         + $"nowhere toward {Fmt(target)}. vnavmesh cannot serve this spot; the step's mark may need moving.");
+                    return;
+                }
                 if (_lastIssuedFly && !_groundFallback)
                 {
                     _groundFallback = true;
                     _world.Log($"The flight is wedged at {Fmt(_world.PlayerPosition)} — trying this leg on the ground.");
+                }
+                else if (_groundFallback && _frozenStops >= 3)
+                {
+                    // The ground wedges too: alternate back to the air for another look.
+                    _groundFallback = false;
+                    _world.Log($"The ground wedges as well at {Fmt(_world.PlayerPosition)} — back to the air.");
                 }
                 else
                     _world.Log($"Moving without moving for {(now - _frozenSince).TotalSeconds:F0}s at {Fmt(_world.PlayerPosition)} — stopping and re-pathing.");
@@ -1737,8 +1754,10 @@ public sealed class StepExecutor
             // Giving up while still in the air is premature: a hover is fat and snags on lips
             // and rings a walker slips past — Clutch and Kin's ring sat 2.9y away, level, for
             // ten minutes of hover. Land once and run the attempts again on foot.
-            if (_world.IsInFlight && !_landedToFinish)
+            if (_world.IsInFlight && !_landedToFinish && distance <= OffMeshDirectMax)
             {
+                // Only within the last stretch: landing fifty yalms out just trades a flight
+                // problem for a longer ground one — it did, on Kurobana's hill.
                 _landedToFinish = true;
                 _moveRetries = 0;
                 _offMeshNudged = false;
