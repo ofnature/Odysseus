@@ -702,6 +702,36 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void Named_overworld_targets_are_hunted_wide_and_unnamed_pulls_stay_close()
+    {
+        // The Banestools roam past the thirty-yalm ring; with ids in hand the hunt goes as far
+        // as the object table sees, and the engage walk covers the distance.
+        var step = new QuestStep
+        {
+            Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.OverworldEnemies,
+            KillEnemyDataIds = [3437], TerritoryId = 152, Position = new Vector3(221, 5, 164),
+        };
+        var w = new FakeStepWorld { TerritoryId = 152, ArriveOnMove = true };
+        w.PlayerPosition = step.Position!.Value;
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+        for (var i = 0; i < 10 && !w.Calls.Contains("Attack"); i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Equal(StepExecutor.OverworldHuntRadius, w.LastAttackRadius);
+
+        // No ids: wide would pull someone else's mobs. The tight ring stands.
+        var any = new FakeStepWorld { TerritoryId = 152, ArriveOnMove = true };
+        any.PlayerPosition = step.Position!.Value;
+        ex = new StepExecutor(any);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.OverworldEnemies,
+            TerritoryId = 152, Position = step.Position,
+        });
+        for (var i = 0; i < 10 && !any.Calls.Contains("Attack"); i++) { ex.Tick(); any.Advance(0.5); }
+        Assert.Equal(StepExecutor.CombatSearchRadius, any.LastAttackRadius);
+    }
+
+    [Fact]
     public void Combat_gets_off_the_mount_before_it_pulls()
     {
         // Borderline Slaughter: ride to the spot, sit in the saddle, target mobs, swing nothing.

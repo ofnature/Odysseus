@@ -261,6 +261,7 @@ public sealed class TribeRunner
                 _controller.Stop();
             }
             var finished = _running;
+            _log($"{_tribe!.Name}: daily {finished} run ended (controller {_controller.State}, quest {_controller.QuestId}).");
             _running = 0; // controller went idle: the daily completed (or was stopped at its hand-in)
             // Objectives phase: the hand-in was held, so the daily is standing at sequence 255 —
             // it goes in the pile for the one trip home. A daily already turned in (or one the
@@ -273,7 +274,10 @@ public sealed class TribeRunner
         while (_toRun.Count > 0)
         {
             var id = _toRun.Dequeue();
-            if (_controller.QuestId == id) continue;
+            // Skip only a daily the controller is actively running. QuestId is sticky after a
+            // stop, and matching on it alone silently dropped the last-run daily from the
+            // turn-in round — its hand-in never happened and nothing said so.
+            if (_controller.State != RunState.Idle && _controller.QuestId == id) continue;
             if (!_controller.Start(id))
             {
                 _log($"{_tribe!.Name}: no path/refused for daily {id} — skipping.");

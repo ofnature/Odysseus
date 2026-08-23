@@ -237,9 +237,11 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
             _talkingUntil = UtcNow + TalkLength;
         return true;
     }
+    public float LastAttackRadius { get; private set; }
     public bool AttackNearestEnemy(IReadOnlyCollection<uint> dataIds, float radius)
     {
         Calls.Add("Attack");
+        LastAttackRadius = radius;
         return AttackResults.Count > 0 && AttackResults.Dequeue();
     }
     // ── Instances and handoffs ──

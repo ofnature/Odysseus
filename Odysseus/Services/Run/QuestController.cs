@@ -323,7 +323,7 @@ public sealed class QuestController
         return true;
     }
 
-    public void Stop()
+    public void Stop([System.Runtime.CompilerServices.CallerMemberName] string? by = null)
     {
         _singleStep = null;
         _awaitingResumeConfirm = false;
@@ -334,7 +334,7 @@ public sealed class QuestController
         _world.StopMoving();
         _world.ReleaseDialogue();
         if (State != RunState.Idle)
-            _log("Stopped.");
+            _log($"Stopped. (from {by ?? "?"}, quest {_questId}, {State})");
         State = RunState.Idle;
         _block = null;
         _waitingSince = null;

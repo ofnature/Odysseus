@@ -117,6 +117,9 @@ public sealed class StepExecutor
     public const float MountWorthDistance = 30f;
     /// <summary>Overworld enemies farther than this are not "ours".</summary>
     public const float CombatSearchRadius = 30f;
+
+    /// <summary>How far a named overworld target is hunted from the mark — the roamers' range.</summary>
+    public const float OverworldHuntRadius = 90f;
     /// <summary>
     /// vnavmesh declares arrival by its own tolerance and can stop a hair outside ours; without
     /// slack the executor would re-path three times over half a yalm and then fail the step.
@@ -2472,8 +2475,14 @@ public sealed class StepExecutor
             return;
         }
 
-        // Out of combat. Anything left to pull?
-        if (_world.AttackNearestEnemy(enemies, CombatSearchRadius))
+        // Out of combat. Anything left to pull? Named overworld mobs roam: the Banestools stood
+        // in plain sight past the thirty-yalm ring while the step waited at the mark for nothing.
+        // With ids to look for, hunt as far as the object table sees and walk to the nearest;
+        // the tight ring stays for unnamed pulls, where wide means someone else's mobs.
+        var radius = enemies.Count > 0 && step.EnemySpawnType == EnemySpawnType.OverworldEnemies
+            ? OverworldHuntRadius
+            : CombatSearchRadius;
+        if (_world.AttackNearestEnemy(enemies, radius))
         {
             _phase = Phase.Combat;
             return;
