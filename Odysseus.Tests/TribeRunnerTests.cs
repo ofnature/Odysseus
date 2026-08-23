@@ -65,6 +65,21 @@ public class TribeRunnerTests : IDisposable
         });
     }
 
+    /// <summary>An objective at the mob/object, and a hand-in back at the issuer.</summary>
+    private void StoreDailyWithTurnIn(ushort id, uint npc)
+    {
+        _world.Spawned.Add(npc);
+        _store.Save(new QuestPath
+        {
+            QuestId = id, Name = $"Daily {id}", Category = "Allied Societies",
+            Sequences =
+            [
+                new QuestSequence { Sequence = 0, Steps = [new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = npc, TerritoryId = 146, Position = _world.PlayerPosition }] },
+                new QuestSequence { Sequence = 255, Steps = [new QuestStep { Kind = StepKind.CompleteQuest, KindName = "CompleteQuest", DataId = 1005550, TerritoryId = 146, Position = _world.PlayerPosition }] },
+            ],
+        });
+    }
+
     private void Ticks(int n, double seconds = 0.5)
     {
         for (var i = 0; i < n; i++) { _runner.Tick(); _world.Advance(seconds); }
@@ -131,6 +146,41 @@ public class TribeRunnerTests : IDisposable
         _quests.Set(2001, 0);
         Ticks(30);
         Assert.Contains("Interact 5001", _world.Calls);
+    }
+
+    [Fact]
+    public void All_objectives_first_then_one_trip_home_for_every_turn_in()
+    {
+        StoreDailyWithTurnIn(2001, 5001);
+        StoreDailyWithTurnIn(2002, 5002);
+        _state.Accepted.AddRange([2001, 2002]);
+        _state.CompletedToday = 3;   // nothing to accept; straight to the objectives
+        _quests.Set(2001, 0);
+        _quests.Set(2002, 0);
+        Assert.True(_runner.Start(Amaljaa));
+        Ticks(2);
+        Assert.Equal(TribeRunState.Run, _runner.State);
+
+        // Daily one's objective is done; the game moves it to its hand-in sequence — and instead
+        // of walking home, the runner holds the turn-in and starts daily two's objective.
+        Ticks(30);
+        Assert.Contains("Interact 5001", _world.Calls);
+        _quests.Set(2001, 255);
+        Ticks(30);
+        Assert.Contains("Interact 5002", _world.Calls);
+        Assert.DoesNotContain("Interact 1005550", _world.Calls);   // no trip home yet
+        _quests.Set(2002, 255);
+        Ticks(10);
+
+        // Now the one trip: both hand-ins from the same visit.
+        Ticks(60);
+        Assert.Contains("Interact 1005550", _world.Calls);
+        _quests.Accepted.Remove(2001); _quests.Complete.Add(2001);
+        Ticks(60);
+        _quests.Accepted.Remove(2002); _quests.Complete.Add(2002);
+        Ticks(30);
+        Assert.Equal(TribeRunState.Done, _runner.State);
+        Assert.Contains(_log, l => l.Contains("back to hand them in"));
     }
 
     [Fact]

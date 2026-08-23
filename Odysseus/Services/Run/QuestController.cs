@@ -139,6 +139,12 @@ public sealed class QuestController
     /// <summary>Armed: finish the current quest, then stop instead of rolling into the next.</summary>
     public bool StopAfterQuest { get; set; }
 
+    /// <summary>
+    /// Armed: run the objectives and stop the moment the quest reaches its hand-in (sequence 255)
+    /// instead of travelling back. What batches a day of dailies into one trip home. Reset by Start.
+    /// </summary>
+    public bool HoldTurnIn { get; set; }
+
     /// <summary>Armed: finish the current step, then stop — the "Step" button.</summary>
     public bool PauseAfterStep { get; set; }
 
@@ -243,6 +249,7 @@ public sealed class QuestController
         _runStarted = _world.UtcNow;
         _questsThisRun = 0;
         StopAfterQuest = false;
+        HoldTurnIn = false;
         // Started by hand on a listed quest: treat it as the priority run it is.
         _runningPriority = PriorityNext?.Invoke() == questId;
         return Begin(questId, path);
@@ -399,6 +406,13 @@ public sealed class QuestController
         var snap = _quests.Read(_questId);
         _lastSnapshot = snap;
         var sequence = snap.IsAvailable ? snap.Sequence : (byte)0;
+
+        if (HoldTurnIn && sequence == 255)
+        {
+            _log($"Quest {_questId}: objectives done — holding the turn-in.");
+            Stop();
+            return;
+        }
 
         if (sequence != _currentSequence)
             EnterSequence(sequence, snap);

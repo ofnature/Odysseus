@@ -24,7 +24,8 @@ public enum TribeRunState
 
 /// <summary>
 /// Runs one allied society's dailies for the day: get the right job, go to the issuer, accept up
-/// to the day's slots, then run each accepted daily to completion through the same
+/// to the day's slots, then run every accepted daily's objectives — each hand-in held — and make
+/// one trip home to turn them all in, through the same
 /// <see cref="QuestController"/> the MSQ uses.
 ///
 /// <para>
@@ -54,6 +55,8 @@ public sealed class TribeRunner
     private int _acceptTarget;
     private Queue<ushort> _toRun = new();
     private ushort _running;
+    private readonly Queue<ushort> _toTurnIn = new();
+    private bool _turningIn;
     private bool _needAccept;
     private readonly List<ushort> _dropped = [];
 
@@ -91,6 +94,8 @@ public sealed class TribeRunner
         }
         var slots = Math.Min(standing.SlotsLeft, _state.AllowanceLeft);
         _toRun = new Queue<ushort>(standing.AcceptedDailies); // finish any already in the journal too
+        _toTurnIn.Clear();
+        _turningIn = false;
         if (slots <= 0 && _toRun.Count == 0)
         {
             StatusLine = $"{tribe.Name}: nothing left today (slots {standing.SlotsLeft}, allowance {_state.AllowanceLeft}).";
@@ -255,7 +260,13 @@ public sealed class TribeRunner
                 _log($"{_tribe!.Name}: the controller rolled on to quest {_controller.QuestId} after the daily — stopping it.");
                 _controller.Stop();
             }
-            _running = 0; // controller went idle: the daily completed (or was stopped)
+            var finished = _running;
+            _running = 0; // controller went idle: the daily completed (or was stopped at its hand-in)
+            // Objectives phase: the hand-in was held, so the daily is standing at sequence 255 —
+            // it goes in the pile for the one trip home. A daily already turned in (or one the
+            // roll-on guard stopped early) resumes from wherever it stands, which is also right.
+            if (!_turningIn && finished != 0)
+                _toTurnIn.Enqueue(finished);
         }
 
         // Next daily still not complete.
@@ -271,8 +282,19 @@ public sealed class TribeRunner
             // A daily is one quest. Start resets this flag, so it is armed after, and it is what
             // keeps the controller from rolling into the priority list or the MSQ when it ends.
             _controller.StopAfterQuest = true;
+            // Objectives first for the whole batch; the trips home all happen together after.
+            _controller.HoldTurnIn = !_turningIn;
             _running = id;
-            StatusLine = $"{_tribe!.Name}: running daily {id}";
+            StatusLine = $"{_tribe!.Name}: {(_turningIn ? "turning in" : "running")} daily {id}";
+            return;
+        }
+
+        if (!_turningIn && _toTurnIn.Count > 0)
+        {
+            _turningIn = true;
+            while (_toTurnIn.Count > 0)
+                _toRun.Enqueue(_toTurnIn.Dequeue());
+            _log($"{_tribe!.Name}: objectives done for {_toRun.Count} — back to hand them in.");
             return;
         }
 
