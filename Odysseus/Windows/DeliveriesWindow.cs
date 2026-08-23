@@ -242,6 +242,10 @@ public sealed class DeliveriesWindow : OdysseusWindow
 
     private void DrawClientRow(DeliveryClient client)
     {
+        // Same-labelled buttons on every row share an ImGui id without this, and only the first
+        // row's ever respond — the bug that made every society but Amalj'aa unclickable.
+        using var rowId = Dalamud.Interface.Utility.Raii.ImRaii.PushId((int)client.Index);
+
         var open = _state.IsUnlocked(client);
         var bonus = open ? _bonus.For(client) : BonusFlags.None;
         var remaining = _scrips.RemainingDeliveries(client);

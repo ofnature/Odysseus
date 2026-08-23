@@ -97,6 +97,9 @@ public sealed class FlightWindow : OdysseusWindow
 
     private void DrawZone(ZoneFlight zone, uint here)
     {
+        // Per-row id scope; identical buttons on sibling rows are dead without it.
+        using var rowId = Dalamud.Interface.Utility.Raii.ImRaii.PushId((int)zone.TerritoryId);
+
         var missing = zone.Missing(_state.IsUnlocked).ToList();
         var fromQuests = missing.Where(c => c.FromQuest).ToList();
         var loose = missing.Where(c => !c.FromQuest).ToList();

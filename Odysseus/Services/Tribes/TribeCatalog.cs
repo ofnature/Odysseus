@@ -57,6 +57,12 @@ public sealed class TribeCatalog
     {
         try
         {
+            // Every society climbs the same ladder — Neutral to Sworn and then Allied, eight ranks
+            // — so the ceiling comes from the ladder itself. BeastTribe.MaxRank reads 4 for the ARR
+            // combat tribes and 7 for the Ixal, which matches nothing a player sees; whatever that
+            // column means, it is not this.
+            var maxRank = (byte)Math.Max(1, data.GetExcelSheet<BeastReputationRank>().Count - 1);
+
             var quests = data.GetExcelSheet<Lumina.Excel.Sheets.Quest>();
             var dailiesByTribe = quests
                 .Where(q => q.RowId >= 65536 && q.IsRepeatable && q.BeastTribe.RowId != 0)
@@ -90,7 +96,7 @@ public sealed class TribeCatalog
                 var kind = KindOf(dailies);
                 unlockByTribe.TryGetValue((byte)tribe.RowId, out var unlock);
                 _byId[(byte)tribe.RowId] = new TribeInfo(
-                    (byte)tribe.RowId, Capitalise(name), tribe.Expansion.RowId, kind, tribe.MaxRank,
+                    (byte)tribe.RowId, Capitalise(name), tribe.Expansion.RowId, kind, maxRank,
                     issuers, dailies.Select(q => (ushort)(q.RowId - 65536)).ToList(), unlock,
                     tribe.IconReputation != 0 ? tribe.IconReputation : tribe.Icon);
             }

@@ -49,6 +49,13 @@ public sealed class TribesWindow : OdysseusWindow
     public override void Draw()
     {
         ImGui.TextColored(OdysseusTheme.TextSecondary, $"Daily allowance left: {_state.AllowanceLeft} / 12");
+        if (_runner.State is TribeRunState.Idle or TribeRunState.Done && _runner.StatusLine.Length > 0)
+        {
+            // A refusal from Start lands here — the alternative was a Run click that appeared to
+            // do nothing while the reason evaporated with the queue entry.
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.StatusYellow, _runner.StatusLine);
+        }
         if (_runner.State is not (TribeRunState.Idle or TribeRunState.Done or TribeRunState.Faulted))
         {
             ImGui.SameLine(0f, 16f);
@@ -95,6 +102,12 @@ public sealed class TribesWindow : OdysseusWindow
 
     private void DrawRow(TribeInfo tribe)
     {
+        // Every row draws a "Run" or "Unlock" of the same icon and label, and ImGui derives the
+        // button's id from exactly those — so without a per-row scope only the first instance
+        // drawn ever received a click. Amalj'aa ran; the identical buttons below it were dead
+        // rectangles, which looked precisely like a click that did nothing.
+        using var rowId = Dalamud.Interface.Utility.Raii.ImRaii.PushId(tribe.Id);
+
         var s = _state.Read(tribe);
         var muted = s.Unlocked ? OdysseusTheme.TextSecondary : OdysseusTheme.TextDisabled;
 

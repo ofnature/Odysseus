@@ -231,6 +231,32 @@ public class QuestControllerTests : IDisposable
         Assert.DoesNotContain(_world.Calls, c => c.StartsWith("Gearset "));
     }
 
+    [Fact]
+    public void Stop_after_quest_holds_against_continue_to_next()
+    {
+        // The tribe runner runs one daily at a time through this controller and arms this flag.
+        // With "continue to next quest" on, a completion that rolled on would leave the controller
+        // busy forever from the runner's point of view — and every society's Run button greys on
+        // its state.
+        _policy.ContinueToNextQuest = true;
+        _chain[1622] = 1700;                                   // a next quest exists and has a path
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+        _store.Save(new QuestPath { QuestId = 1700, Name = "Next", Sequences = [new QuestSequence { Sequence = 1, Steps = [Interact(2)] }] });
+        _world.Spawned.UnionWith([1u, 2u]);
+        _quests.Set(1622, 1);
+
+        Assert.True(_controller.Start(1622));
+        _controller.StopAfterQuest = true;                     // armed after Start, as the runner does
+
+        _quests.Accepted.Remove(1622);
+        _quests.Complete.Add(1622);                            // the daily completes
+        Ticks(6);
+
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.NotEqual((ushort)1700, _controller.QuestId);    // it did not roll on
+        Assert.Contains("as armed", _controller.StatusLine);
+    }
+
     // ── controller ──
 
     [Fact]

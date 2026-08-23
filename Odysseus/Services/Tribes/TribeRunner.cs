@@ -54,6 +54,8 @@ public sealed class TribeRunner
     private int _acceptTarget;
     private Queue<ushort> _toRun = new();
     private ushort _running;
+    private bool _needAccept;
+    private readonly List<ushort> _dropped = [];
 
     public TribeRunner(IStepWorld world, ITribeState state, QuestController controller, StepExecutor travelExecutor, Action<string> log)
     {
@@ -96,9 +98,20 @@ public sealed class TribeRunner
         }
         _tribe = tribe;
         _issuer = issuer;
+        _dropped.Clear();
         _acceptTarget = standing.TakenToday + slots;
-        Enter(_world.IsCombatJob ? TribeRunState.Travel : TribeRunState.Job);
-        _log($"{tribe.Name}: starting — accept up to {slots}, {_toRun.Count} already accepted.");
+
+        // The issuer is only worth a trip when there is something to accept. Dailies already in
+        // the journal — a restart mid-run, a fault, a reload — resume from wherever the character
+        // stands: the quest controller picks each one up at the game's own sequence, and walking
+        // back to the issuer first was a round trip for nothing.
+        _needAccept = slots > 0;
+        Enter(!_world.IsCombatJob ? TribeRunState.Job
+            : _needAccept ? TribeRunState.Travel
+            : TribeRunState.Run);
+        _log(_needAccept
+            ? $"{tribe.Name}: starting — accept up to {slots}, {_toRun.Count} already accepted."
+            : $"{tribe.Name}: resuming {_toRun.Count} accepted dailies from here.");
         return true;
     }
 
@@ -132,7 +145,7 @@ public sealed class TribeRunner
 
     private void TickJob()
     {
-        if (_world.IsCombatJob) { Enter(TribeRunState.Travel); return; }
+        if (_world.IsCombatJob) { Enter(_needAccept ? TribeRunState.Travel : TribeRunState.Run); return; }
         var sets = _world.CombatGearsets();
         if (sets.Count == 0) { Fault($"{_tribe!.Name}: no combat gearset to switch to."); return; }
         if (_world.UtcNow - _lastInteract > TimeSpan.FromSeconds(1))
@@ -223,14 +236,24 @@ public sealed class TribeRunner
             if (_controller.State == RunState.Faulted)
             {
                 _log($"{_tribe!.Name}: daily {_running} faulted ({_controller.StatusLine}) — dropping it.");
+                _dropped.Add(_running);
                 _controller.Stop();
                 _running = 0;
                 return;
             }
             if (_controller.State != RunState.Idle)
             {
-                StatusLine = $"{_tribe!.Name}: {_controller.StatusLine}";
-                return; // still running
+                // Only while it is still our daily. The controller rolling on into the priority
+                // list or the MSQ would otherwise read as a daily that never finishes — which
+                // greys every society's Run button for the rest of the day, since they all share
+                // this runner's state.
+                if (_controller.QuestId == _running)
+                {
+                    StatusLine = $"{_tribe!.Name}: {_controller.StatusLine}";
+                    return; // still running
+                }
+                _log($"{_tribe!.Name}: the controller rolled on to quest {_controller.QuestId} after the daily — stopping it.");
+                _controller.Stop();
             }
             _running = 0; // controller went idle: the daily completed (or was stopped)
         }
@@ -245,13 +268,22 @@ public sealed class TribeRunner
                 _log($"{_tribe!.Name}: no path/refused for daily {id} — skipping.");
                 continue;
             }
+            // A daily is one quest. Start resets this flag, so it is armed after, and it is what
+            // keeps the controller from rolling into the priority list or the MSQ when it ends.
+            _controller.StopAfterQuest = true;
             _running = id;
             StatusLine = $"{_tribe!.Name}: running daily {id}";
             return;
         }
 
         Enter(TribeRunState.Done);
-        StatusLine = $"{_tribe!.Name}: done.";
+        // "Done." with a daily silently dropped read as everything having worked, while the quest
+        // sat unfinished in the journal. Done says what happened to all of them.
+        StatusLine = _dropped.Count == 0
+            ? $"{_tribe!.Name}: done."
+            : $"{_tribe!.Name}: done, but {_dropped.Count} dail{(_dropped.Count == 1 ? "y" : "ies")} " +
+              $"faulted and {(_dropped.Count == 1 ? "was" : "were")} left in the journal ({string.Join(", ", _dropped)}) — " +
+              "Run again to retry from where they stand.";
         _log(StatusLine);
     }
 
