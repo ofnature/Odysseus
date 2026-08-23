@@ -698,6 +698,27 @@ public class StepExecutorTests
         Assert.True(dismount < interact, "interacted from the saddle");
     }
     [Fact]
+    public void A_leg_that_gives_up_in_flight_lands_and_tries_again_on_foot()
+    {
+        // Level with the ring, 2.9y short, hover snagged: the give-up lands first, and only a
+        // grounded failure settles for "near enough".
+        var mark = new Vector3(-41, -23, -90);
+        var world = new FakeStepWorld { TerritoryId = 138, IsMounted = true, IsInFlight = true, CanFlyHere = true, PathWaypointCount = 0 };
+        world.PlayerPosition = new Vector3(-41, -23, -92.9f);
+        world.NearestReachableFn = (p, _) => p;   // mesh claims everything, gives nothing
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", Fly = true, TerritoryId = 138, Position = mark });
+
+        for (var i = 0; i < 40 && !world.Calls.Contains("Dismount"); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("landing to finish on foot"));
+        Assert.Contains("Dismount", world.Calls);
+
+        // On foot the ring is stepped into (or, here, the grounded retries settle for the mark).
+        world.IsInFlight = false; world.IsMounted = false;
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+    }
+
+    [Fact]
     public void A_flight_hanging_over_a_walkto_mark_lands_before_judging_arrival()
     {
         // Clutch and Kin's destination ring: the flight ends hovering over it, the ring fires

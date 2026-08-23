@@ -244,6 +244,7 @@ public sealed class StepExecutor
     private DateTime _lastOvercapYes;
     private bool _flyFallback;
     private bool _combatLanded;
+    private bool _landedToFinish;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -363,6 +364,7 @@ public sealed class StepExecutor
         _sawCombat = false;
         _flyFallback = false;
         _combatLanded = false;
+        _landedToFinish = false;
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
@@ -1564,13 +1566,27 @@ public sealed class StepExecutor
 
         if (_moveRetries >= MaxMoveRetries)
         {
+            // Giving up while still in the air is premature: a hover is fat and snags on lips
+            // and rings a walker slips past — Clutch and Kin's ring sat 2.9y away, level, for
+            // ten minutes of hover. Land once and run the attempts again on foot.
+            if (_world.IsInFlight && !_landedToFinish)
+            {
+                _landedToFinish = true;
+                _moveRetries = 0;
+                _offMeshNudged = false;
+                _footingTaken = false;
+                _world.Log($"Still in flight {distance:F1}y from {Fmt(target)} — landing to finish on foot.");
+                Enter(BeginDismount(Phase.Move));
+                return;
+            }
             // A waypoint, not a target: a WalkTo that the world will not let us finish — three
             // yalms from the mark with the pathfinder silent and a straight walk stalled — has
             // done its job, which was to get us *here*. The step that needs exactness is the next
             // one, and it measures from its own target.
             if (step.Kind == StepKind.WalkTo && detour is null && distance <= WalkToNearEnough)
             {
-                _world.Log($"Ended {distance:F1}y short of the mark {Fmt(target)} and can get no closer — near enough for a waypoint.");
+                _world.Log($"Ended {distance:F1}y short of the mark {Fmt(target)} and can get no closer — near enough for a waypoint. "
+                    + $"(standing at {Fmt(_world.PlayerPosition)}, {(_world.IsInFlight ? "in flight" : _world.IsMounted ? "mounted" : "on foot")})");
                 _world.StopMoving();
                 Enter(Phase.WaitReady);
                 return;
