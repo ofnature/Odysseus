@@ -242,7 +242,7 @@ public class StepExecutorTests
         // holding a mesh that did not cover where she stood. The message should say so, because
         // the fix (/vnav rebuild) is nothing like the fix for a destination behind a door.
         var stale = new FakeStepWorld { PathWaypointCount = 0, PlayerPosition = new Vector3(1, 0, 1) };
-        stale.MeshReachesFn = (p, _) => false;   // nothing reachable, not even our own feet
+        stale.NearestReachableFn = (p, _) => null;   // nothing reachable, not even our own feet
         var ex = new StepExecutor(stale);
         ex.Begin(Step(StepKind.WalkTo, new Vector3(10, 0, 10)));
         Assert.Equal(StepStatus.Failed, Run(ex, stale));
@@ -250,11 +250,34 @@ public class StepExecutorTests
         Assert.Contains("/vnav rebuild", ex.FailReason);
 
         var door = new FakeStepWorld { PathWaypointCount = 0, PlayerPosition = new Vector3(1, 0, 1) };
-        door.MeshReachesFn = (p, _) => p == door.PlayerPosition;   // our feet are fine; the target is not
+        door.NearestReachableFn = (p, _) => p == door.PlayerPosition ? p : null;   // our feet are fine; the target is not
         ex = new StepExecutor(door);
         ex.Begin(Step(StepKind.WalkTo, new Vector3(10, 0, 10)));
         Assert.Equal(StepStatus.Failed, Run(ex, door));
         Assert.Contains("no route from here to there", ex.FailReason);
+    }
+
+    [Fact]
+    public void A_destination_off_the_mesh_is_reached_by_its_nearest_mesh_point_and_a_walk()
+    {
+        // Hamujj Gah's platform is painted non-walkable: the WalkTo beside him has no mesh under it.
+        // The mesh is asked where it can get to, that is pathed to, and the last few yalms are on foot.
+        var target = new Vector3(107, 15, -361);
+        var edge = new Vector3(103, 15, -358);
+        var world = new FakeStepWorld { PathWaypointCount = 0, PlayerPosition = new Vector3(90, 15, -350) };
+        world.NearestReachableFn = (p, _) => p == world.PlayerPosition ? p : Vector3.Distance(p, target) < 1 ? edge : null;
+        var ex = new StepExecutor(world);
+        ex.Begin(Step(StepKind.WalkTo, target));
+
+        // First ask: nothing. Second look: snap to the edge and go there.
+        for (var i = 0; i < 12 && !world.Calls.Any(c => c.StartsWith("Move 103,15,-358")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Move 103,15,-358"));
+        world.PlayerPosition = edge;   // arrived at the mesh's edge, standing still
+
+        for (var i = 0; i < 12 && !world.Calls.Any(c => c.StartsWith("MoveDirect 107,15,-361")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("MoveDirect 107,15,-361"));
+        world.PlayerPosition = target;
+        Assert.Equal(StepStatus.Done, Run(ex, world));
     }
 
     [Fact]

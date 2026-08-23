@@ -10,9 +10,9 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Vector3 PlayerPosition { get; set; }
     public uint TerritoryId { get; set; } = 400;
     public bool NavmeshReady { get; set; } = true;
-    /// <summary>Null = everything is on the mesh; otherwise answers per point.</summary>
-    public Func<Vector3, float, bool>? MeshReachesFn { get; set; }
-    public bool MeshReaches(Vector3 point, float within) => MeshReachesFn?.Invoke(point, within) ?? true;
+    /// <summary>Null = everything is on the mesh (the point itself comes back); otherwise answers per point.</summary>
+    public Func<Vector3, float, Vector3?>? NearestReachableFn { get; set; }
+    public Vector3? NearestReachablePoint(Vector3 near, float within) => NearestReachableFn is { } f ? f(near, within) : near;
     /// <summary>0..1 while the mesh builds; negative means it is not building.</summary>
     public float NavmeshBuildProgress { get; set; } = -1f;
     public bool IsMoving { get; set; }

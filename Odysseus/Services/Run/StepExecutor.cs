@@ -90,6 +90,12 @@ public sealed class StepExecutor
     /// </summary>
     private const float DetourNudgeDistance = 12f;
 
+    /// <summary>How far around an off-mesh destination to look for a point the mesh does reach.</summary>
+    private const float OffMeshSnapRange = 10f;
+
+    /// <summary>The most that is walked blind from the mesh's nearest point to the destination.</summary>
+    private const float OffMeshDirectMax = 15f;
+
     /// <summary>Distances past this are worth a mount.</summary>
     public const float MountWorthDistance = 30f;
     /// <summary>Overworld enemies farther than this are not "ours".</summary>
@@ -210,6 +216,8 @@ public sealed class StepExecutor
     private float _detourTolerance = DefaultStopDistance;
     /// <summary>The straight-line finish has been used for this detour; it gets one go.</summary>
     private bool _detourNudged;
+    private Vector3? _offMeshSnap;
+    private bool _offMeshNudged;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -1406,6 +1414,37 @@ public sealed class StepExecutor
             return;
         }
 
+        var fly = step.Fly && _world.CanFlyHere && !_groundOnly;
+
+        // The mesh answered nothing and we are standing still. Before asking again: a destination
+        // that is simply off the mesh — an NPC's platform painted non-walkable is the usual shape,
+        // Hamujj Gah's among them — is reached by pathing to the nearest point the mesh does reach
+        // and walking the rest on foot. A genuine "no route" snaps to nothing, or to a point no
+        // nearer than here, and keeps its failure below.
+        if (!direct && _moveRetries > 0 && _world.PathWaypointCount == 0)
+        {
+            if (_offMeshSnap is null
+                && _world.NearestReachablePoint(target, OffMeshSnapRange) is { } snap
+                && Vector3.Distance(snap, target) > tolerance + ArrivalSlack
+                && Vector3.Distance(snap, _world.PlayerPosition) > ArrivalSlack)
+            {
+                _offMeshSnap = snap;
+                _lastMoveIssue = now;
+                _world.Log($"{Fmt(target)} is off the mesh; going to the nearest point it reaches " +
+                           $"({Vector3.Distance(snap, target):F1}y short) and walking the rest.");
+                _world.MoveTo(snap, fly);
+                return;
+            }
+            if (_offMeshSnap is not null && !_offMeshNudged && distance <= OffMeshDirectMax)
+            {
+                _offMeshNudged = true;
+                _lastMoveIssue = now;
+                _world.Log($"Walking the last {distance:F1}y to {Fmt(target)} directly — the mesh does not cover it.");
+                _world.MoveDirectTo(target, false);
+                return;
+            }
+        }
+
         if (_moveRetries >= MaxMoveRetries)
         {
             Fail(!direct && _world.PathWaypointCount == 0
@@ -1414,7 +1453,6 @@ public sealed class StepExecutor
             return;
         }
 
-        var fly = step.Fly && _world.CanFlyHere && !_groundOnly;
         var ok = direct
             ? _world.MoveDirectTo(target, fly)
             : tolerance > WalkToStopDistance
@@ -1434,9 +1472,9 @@ public sealed class StepExecutor
     /// </summary>
     private string MeshDiagnosis(Vector3 target)
     {
-        if (!_world.MeshReaches(_world.PlayerPosition, 3f))
+        if (_world.NearestReachablePoint(_world.PlayerPosition, 3f) is null)
             return " — the loaded navmesh does not cover where you stand, so it is probably stale for this zone: /vnav rebuild, then Retry";
-        if (!_world.MeshReaches(target, 3f))
+        if (_world.NearestReachablePoint(target, 3f) is null)
             return " — the mesh has no route from here to there (off the mesh, or behind a door or zone line)";
         return string.Empty;
     }
@@ -2352,6 +2390,8 @@ public sealed class StepExecutor
         {
             _lastMoveIssue = default;
             _moveRetries = 0;
+            _offMeshSnap = null;
+            _offMeshNudged = false;
         }
     }
 
