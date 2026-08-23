@@ -738,6 +738,26 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_dive_step_presses_the_descent_bind_until_the_water_accepts()
+    {
+        // Gyorin the Namazu: swim to the mark, then under. The press is the game's own bind.
+        var world = new FakeStepWorld { TerritoryId = 614, IsSwimming = true };
+        world.PlayerPosition = new Vector3(-488, -1, 579);
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Dive, KindName = "Dive", TerritoryId = 614, Position = new Vector3(-488, -1, 579) });
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.True(world.Calls.Count(c => c == "Descend") >= 3);
+
+        // Dry land is not a place to dive from.
+        var dry = new FakeStepWorld { TerritoryId = 614 };
+        dry.PlayerPosition = new Vector3(-488, -1, 579);
+        ex = new StepExecutor(dry);
+        ex.Begin(new QuestStep { Kind = StepKind.Dive, KindName = "Dive", TerritoryId = 614, Position = new Vector3(-488, -1, 579) });
+        Assert.Equal(StepStatus.Failed, Run(ex, dry));
+        Assert.Contains("not in the water", ex.FailReason);
+    }
+
+    [Fact]
     public void A_flight_hanging_over_a_walkto_mark_lands_before_judging_arrival()
     {
         // Clutch and Kin's destination ring: the flight ends hovering over it, the ring fires

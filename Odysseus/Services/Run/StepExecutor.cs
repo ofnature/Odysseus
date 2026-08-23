@@ -50,6 +50,8 @@ public sealed class StepExecutor
         ActionUse,
         /// <summary>Fire the step's emote at its target, with the same patience for the target.</summary>
         EmoteUse,
+        /// <summary>Pressing the descent key until the water accepts us.</summary>
+        Dive,
         /// <summary>Vendor interacted with, waiting for the shop window.</summary>
         Shop,
         /// <summary>Shop open: buy the shortfall and watch the bag until it is covered.</summary>
@@ -365,6 +367,8 @@ public sealed class StepExecutor
         _flyFallback = false;
         _combatLanded = false;
         _landedToFinish = false;
+        _lastDiveTry = default;
+        _diveAttempts = 0;
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
@@ -406,7 +410,7 @@ public sealed class StepExecutor
         or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem or StepKind.Say
         or StepKind.EquipRecommended or StepKind.Action or StepKind.Instruction or StepKind.StatusOff
         or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Craft or StepKind.Gather
-        or StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset;
+        or StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset or StepKind.Dive;
 
     /// <summary>The step hands the character to another plugin for a whole instance.</summary>
     public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
@@ -576,6 +580,10 @@ public sealed class StepExecutor
 
             case Phase.EmoteUse:
                 TickEmoteUse(step, now);
+                break;
+
+            case Phase.Dive:
+                TickDive(now);
                 break;
 
             case Phase.WaitReady:
@@ -999,6 +1007,13 @@ public sealed class StepExecutor
                     _world.Log($"Path note: {note}");
                 return Phase.Finish;
 
+            case StepKind.Dive:
+                // Below the surface already is arrival; from the surface (or the saddle over
+                // it), press the game's own descent bind until the water accepts us.
+                if (_world.IsDiving)
+                    return Phase.Finish;
+                return Phase.Dive;
+
             case StepKind.Action:
                 if (step.ActionName is not { } actionName || _world.ResolveAction(actionName) is not { } _)
                 {
@@ -1294,6 +1309,42 @@ public sealed class StepExecutor
             Fail($"action \"{step.ActionName}\" was refused — see the log for the game's reason");
     }
 
+    /// <summary>How long between descent attempts, and how many before asking for a human.</summary>
+    private static readonly TimeSpan DiveRetry = TimeSpan.FromSeconds(5);
+    private const int MaxDiveAttempts = 3;
+    private DateTime _lastDiveTry;
+    private int _diveAttempts;
+
+    /// <summary>
+    /// Press the descent bind until Diving is set. The press itself is a queue of key messages
+    /// pumped one per frame by the world; this phase's only job is patience and the retry clock.
+    /// Ported behaviour from Questionable's Dive task (AGPL-3.0, as is this plugin).
+    /// </summary>
+    private void TickDive(DateTime now)
+    {
+        if (_world.IsDiving)
+        {
+            Enter(Phase.Finish);
+            return;
+        }
+        if (!_world.IsSwimming && !_world.IsMounted)
+        {
+            Fail("not in the water — a dive needs to start swimming (check the step's position)");
+            return;
+        }
+        if (_diveAttempts >= MaxDiveAttempts && now - _lastDiveTry > DiveRetry)
+        {
+            Fail("the descent key did not take — dive manually, then Retry");
+            return;
+        }
+        if (_lastDiveTry == default || now - _lastDiveTry > DiveRetry)
+        {
+            _lastDiveTry = now;
+            _diveAttempts++;
+        }
+        _world.PressDescent(); // pumps one key message per call
+    }
+
     /// <summary>
     /// The step's emote at its target — the doze that baits a spawn. The target gets the same
     /// patience an action target does; it can pop in on approach.
@@ -1529,7 +1580,9 @@ public sealed class StepExecutor
             return;
         }
 
-        var fly = step.Fly && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded;
+        // While diving, every move is a volume move — the ground mesh has nothing down here.
+        var fly = (step.Fly && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded)
+                  || _world.IsDiving;
 
         // The mesh answered nothing and we are standing still. Before asking again: a destination
         // that is simply off the mesh — an NPC's platform painted non-walkable is the usual shape,

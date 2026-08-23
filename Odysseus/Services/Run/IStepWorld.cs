@@ -98,6 +98,19 @@ public interface IStepWorld
     /// <summary>A cutscene is playing or being watched.</summary>
     bool InCutscene { get; }
 
+    /// <summary>Underwater, below the surface.</summary>
+    bool IsDiving { get; }
+
+    /// <summary>On the water's surface.</summary>
+    bool IsSwimming { get; }
+
+    /// <summary>
+    /// Press the game's own descent keybind (MOVE_DESCENT), one key message per call — call it
+    /// every frame until <see cref="IsDiving"/>. Ported from Questionable's Dive task (AGPL-3.0,
+    /// as is this plugin — see NOTICE.md).
+    /// </summary>
+    void PressDescent();
+
     /// <summary>Click the subtitle box (Talk) once, advancing the line. No-op when it is not up.</summary>
     void AdvanceTalk();
 

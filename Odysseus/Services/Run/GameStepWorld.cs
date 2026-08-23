@@ -705,6 +705,79 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
            || _condition[ConditionFlag.WatchingCutscene]
            || _condition[ConditionFlag.WatchingCutscene78];
 
+    public bool IsDiving => _condition[ConditionFlag.Diving];
+
+    public bool IsSwimming => _condition[ConditionFlag.Swimming];
+
+    /// <summary>
+    /// The descent keypress, spread over frames the way the game expects: modifiers down, key
+    /// down, a few quiet frames, then everything up. The keybind is read from the game's own
+    /// input data (MOVE_DESCENT), so remaps are honoured. Ported from Questionable's Dive task
+    /// (PunishXIV/Questionable, AGPL-3.0 — the licence this plugin shares; see NOTICE.md).
+    /// </summary>
+    private readonly Queue<(uint Type, nint Key)> _descentKeys = new();
+
+    public void PressDescent()
+    {
+        try
+        {
+            if (_descentKeys.TryDequeue(out var message))
+            {
+                if (message.Type != 0)
+                    SendMessage((nint)FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device.Instance()->hWnd,
+                        message.Type, message.Key, nint.Zero);
+                return;
+            }
+
+            var keybind = new FFXIVClientStructs.FFXIV.Client.System.Input.Keybind();
+            var keyName = FFXIVClientStructs.FFXIV.Client.System.String.Utf8String.FromString("MOVE_DESCENT");
+            FFXIVClientStructs.FFXIV.Client.UI.UIInputData.Instance()->GetKeybindByName(keyName, &keybind);
+
+            var keys = DescentKeys(keybind.KeySettings[0]) ?? DescentKeys(keybind.KeySettings[1]);
+            if (keys is null)
+            {
+                _log("No usable keybind for descending — bind Descend (MOVE_DESCENT) to something and retry.");
+                return;
+            }
+
+            foreach (var key in keys)
+            {
+                _descentKeys.Enqueue((WmKeydown, key));
+                _descentKeys.Enqueue((0, 0));
+                _descentKeys.Enqueue((0, 0));
+            }
+            for (var i = 0; i < 5; i++)
+                _descentKeys.Enqueue((0, 0));
+            keys.Reverse();
+            foreach (var key in keys)
+                _descentKeys.Enqueue((WmKeyup, key));
+        }
+        catch (Exception ex)
+        {
+            _log($"Descent press failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static System.Collections.Generic.List<nint>? DescentKeys(
+        FFXIVClientStructs.FFXIV.Client.System.Input.KeySetting setting)
+    {
+        if ((byte)setting.Key == 0)
+            return null;
+        var keys = new System.Collections.Generic.List<nint>();
+        if (setting.KeyModifier.HasFlag(FFXIVClientStructs.FFXIV.Client.System.Input.KeyModifierFlag.Ctrl)) keys.Add(0x11);
+        if (setting.KeyModifier.HasFlag(FFXIVClientStructs.FFXIV.Client.System.Input.KeyModifierFlag.Shift)) keys.Add(0x10);
+        if (setting.KeyModifier.HasFlag(FFXIVClientStructs.FFXIV.Client.System.Input.KeyModifierFlag.Alt)) keys.Add(0x12);
+        keys.Add((byte)setting.Key);
+        return keys;
+    }
+
+    private const uint WmKeydown = 0x100;
+    private const uint WmKeyup = 0x101;
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Auto)]
+    [System.Runtime.InteropServices.DefaultDllImportSearchPaths(System.Runtime.InteropServices.DllImportSearchPath.System32)]
+    private static extern nint SendMessage(nint hWnd, uint msg, nint wParam, nint lParam);
+
     public bool InCutscene
         => _condition[ConditionFlag.OccupiedInCutSceneEvent]
            || _condition[ConditionFlag.WatchingCutscene]

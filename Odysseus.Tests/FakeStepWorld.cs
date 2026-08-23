@@ -16,6 +16,16 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool RebuildAccepted { get; set; } = true;
     public bool RebuildNavmesh() { Calls.Add("RebuildNavmesh"); return RebuildAccepted; }
     public bool InCutscene { get; set; }
+    public bool IsDiving { get; set; }
+    public bool IsSwimming { get; set; }
+    /// <summary>Presses until this many calls, then the water accepts us.</summary>
+    public int DivePressesNeeded { get; set; } = 3;
+    private int _divePresses;
+    public void PressDescent()
+    {
+        Calls.Add("Descend");
+        if (++_divePresses >= DivePressesNeeded) IsDiving = true;
+    }
     public void AdvanceTalk() { if (VisibleAddons.Contains("Talk")) Calls.Add("AdvanceTalk"); }
     public bool AcceptOfferedQuest()
     {

@@ -94,6 +94,12 @@ not true, and nothing here is contributed back under Apache terms.
 
 ## Code studied, code ported
 
+### Questionable (`PunishXIV/Questionable`) — AGPL-3.0
+
+Beyond the path data above, the Dive step's mechanism — reading the game's own MOVE_DESCENT
+keybind from its input data and pressing it as window key messages spread over frames — is ported
+from Questionable's Dive task. AGPL-3.0 into AGPL-3.0, which this notice records.
+
 ### ECommons (`NightmareXIV/ECommons`) — MIT
 
 The subtitle-box click in `GameStepWorld.AdvanceTalk` is ported from ECommons'
