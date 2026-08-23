@@ -250,6 +250,8 @@ public sealed class StepExecutor
     private DateTime _lastDismountTry;
     private int _interactRetries;
     private bool _sawCombat;
+    private bool _inFight;
+    private int _fights;
     private DateTime _lastCombatSeen;
     private bool _skipTeleport;
     /// <summary>The instance this step hands off has been run; arriving again means finish, not re-enter.</summary>
@@ -324,6 +326,8 @@ public sealed class StepExecutor
         _stalledSince = default;
         _lastStallJump = default;
         _sawCombat = false;
+        _inFight = false;
+        _fights = 0;
         _skipTeleport = skipTeleport;
         _sawTravelBusy = false;
         _handoffDone = false;
@@ -2272,11 +2276,20 @@ public sealed class StepExecutor
 
         if (_world.InCombat)
         {
+            if (!_inFight)
+            {
+                // A new fight. Stop any approach still running so we do not jog past the mob,
+                // and count it — MinimumKillCount is paid in fights, one mob to a pull.
+                _inFight = true;
+                _fights++;
+                _world.StopMoving();
+            }
             _sawCombat = true;
             _lastCombatSeen = now;
             _phase = Phase.Combat;
             return; // Daedalus is fighting; our only job is to not walk away.
         }
+        _inFight = false;
 
         if (now - _stepStart > CombatMax)
         {
@@ -2293,7 +2306,12 @@ public sealed class StepExecutor
 
         if (_sawCombat)
         {
-            // Fought and it is quiet now — give stragglers a moment to spawn, then call it.
+            // Fought and it is quiet now. A step that wants more kills than there were mobs
+            // waits here for the respawn — the clock above is the limit — and the sequence
+            // advancing ends it sooner if the game is already satisfied.
+            if (step.MinimumKillCount is { } wanted && _fights < wanted)
+                return;
+            // Otherwise give stragglers a moment to spawn, then call it.
             if (now - _lastCombatSeen > CombatClearSettle)
                 Enter(Phase.Finish);
             return;

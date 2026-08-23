@@ -886,7 +886,20 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
             return false;
 
         SetTarget(target);
-        return Interact(target); // interacting with a hostile is "engage"; Daedalus takes it from there
+
+        // An overworld mob standing off at twenty yalms is not engaged by pressing interact at
+        // it from here. Walk into reach first — hostiles usually close the rest themselves — and
+        // report the approach as engagement so the caller keeps waiting rather than deciding
+        // there was nothing to fight.
+        if (Vector3.Distance(target.Position, player.Position) > StepExecutor.InteractReach)
+        {
+            if (!IsTravelBusy)
+                _vnav.MoveTo(target.Position, false);
+            return true;
+        }
+
+        Interact(target); // interacting with a hostile is "engage"; Daedalus takes it from there
+        return true;
     }
 
     // ── Instances and handoffs ──
