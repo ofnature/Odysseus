@@ -75,4 +75,69 @@ public static class PurchasePlan
 
         return !feedsSomething || !everyCraftSatisfied;
     }
+
+    /// <summary>
+    /// The same judgement for a Gather step: skip it only when every target it is still short of
+    /// exists solely to feed crafts that are already made. One Size Fits All's happi sets stood
+    /// crafted 3/3 while the gather step demanded the malachite they had consumed — the bundle
+    /// orders the craft before its gathers, which is also why this scans the whole block.
+    /// </summary>
+    public static bool IsWorthGathering(
+        IReadOnlyList<QuestStep> steps, int index, Func<uint, int> held, IngredientsOf ingredientsOf)
+    {
+        if (index < 0 || index >= steps.Count)
+            return true;
+        var step = steps[index];
+        if (step.Kind != StepKind.Gather || step.GatherItems is not { Count: > 0 } targets)
+            return true;
+
+        foreach (var target in targets)
+        {
+            if (held(target.ItemId) >= target.ItemCount)
+                continue; // covered either way; says nothing about the rest
+            if (WorthAcquiring(steps, index, target.ItemId, held, ingredientsOf))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Whole-block scan: the item is worth having unless it only feeds satisfied crafts.</summary>
+    private static bool WorthAcquiring(
+        IReadOnlyList<QuestStep> steps, int index, uint item, Func<uint, int> held, IngredientsOf ingredientsOf)
+    {
+        var feedsSomething = false;
+        var everyCraftSatisfied = true;
+
+        for (var i = 0; i < steps.Count; i++)
+        {
+            if (i == index)
+                continue;
+            var other = steps[i];
+
+            if (other.Kind == StepKind.Craft && other.ItemId is { } making)
+            {
+                var consumes = false;
+                foreach (var ingredient in ingredientsOf(making))
+                    if (ingredient == item) { consumes = true; break; }
+                if (!consumes)
+                    continue;
+
+                feedsSomething = true;
+                if (held(making) < Math.Max(1, other.ItemCount ?? 1))
+                    everyCraftSatisfied = false;
+                continue;
+            }
+
+            // Wanted by name for its own sake — used, equipped, gathered up to a count, bought
+            // again. Nothing about a satisfied craft says anything about that.
+            if (other.ItemId == item)
+                return true;
+            if (other.GatherItems is { } wanted)
+                foreach (var t in wanted)
+                    if (t.ItemId == item)
+                        return true;
+        }
+
+        return !feedsSomething || !everyCraftSatisfied;
+    }
 }

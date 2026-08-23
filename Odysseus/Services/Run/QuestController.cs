@@ -467,6 +467,14 @@ public sealed class QuestController
                 _stepIndex++;
                 return;
             }
+            if (!PurchasePlan.IsWorthGathering(_block.Steps, _stepIndex, _conditions.ItemCount, _ingredientsOf))
+            {
+                _log($"Skip step {_stepIndex} ({step}) — its materials only feed crafts that are already made.");
+                _stepStarted = _world.UtcNow;
+                LogStep(step, "Skipped", "the craft it feeds is already made");
+                _stepIndex++;
+                return;
+            }
             if (!PurchasePlan.IsWorthBuying(_block.Steps, _stepIndex, _conditions.ItemCount, _ingredientsOf))
             {
                 _log($"Skip step {_stepIndex} ({step}) — nothing left in this sequence needs it.");

@@ -111,4 +111,24 @@ public class PurchasePlanTests
     [Fact]
     public void Other_step_kinds_are_left_alone()
         => Assert.True(Worth(Sequence(), new Dictionary<uint, int> { [Ingot] = 1 }, index: 1));
+
+    /// <summary>
+    /// One Size Fits All: the happi sets stood crafted 3/3 while the gather step demanded the
+    /// malachite they had consumed. The bundle orders the craft before its gathers, so the
+    /// gather judgement scans the whole block.
+    /// </summary>
+    [Fact]
+    public void A_gather_whose_crafts_are_all_made_is_not_worth_running()
+    {
+        List<QuestStep> steps =
+        [
+            new QuestStep { Kind = StepKind.Craft, ItemId = Ingot, ItemCount = 3 },
+            new QuestStep { Kind = StepKind.Gather, KindName = "Gather", GatherItems = [new GatherTarget(Ore, 3)] },
+        ];
+        PurchasePlan.IngredientsOf of = item => item == Ingot ? [Ore] : [];
+        Assert.False(PurchasePlan.IsWorthGathering(steps, 1, item => item == Ingot ? 3 : 0, of));
+
+        // The craft still short: the gather stands.
+        Assert.True(PurchasePlan.IsWorthGathering(steps, 1, _ => 0, of));
+    }
 }
