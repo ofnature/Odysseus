@@ -1,4 +1,4 @@
-﻿name: Release
+name: Release
 
 on:
   push:
@@ -25,8 +25,12 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Download Dalamud
+        # The RELEASE channel, not staging: a release is compiled against the Dalamud the fleet
+        # actually runs. Staging can carry a ClientStructs bump the installed Dalamud does not
+        # have yet, and a DLL built against structs the runtime lacks breaks one code path at a
+        # time with nothing in the log to say why.
         run: |
-          wget -q https://goatcorp.github.io/dalamud-distrib/stg/latest.zip -O dalamud.zip
+          wget -q https://goatcorp.github.io/dalamud-distrib/latest.zip -O dalamud.zip
           unzip -q dalamud.zip -d ~/dalamud
 
       - name: Restore
