@@ -92,9 +92,11 @@ public sealed class StepExecutor
     /// </summary>
     private bool NeedsDialogueJoin(QuestStep step)
         => _world.IsAddonVisible("Request")
-           || (step.Kind is StepKind.CompleteQuest or StepKind.AcceptQuest
+           || ((step.Kind is StepKind.CompleteQuest or StepKind.AcceptQuest
+                || step.DialogueChoices is { Count: > 0 })
                && (_world.IsAddonVisible("SelectString") || _world.IsAddonVisible("SelectYesno")
-                   || _world.IsAddonVisible("SelectIconString") || _world.IsAddonVisible("JournalResult")));
+                   || _world.IsAddonVisible("SelectIconString") || _world.IsAddonVisible("JournalResult")
+                   || _world.IsAddonVisible(GameStepWorld.CutsceneChoice)));
 
     /// <summary>Steps whose business is a thing in the world, reached when the thing is, done from the ground.</summary>
     private static bool IsObjectStep(StepKind kind) => kind is StepKind.Interact or StepKind.AcceptQuest
@@ -630,7 +632,12 @@ public sealed class StepExecutor
                 break;
 
             case Phase.WaitReady:
-                if (_world.IsReady && !_world.IsOccupied)
+                // A WalkTo has nothing to press: arrival is completion, whatever window is up —
+                // the ascend prompt at the Mol Guide belongs to the NEXT step, which declares
+                // its Yes, and holding the finished walk hostage kept the answer a step away.
+                if (step.Kind is StepKind.WalkTo or StepKind.None)
+                    Enter(NextAfterArrival(step));
+                else if (_world.IsReady && !_world.IsOccupied)
                     Enter(NextAfterArrival(step));
                 else if (_world.IsOccupied && NeedsDialogueJoin(step))
                 {
