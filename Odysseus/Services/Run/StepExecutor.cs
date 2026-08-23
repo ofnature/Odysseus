@@ -76,6 +76,16 @@ public sealed class StepExecutor
     /// <summary>WalkTo without a StopDistance: land on the point.</summary>
     public const float WalkToStopDistance = 0.5f;
 
+    /// <summary>Close enough to a combat mark to land and finish the approach on foot.</summary>
+    private const float CombatLandRadius = 15f;
+
+    /// <summary>How far above an object a flight may end and still count as arrived — the dismount descends the rest.</summary>
+    private const float HoverAboveObject = 10f;
+
+    /// <summary>Steps whose business is a thing in the world, reached when the thing is, done from the ground.</summary>
+    private static bool IsObjectStep(StepKind kind) => kind is StepKind.Interact or StepKind.AcceptQuest
+        or StepKind.CompleteQuest or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent;
+
     /// <summary>A WalkTo given up on this close to its mark is taken as arrived rather than faulted.</summary>
     private const float WalkToNearEnough = 5f;
     /// <summary>
@@ -228,6 +238,7 @@ public sealed class StepExecutor
     private bool _footingTaken;
     private bool _meshRebuilt;
     private bool _flyFallback;
+    private bool _combatLanded;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -345,6 +356,7 @@ public sealed class StepExecutor
         _lastStallJump = default;
         _sawCombat = false;
         _flyFallback = false;
+        _combatLanded = false;
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
@@ -946,12 +958,13 @@ public sealed class StepExecutor
 
     private Phase NextAfterArrival(QuestStep step)
     {
-        // "Land": the flight ends in the air over the mark and the step is done from the ground.
-        // A dismount up here is the game's own descent — TickDismount rides it all the way down —
-        // so landing is just dismounting early, before the step acts. The chooser below has side
-        // effects (emotes fire from it), so it re-runs after the ground rather than being
-        // pre-computed as a destination.
-        if (step.Land && _world.IsMounted)
+        // "Land", and every step whose business is an object: the approach ends mounted — often
+        // in the air over the mark — and the interaction is done from the ground. A dismount up
+        // here is the game's own descent — TickDismount rides it all the way down — so landing
+        // is just dismounting early, before the step acts. The chooser below has side effects
+        // (emotes fire from it), so it re-runs after the ground rather than being pre-computed
+        // as a destination.
+        if ((step.Land || IsObjectStep(step.Kind)) && _world.IsMounted)
         {
             _dismountRechoose = true;
             _lastDismountTry = default;
@@ -1348,15 +1361,32 @@ public sealed class StepExecutor
 
         var arrived = distance <= tolerance + ArrivalSlack
                       || (_detourNeedsShard && _world.AtAethernetShard);
+        // A fight is entered on foot: close enough to the combat mark, land (a dismount from the
+        // air is the game's own descent), and walk the rest. Pulling from the saddle does
+        // nothing, and a flight that circles the mark hunting the exact yalm never fights.
+        if (!arrived && detour is null && step.Kind == StepKind.Combat && _world.IsMounted
+            && !_combatLanded && distance <= CombatLandRadius)
+        {
+            _combatLanded = true;
+            _world.StopMoving();
+            _world.Log($"Within {distance:F0}y of the fight — landing to finish on foot.");
+            Enter(BeginDismount(Phase.Move));
+            return;
+        }
         // The mark is where the recording stood; the step's business is the object. Within
         // interact reach of the thing itself is arrival, however far the mark sits — marks get
         // recorded from mid-dismount, sit inside the object's own collision, or claim a spot the
         // world refuses by a yalm. The interact phase re-measures for itself either way.
         if (!arrived && detour is null && _world.TerritoryId == step.TerritoryId && step.DataId is { } objectId
-            && step.Kind is StepKind.Interact or StepKind.AcceptQuest or StepKind.CompleteQuest
-                or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent
-            && _world.DistanceToDataId(objectId) is { } reach && reach <= InteractReach)
-            arrived = true;
+            && IsObjectStep(step.Kind) && _world.PositionOfDataId(objectId) is { } objectAt)
+        {
+            var flat = objectAt with { Y = _world.PlayerPosition.Y };
+            // Horizontal reach with a forgiving vertical: a flight that ends hovering over the
+            // object has arrived — the dismount on the way in is a descent, and that is what
+            // pins the interaction to the floor.
+            arrived = Vector3.Distance(flat, _world.PlayerPosition) <= InteractReach
+                      && Math.Abs(objectAt.Y - _world.PlayerPosition.Y) <= HoverAboveObject;
+        }
         if (arrived)
         {
             _world.StopMoving();
@@ -1437,7 +1467,7 @@ public sealed class StepExecutor
             return;
         }
 
-        var fly = step.Fly && _world.CanFlyHere && (!_groundOnly || _flyFallback);
+        var fly = step.Fly && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded;
 
         // The mesh answered nothing and we are standing still. Before asking again: a destination
         // that is simply off the mesh — an NPC's platform painted non-walkable is the usual shape,

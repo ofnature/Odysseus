@@ -259,6 +259,34 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void An_interact_reached_mounted_lands_and_dismounts_before_it_acts()
+    {
+        // "Pin to the floor": the flight ends hovering eight yalms over the succulent. That is
+        // arrival — and the step gets off the mount (the game's own descent) before touching it.
+        var world = new FakeStepWorld { PathWaypointCount = 0, TerritoryId = 146, IsMounted = true };
+        world.PlayerPosition = new Vector3(-29, 15, -88);             // right above it, in the air
+        world.Spawned.Add(2002981);
+        world.Positions[2002981] = new Vector3(-29, 7, -88);
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.Interact, KindName = "Interact", DataId = 2002981, Fly = true,
+            TerritoryId = 146, Position = new Vector3(-29, 7, -88),
+        });
+        for (var i = 0; i < 30 && !world.Calls.Contains("Interact 2002981"); i++)
+        {
+            ex.Tick();
+            if (!world.IsMounted) world.PlayerPosition = world.Positions[2002981]; // landed
+            world.Advance(0.5);
+        }
+        var dismount = world.Calls.IndexOf("Dismount");
+        var interact = world.Calls.IndexOf("Interact 2002981");
+        Assert.True(dismount >= 0, "never dismounted");
+        Assert.True(interact >= 0, "never interacted");
+        Assert.True(dismount < interact, "interacted from the saddle");
+    }
+
+    [Fact]
     public void A_leg_the_ground_cannot_route_flies_when_the_path_says_to()
     {
         // Zanr'ak's succulents: fenced camp, Fly true in the data, ground-only for tribe runs —
@@ -625,6 +653,29 @@ public class StepExecutorTests
         Assert.True(interact >= 0, "never interacted");
         Assert.True(dismount < interact, "interacted from the saddle");
     }
+    [Fact]
+    public void A_flight_to_a_fight_lands_in_the_radius_and_walks_the_rest()
+    {
+        // Arrive flying near the combat mark: land there, then close the last stretch on foot.
+        var mark = new Vector3(38, 3, -275);
+        var world = new FakeStepWorld { TerritoryId = 146, IsMounted = true, CanFlyHere = true };
+        world.PlayerPosition = new Vector3(48, 8, -275);   // 11y out, in the air
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.OverworldEnemies,
+            KillEnemyDataIds = [742], Fly = true, TerritoryId = 146, Position = mark,
+        });
+        for (var i = 0; i < 20 && !world.Calls.Contains("Dismount"); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains("Dismount", world.Calls);
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("landing to finish on foot"));
+
+        // Feet down: the rest of the approach is walked, not flown.
+        world.ArriveOnMove = true;
+        for (var i = 0; i < 20 && !world.Calls.Any(c => c.StartsWith("Move 38,3,-275 fly=False")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Move 38,3,-275 fly=False"));
+    }
+
     [Fact]
     public void Combat_gets_off_the_mount_before_it_pulls()
     {

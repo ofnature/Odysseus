@@ -83,8 +83,11 @@ public class DialogueTests
         ex.Begin(Interact(1005578));
         Ticks(ex, w, 20);
 
+        // The dismount is proactive now — an object step lands before its first press, so the
+        // press from the air never happens — and the walk to the NPC below still follows.
         Assert.Contains("Dismount", w.Calls);
-        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("dismounting first"));
+        var firstPress = w.Calls.IndexOf("Interact 1005578");
+        Assert.True(firstPress < 0 || w.Calls.IndexOf("Dismount") < firstPress, "pressed from the saddle");
         Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("walking to it"));
     }
 
