@@ -1367,6 +1367,18 @@ public sealed class StepExecutor
         // step is not being attempted.
         if (_world.IsOccupied)
         {
+            // The quest chain can roll straight into the hand-in conversation without any
+            // travelling — Clutch and Kin's join choice opened off the last objective, and the
+            // move phase sat behind it with every clock frozen while the choice sat unanswered.
+            // A choice window during an accept or turn-in IS the step: join it.
+            if (step.Kind is StepKind.CompleteQuest or StepKind.AcceptQuest
+                && (_world.IsAddonVisible("SelectString") || _world.IsAddonVisible("SelectYesno")
+                    || _world.IsAddonVisible("SelectIconString") || _world.IsAddonVisible("JournalResult")))
+            {
+                _sawOccupied = true;
+                Enter(Phase.Dialogue);
+                return;
+            }
             _phaseStart = now;
             _stepStart = now;
             _lastMoveIssue = now;

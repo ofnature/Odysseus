@@ -238,6 +238,25 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_turn_in_whose_chain_opened_mid_travel_joins_the_choice_instead_of_freezing()
+    {
+        // Clutch and Kin: the join choice opened straight off the last objective, the
+        // CompleteQuest step was still in its move phase far from the issuer, and both waited
+        // on each other for seven minutes.
+        var w = new FakeStepWorld { TerritoryId = 138, TalksWhenInteracted = false };
+        w.PlayerPosition = new Vector3(-38, -23, -89);           // still at the camp
+        w.Spawned.Add(1005937);
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectString");
+        w.ListEntries.AddRange(["I swear myself to your noble cause. Pshhh.", "I don't believe I can trust you."]);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.CompleteQuest, KindName = "CompleteQuest", DataId = 1005937, TerritoryId = 138, Position = new Vector3(-238, -41, 68) });
+
+        for (var i = 0; i < 40 && !w.Calls.Contains("Select 0"); i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains("Select 0", w.Calls);   // the first answer, after the undeclared-list grace
+    }
+
+    [Fact]
     public void A_turn_in_joins_a_conversation_the_previous_hand_in_left_open()
     {
         // Third Kobold hand-in: the second quest's chain was still up (ending at the overcap
