@@ -180,6 +180,9 @@ public sealed class StepExecutor
     private static readonly TimeSpan HandOverRetry = TimeSpan.FromSeconds(1.5);
     private static readonly TimeSpan CombatSpawnWait = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan CombatClearSettle = TimeSpan.FromSeconds(3);
+
+    /// <summary>How long an arrival-spawn fight waits before creeping onto the exact mark.</summary>
+    private static readonly TimeSpan CombatCreepAfter = TimeSpan.FromSeconds(4);
     private static readonly TimeSpan CombatMax = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan TravelStart = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan TravelMax = TimeSpan.FromSeconds(90);
@@ -247,6 +250,7 @@ public sealed class StepExecutor
     private bool _flyFallback;
     private bool _combatLanded;
     private bool _landedToFinish;
+    private bool _creptToMark;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -369,6 +373,7 @@ public sealed class StepExecutor
         _landedToFinish = false;
         _lastDiveTry = default;
         _diveAttempts = 0;
+        _creptToMark = false;
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
@@ -2640,10 +2645,23 @@ public sealed class StepExecutor
             return;
         }
 
-        // Never fought. Enemies that spawn on arrival can take a few seconds; enemies that were
-        // meant to be found may simply not be here (already dead, or the flags are already set).
-        // Optional combat has nothing to wait for: if the leftovers were here, the pull above
-        // would have taken them.
+        // Never fought. Enemies that spawn on arrival can take a few seconds — and their trigger
+        // is keyed to where the path author stood, while arrival settles four-and-a-half yalms
+        // short of the mark. Before concluding nothing is coming, stand exactly on it: the
+        // Cowardly Lupin's ambush wanted the last few steps.
+        if (step.EnemySpawnType == EnemySpawnType.AutoOnEnterArea && !_creptToMark
+            && step.Position is { } spawnMark && now - _phaseStart > CombatCreepAfter
+            && Vector3.Distance(_world.PlayerPosition, spawnMark) > 1.5f)
+        {
+            _creptToMark = true;
+            _world.Log($"Nothing spawned {Vector3.Distance(_world.PlayerPosition, spawnMark):F1}y from the mark — stepping exactly onto it.");
+            _world.MoveDirectTo(spawnMark, false);
+            _phaseStart = now; // a fresh spawn wait, from the spot itself
+            return;
+        }
+        // Enemies that were meant to be found may simply not be here (already dead, or the flags
+        // are already set). Optional combat has nothing to wait for: if the leftovers were here,
+        // the pull above would have taken them.
         if (step.EnemySpawnType == EnemySpawnType.FinishCombatIfAny || now - _phaseStart > CombatSpawnWait)
             Enter(Phase.Finish);
     }

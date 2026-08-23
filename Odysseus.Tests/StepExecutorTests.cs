@@ -832,6 +832,25 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void An_arrival_spawn_that_stays_quiet_gets_the_last_steps_onto_the_mark()
+    {
+        // The Cowardly Lupin's ambush trigger sits where the author stood; arrival settles
+        // 4.5y short. Quiet for a few seconds → stand exactly on the mark, then wait fresh.
+        var mark = new Vector3(497, 55, 191);
+        var world = new FakeStepWorld { TerritoryId = 614 };
+        world.PlayerPosition = new Vector3(493, 55, 191);   // arrived, tolerance-short
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.AutoOnEnterArea,
+            KillEnemyDataIds = [7539], TerritoryId = 614, Position = mark,
+        });
+        for (var i = 0; i < 30 && !world.Calls.Any(c => c.StartsWith("MoveDirect 497,55,191")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("MoveDirect 497,55,191"));
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("stepping exactly onto it"));
+    }
+
+    [Fact]
     public void Combat_gets_off_the_mount_before_it_pulls()
     {
         // Borderline Slaughter: ride to the spot, sit in the saddle, target mobs, swing nothing.
