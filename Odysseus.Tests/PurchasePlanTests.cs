@@ -131,4 +131,30 @@ public class PurchasePlanTests
         // The craft still short: the gather stands.
         Assert.True(PurchasePlan.IsWorthGathering(steps, 1, _ => 0, of));
     }
+
+    /// <summary>
+    /// 3097's true shape: the crate supplied materials the sheets know nothing about, the crafts
+    /// stand satisfied, and the gather's raws are in no recipe at all. Done crafting excuses
+    /// them; a block with no craft, or one still short, keeps its gathers.
+    /// </summary>
+    [Fact]
+    public void Raws_the_sheets_cannot_connect_are_excused_once_the_blocks_crafting_is_done()
+    {
+        const uint Malachite = 22616;
+        List<QuestStep> steps =
+        [
+            new QuestStep { Kind = StepKind.Craft, ItemId = Ingot, ItemCount = 3 },
+            new QuestStep { Kind = StepKind.Gather, KindName = "Gather", GatherItems = [new GatherTarget(Malachite, 3)] },
+        ];
+        PurchasePlan.IngredientsOf of = item => item == Ingot ? [Ore] : [];   // malachite feeds nothing
+        Assert.False(PurchasePlan.IsWorthGathering(steps, 1, item => item == Ingot ? 3 : 0, of));
+        Assert.True(PurchasePlan.IsWorthGathering(steps, 1, _ => 0, of));      // craft short: gather stands
+
+        List<QuestStep> noCraft =
+        [
+            new QuestStep { Kind = StepKind.Gather, KindName = "Gather", GatherItems = [new GatherTarget(Malachite, 3)] },
+            new QuestStep { Kind = StepKind.CompleteQuest },
+        ];
+        Assert.True(PurchasePlan.IsWorthGathering(noCraft, 0, _ => 0, of));    // nothing excuses a bare gather
+    }
 }

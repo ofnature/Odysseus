@@ -91,53 +91,76 @@ public static class PurchasePlan
         if (step.Kind != StepKind.Gather || step.GatherItems is not { Count: > 0 } targets)
             return true;
 
+        // The block's crafting, as a whole: gathers exist to serve it, and One Size Fits All's
+        // raws are not even in the happi's recipe — the crate item is — so "feeds nothing the
+        // sheets know" cannot mean "must be gathered" once every craft here stands satisfied.
+        var anyCraft = false;
+        var allCraftsSatisfied = true;
+        foreach (var other in steps)
+        {
+            if (other.Kind != StepKind.Craft || other.ItemId is not { } making)
+                continue;
+            anyCraft = true;
+            if (held(making) < Math.Max(1, other.ItemCount ?? 1))
+                allCraftsSatisfied = false;
+        }
+
         foreach (var target in targets)
         {
             if (held(target.ItemId) >= target.ItemCount)
                 continue; // covered either way; says nothing about the rest
-            if (WorthAcquiring(steps, index, target.ItemId, held, ingredientsOf))
+            if (NamedByAnotherStep(steps, index, target.ItemId))
                 return true;
+            if (FeedsAnyCraft(steps, target.ItemId, held, ingredientsOf, out var unsatisfied))
+            {
+                if (unsatisfied)
+                    return true;
+                continue; // feeds only crafts that are already made
+            }
+            if (!(anyCraft && allCraftsSatisfied))
+                return true; // feeds nothing the sheets know, and the block still has work — gather it
         }
         return false;
     }
 
-    /// <summary>Whole-block scan: the item is worth having unless it only feeds satisfied crafts.</summary>
-    private static bool WorthAcquiring(
-        IReadOnlyList<QuestStep> steps, int index, uint item, Func<uint, int> held, IngredientsOf ingredientsOf)
+    private static bool NamedByAnotherStep(IReadOnlyList<QuestStep> steps, int index, uint item)
     {
-        var feedsSomething = false;
-        var everyCraftSatisfied = true;
-
         for (var i = 0; i < steps.Count; i++)
         {
             if (i == index)
                 continue;
             var other = steps[i];
-
-            if (other.Kind == StepKind.Craft && other.ItemId is { } making)
-            {
-                var consumes = false;
-                foreach (var ingredient in ingredientsOf(making))
-                    if (ingredient == item) { consumes = true; break; }
-                if (!consumes)
-                    continue;
-
-                feedsSomething = true;
-                if (held(making) < Math.Max(1, other.ItemCount ?? 1))
-                    everyCraftSatisfied = false;
-                continue;
-            }
-
-            // Wanted by name for its own sake — used, equipped, gathered up to a count, bought
-            // again. Nothing about a satisfied craft says anything about that.
-            if (other.ItemId == item)
+            if (other.Kind != StepKind.Craft && other.ItemId == item)
                 return true;
+            if (other.Kind != StepKind.Gather)
+                continue;
             if (other.GatherItems is { } wanted)
                 foreach (var t in wanted)
                     if (t.ItemId == item)
                         return true;
         }
-
-        return !feedsSomething || !everyCraftSatisfied;
+        return false;
     }
+
+    private static bool FeedsAnyCraft(
+        IReadOnlyList<QuestStep> steps, uint item, Func<uint, int> held, IngredientsOf ingredientsOf, out bool unsatisfied)
+    {
+        var feeds = false;
+        unsatisfied = false;
+        foreach (var other in steps)
+        {
+            if (other.Kind != StepKind.Craft || other.ItemId is not { } making)
+                continue;
+            var consumes = false;
+            foreach (var ingredient in ingredientsOf(making))
+                if (ingredient == item) { consumes = true; break; }
+            if (!consumes)
+                continue;
+            feeds = true;
+            if (held(making) < Math.Max(1, other.ItemCount ?? 1))
+                unsatisfied = true;
+        }
+        return feeds;
+    }
+
 }
