@@ -46,6 +46,10 @@ public sealed class StepExecutor
         Dismount,
         /// <summary>Use a quest item on a target, and try again if the game refuses.</summary>
         ItemUse,
+        /// <summary>Fire the step's named action, waiting for its target to exist first.</summary>
+        ActionUse,
+        /// <summary>Fire the step's emote at its target, with the same patience for the target.</summary>
+        EmoteUse,
         /// <summary>Vendor interacted with, waiting for the shop window.</summary>
         Shop,
         /// <summary>Shop open: buy the shortfall and watch the bag until it is covered.</summary>
@@ -135,7 +139,7 @@ public sealed class StepExecutor
     /// vertical: the walk finishes on the lip above the NPC, well inside the step's stop distance
     /// on the map, and every interact from up there does nothing at all.
     /// </summary>
-    private const float InteractReach = 3.5f;
+    public const float InteractReach = 3.5f;
 
     /// <summary>How long a list the step does not name is left to TextAdvance, or to you, before we take it.</summary>
     private static readonly TimeSpan UndeclaredListGrace = TimeSpan.FromSeconds(3);
@@ -234,12 +238,15 @@ public sealed class StepExecutor
     private bool _groundOnly;
     private bool _dismountAsked;
     private bool _itemReachTried;
+    private bool _iconAnswered;
+    private bool _iconReported;
     private int _itemUseTries;
     private DateTime _lastItemTry;
     private float _closestSeen;
     private DateTime _stalledSince;
     private DateTime _lastStallJump;
     private Phase _dismountThen;
+    private bool _dismountRechoose;
     private DateTime _lastDismountTry;
     private int _interactRetries;
     private bool _sawCombat;
@@ -309,6 +316,8 @@ public sealed class StepExecutor
         _dismountAsked = false;
         _lastDismountTry = default;
         _itemReachTried = false;
+        _iconAnswered = false;
+        _iconReported = false;
         _itemUseTries = 0;
         _lastItemTry = default;
         _closestSeen = float.MaxValue;
@@ -511,11 +520,19 @@ public sealed class StepExecutor
                 break;
 
             case Phase.Dismount:
-                TickDismount(now);
+                TickDismount(step, now);
                 break;
 
             case Phase.ItemUse:
                 TickItemUse(step, now);
+                break;
+
+            case Phase.ActionUse:
+                TickActionUse(step, now);
+                break;
+
+            case Phase.EmoteUse:
+                TickEmoteUse(step, now);
                 break;
 
             case Phase.WaitReady:
@@ -602,6 +619,17 @@ public sealed class StepExecutor
                         Enter(Phase.Finish);
                     break;
                 }
+                if (step.Kind is StepKind.UseItem or StepKind.Combat && _world.IsCasting)
+                {
+                    // A quest item is a cast, and anything that interrupts it — mounting for the
+                    // next leg above all — cancels the use without a word: the ash is spent, the
+                    // beacon stays lit, and the objective sits at 0/5. So the settle clock starts
+                    // when the cast *ends*, not when it began: the step holds here through the
+                    // cast, then gives the game the full settle to register the effect before
+                    // anything is allowed to move.
+                    _phaseStart = now;
+                    break;
+                }
                 if (step.Kind == StepKind.UseItem && _world.IsOccupied)
                 {
                     // An item that opens a dialogue behaves like an interact from here.
@@ -609,7 +637,8 @@ public sealed class StepExecutor
                     Enter(Phase.Dialogue);
                 }
                 else if (now - _phaseStart > ActionSettle)
-                    Enter(step.Kind == StepKind.UseItem && step.EnemySpawnType == EnemySpawnType.AfterItemUse
+                    Enter(step.Kind == StepKind.Combat
+                        || (step.Kind == StepKind.UseItem && step.EnemySpawnType == EnemySpawnType.AfterItemUse)
                         ? Phase.CombatWait
                         : Phase.Finish);
                 break;
@@ -894,6 +923,18 @@ public sealed class StepExecutor
 
     private Phase NextAfterArrival(QuestStep step)
     {
+        // "Land": the flight ends in the air over the mark and the step is done from the ground.
+        // A dismount up here is the game's own descent — TickDismount rides it all the way down —
+        // so landing is just dismounting early, before the step acts. The chooser below has side
+        // effects (emotes fire from it), so it re-runs after the ground rather than being
+        // pre-computed as a destination.
+        if (step.Land && _world.IsMounted)
+        {
+            _dismountRechoose = true;
+            _lastDismountTry = default;
+            return Phase.Dismount;
+        }
+
         switch (step.Kind)
         {
             case StepKind.WalkTo or StepKind.None:
@@ -907,26 +948,23 @@ public sealed class StepExecutor
                 return Phase.Finish;
 
             case StepKind.Action:
-            {
-                if (step.ActionName is not { } actionName || _world.ResolveAction(actionName) is not { } actionId)
+                if (step.ActionName is not { } actionName || _world.ResolveAction(actionName) is not { } _)
                 {
                     Fail($"action \"{step.ActionName ?? "?"}\" is not in the Action sheet");
                     return Phase.None;
                 }
-                if (!step.GroundTarget && step.DataId is { } actionTarget && !_world.TryTargetDataId(actionTarget))
-                {
-                    Fail($"action target {actionTarget} is not here");
-                    return Phase.None;
-                }
-                if (!_world.UseAction(actionId, step.GroundTarget ? step.Position : null))
-                {
-                    Fail($"action \"{actionName}\" was refused");
-                    return Phase.None;
-                }
-                return Phase.ActionSettle;
-            }
+                return Phase.ActionUse;
 
             case StepKind.Combat:
+                // Enemies that spawn from a thrown item — truesight scalebombs at suspicious
+                // objects — need the throw before there is anything to fight. Routing straight to
+                // CombatWait sat out the whole quest without doing a step of it.
+                if (step.EnemySpawnType == EnemySpawnType.AfterItemUse && step.ItemId is not null)
+                    return BeginItemUse(step);
+                if (step.EnemySpawnType == EnemySpawnType.AfterEmote && step.Emote is not null)
+                    return _world.IsMounted ? BeginDismount(Phase.EmoteUse) : Phase.EmoteUse;
+                if (step.EnemySpawnType == EnemySpawnType.AfterAction && step.ActionName is not null)
+                    return _world.IsMounted ? BeginDismount(Phase.ActionUse) : Phase.ActionUse;
                 return step.EnemySpawnType == EnemySpawnType.AfterInteraction && step.DataId is not null
                     ? Phase.Interact
                     : Phase.CombatWait;
@@ -1056,46 +1094,53 @@ public sealed class StepExecutor
                 return BeginClassSwitch(step);
 
             case StepKind.UseItem:
-                if (step.ItemId is null)
-                {
-                    Fail("UseItem step names no item");
-                    return Phase.None;
-                }
-                if (step.DataId is { } itemTarget)
-                {
-                    // Using an item on someone is a targeted action with the same reach as talking
-                    // to them, and the step's recorded position is not always inside it. Close the
-                    // gap once, measured against where the target actually is.
-                    if (!_itemReachTried && _world.DistanceToDataId(itemTarget) is { } far && far > InteractReach
-                        && _world.PositionOfDataId(itemTarget) is { } where)
-                    {
-                        _itemReachTried = true;
-                        _world.Log($"Item target {itemTarget} is {far:F1}y away — walking into range first.");
-                        _detourTo = where;
-                        _detourThen = Phase.WaitReady;
-                        _detourTolerance = InteractReach - ArrivalSlack;
-                        _detourNudged = false;
-                        _detourNeedsShard = false;
-                        return Phase.Move;
-                    }
-                }
-
-                // A quest item cannot be used from the back of a chocobo. Same reason a flight that
-                // ends over an NPC cannot talk to them, and the same remedy.
-                if (_world.IsMounted)
-                    return BeginDismount(Phase.ItemUse);
-
-                return Phase.ItemUse;
+                return BeginItemUse(step);
 
             default:
                 return Phase.Interact;
         }
     }
 
+    /// <summary>The shared way into using a step's item: reach, saddle, then the use itself.</summary>
+    private Phase BeginItemUse(QuestStep step)
+    {
+        if (step.ItemId is null)
+        {
+            Fail("the step names no item to use");
+            return Phase.None;
+        }
+        if (step.DataId is { } itemTarget)
+        {
+            // Using an item on someone is a targeted action with the same reach as talking
+            // to them, and the step's recorded position is not always inside it. Close the
+            // gap once, measured against where the target actually is.
+            if (!_itemReachTried && _world.DistanceToDataId(itemTarget) is { } far && far > InteractReach
+                && _world.PositionOfDataId(itemTarget) is { } where)
+            {
+                _itemReachTried = true;
+                _world.Log($"Item target {itemTarget} is {far:F1}y away — walking into range first.");
+                _detourTo = where;
+                _detourThen = Phase.WaitReady;
+                _detourTolerance = InteractReach - ArrivalSlack;
+                _detourNudged = false;
+                _detourNeedsShard = false;
+                return Phase.Move;
+            }
+        }
+
+        // A quest item cannot be used from the back of a chocobo. Same reason a flight that
+        // ends over an NPC cannot talk to them, and the same remedy.
+        if (_world.IsMounted)
+            return BeginDismount(Phase.ItemUse);
+
+        return Phase.ItemUse;
+    }
+
     /// <summary>Ask to get off the mount, and go to <paramref name="then"/> once we are actually off it.</summary>
     private Phase BeginDismount(Phase then)
     {
         _dismountThen = then;
+        _dismountRechoose = false;
         _lastDismountTry = default;
         return Phase.Dismount;
     }
@@ -1104,11 +1149,17 @@ public sealed class StepExecutor
     /// Waiting for both feet on the ground. Dismounting in the air is a descent and you stay
     /// mounted the whole way down, so this keeps asking rather than assuming it took.
     /// </summary>
-    private void TickDismount(DateTime now)
+    private void TickDismount(QuestStep step, DateTime now)
     {
         if (!_world.IsMounted)
         {
-            Enter(_dismountThen);
+            if (_dismountRechoose)
+            {
+                _dismountRechoose = false;
+                Enter(NextAfterArrival(step)); // Land: pick the step's real phase from the ground
+            }
+            else
+                Enter(_dismountThen);
             return;
         }
         if (now - _lastDismountTry > DismountRetry)
@@ -1130,6 +1181,64 @@ public sealed class StepExecutor
     /// refusal, which is the only way to tell those apart from a genuine one.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The step's named action, with the same patience every other targeted step gets. The sneeze
+    /// targets on the goobbue ride spawn as you approach — failing the moment the object table
+    /// lacks them was the whole of "action target is not here", and it cost the daily.
+    /// </summary>
+    private void TickActionUse(QuestStep step, DateTime now)
+    {
+        if (_world.IsOccupied)
+            return;
+
+        if (!step.GroundTarget && step.DataId is { } target && !_world.TryTargetDataId(target))
+        {
+            if (now - _phaseStart > ReadyWait)
+                Fail($"action target {target} never appeared");
+            return;
+        }
+
+        if (now - _lastItemTry < ItemUseRetry && _itemUseTries > 0)
+            return;
+        _lastItemTry = now;
+
+        var actionId = step.ActionName is { } name ? _world.ResolveAction(name) : null;
+        if (actionId is null)
+        {
+            Fail($"action \"{step.ActionName ?? "?"}\" is not in the Action sheet");
+            return;
+        }
+
+        if (_world.UseAction(actionId.Value, step.GroundTarget ? step.Position : null))
+        {
+            Enter(Phase.ActionSettle);
+            return;
+        }
+
+        if (++_itemUseTries >= MaxItemUseTries)
+            Fail($"action \"{step.ActionName}\" was refused — see the log for the game's reason");
+    }
+
+    /// <summary>
+    /// The step's emote at its target — the doze that baits a spawn. The target gets the same
+    /// patience an action target does; it can pop in on approach.
+    /// </summary>
+    private void TickEmoteUse(QuestStep step, DateTime now)
+    {
+        if (_world.IsOccupied)
+            return;
+
+        if (step.DataId is { } target && !_world.TryTargetDataId(target))
+        {
+            if (now - _phaseStart > ReadyWait)
+                Fail($"emote target {target} never appeared");
+            return;
+        }
+
+        _world.SendChatCommand($"/{step.Emote}");
+        Enter(Phase.ActionSettle);
+    }
+
     private void TickItemUse(QuestStep step, DateTime now)
     {
         if (now - _lastItemTry < ItemUseRetry && _itemUseTries > 0)
@@ -1155,7 +1264,13 @@ public sealed class StepExecutor
 
         _lastItemTry = now;
         _world.HoldDialogue();
-        if (_world.UseItem(step.ItemId!.Value))
+
+        // A ground-targeted item is thrown at a spot, not used on a target — the scalebomb lands
+        // on the suspicious object, wherever the object actually stands.
+        var used = step.GroundTarget && step.DataId is { } ground && _world.PositionOfDataId(ground) is { } spot
+            ? _world.UseItemOnGround(step.ItemId!.Value, spot)
+            : _world.UseItem(step.ItemId!.Value);
+        if (used)
         {
             Enter(Phase.ActionSettle);
             return;
@@ -1845,6 +1960,38 @@ public sealed class StepExecutor
             AnswerDialogue(step, now);
         }
 
+        // The multi-quest hand-in menu: an issuer holding several finished dailies asks which one,
+        // and this step's quest is the answer. Left unanswered, the CompleteQuest step reports its
+        // dialogue over with the menu still up, the quest never completes, and the sequence sits at
+        // "all steps done, waiting for the game" for ever.
+        if (_world.IsAddonVisible("SelectIconString"))
+        {
+            if (!_iconAnswered)
+            {
+                var entries = _world.SelectIconStringEntries();
+                if (entries.Count > 0)
+                {
+                    var name = _world.QuestName(_questId);
+                    var index = name is null ? -1 : FindEntry(entries, name);
+                    if (index >= 0)
+                    {
+                        _world.SelectIconStringIndex(index);
+                        _iconAnswered = true;
+                        _sawOccupied = true;   // a menu opened: this is a live conversation
+                        _phaseStart = now;
+                    }
+                    else if (!_iconReported)
+                    {
+                        _iconReported = true;
+                        _world.Log($"The hand-in menu does not list \"{name ?? _questId.ToString()}\" — " +
+                                   $"[{string.Join(" | ", entries)}]; leaving it for you.");
+                    }
+                }
+            }
+            return; // the menu is up; nothing settles while it stands
+        }
+        _iconAnswered = false;
+
         var rewardWindow = _world.IsAddonVisible("JournalResult");
         if (rewardWindow)
             TickRewardWindow(now);
@@ -2154,7 +2301,9 @@ public sealed class StepExecutor
 
         // Never fought. Enemies that spawn on arrival can take a few seconds; enemies that were
         // meant to be found may simply not be here (already dead, or the flags are already set).
-        if (now - _phaseStart > CombatSpawnWait)
+        // Optional combat has nothing to wait for: if the leftovers were here, the pull above
+        // would have taken them.
+        if (step.EnemySpawnType == EnemySpawnType.FinishCombatIfAny || now - _phaseStart > CombatSpawnWait)
             Enter(Phase.Finish);
     }
 

@@ -111,6 +111,53 @@ public class DialogueTests
     }
 
     [Fact]
+    public void The_hand_in_menu_is_answered_with_the_steps_own_quest()
+    {
+        // An issuer holding several finished dailies asks which one to turn in — the "Daily
+        // Quests" list at Fibubb Gah. Unanswered, the CompleteQuest step reports done with the
+        // menu still up and the quest never completes.
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        w.QuestNames[1401] = "Arms of the U";
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(7), questId: 1401);
+        Ticks(ex, w, 3);
+
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectIconString");
+        w.IconEntries.AddRange(["Fighting Firesand with Fire", "Arms of the U", "Small Talk", "Nothing"]);
+        ex.Tick(); w.Advance(0.5);
+        ex.Tick();
+
+        Assert.Equal(1, w.Calls.Count(c => c == "IconSelect 1"));   // ours, once
+
+        // Answered: the menu closes and the conversation runs on to its end.
+        w.VisibleAddons.Remove("SelectIconString");
+        w.IsOccupied = false;
+        Ticks(ex, w, 8);
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    [Fact]
+    public void A_menu_that_does_not_list_our_quest_is_left_alone_and_says_so()
+    {
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        w.QuestNames[1401] = "Arms of the U";
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(7), questId: 1401);
+        Ticks(ex, w, 3);
+
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectIconString");
+        w.IconEntries.AddRange(["Small Talk", "Nothing"]);
+        for (var i = 0; i < 4; i++) { ex.Tick(); w.Advance(0.5); }
+
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("IconSelect "));
+        Assert.Single(w.Calls, c => c.StartsWith("Log") && c.Contains("does not list"));
+    }
+
+    [Fact]
     public void The_npc_is_faced_before_being_talked_to()
     {
         var w = new FakeStepWorld();

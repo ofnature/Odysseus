@@ -62,6 +62,12 @@ public enum EnemySpawnType
     OverworldEnemies,
     /// <summary>They spawn after using <see cref="QuestStep.ItemId"/>.</summary>
     AfterItemUse,
+    /// <summary>They spawn after performing <see cref="QuestStep.Emote"/> at <see cref="QuestStep.DataId"/>.</summary>
+    AfterEmote,
+    /// <summary>They spawn after casting <see cref="QuestStep.ActionName"/> on <see cref="QuestStep.DataId"/>.</summary>
+    AfterAction,
+    /// <summary>Combat is optional: kill what is already here or on us, and skip cleanly when nothing is.</summary>
+    FinishCombatIfAny,
 }
 
 /// <summary>A dialogue answer the step needs. Prompts and answers are the game's own text keys, never display text.</summary>
@@ -186,6 +192,9 @@ public sealed class QuestStep
     public string? ActionName { get; set; }
     /// <summary>The action is placed on the ground at <see cref="Position"/> rather than cast on <see cref="DataId"/>.</summary>
     public bool GroundTarget { get; set; }
+
+    /// <summary>Land before acting — the step is reached flying and must be done from the ground.</summary>
+    public bool Land { get; set; }
 
     /// <summary>The variables allow this step (true when the step has no requirement).</summary>
     public bool RequiredVariablesMet(ReadOnlySpan<byte> variables)

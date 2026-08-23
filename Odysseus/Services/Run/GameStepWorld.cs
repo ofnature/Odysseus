@@ -109,6 +109,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public bool IsMounted => _condition[ConditionFlag.Mounted];
 
+    public bool IsInFlight => _condition[ConditionFlag.InFlight];
+
     public void Mount()
     {
         try
@@ -1007,6 +1009,31 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
+    /// <summary>
+    /// Throw a ground-targeted quest item at a spot. <c>UseActionLocation</c> rather than
+    /// <c>UseAction</c>: the item lands on the ground where aimed, which is what "throw the
+    /// scalebomb at the suspicious object" is.
+    /// </summary>
+    public bool UseItemOnGround(uint itemId, Vector3 position)
+    {
+        try
+        {
+            var actions = ActionManager.Instance();
+            if (actions == null)
+                return false;
+            var spot = position;
+            if (actions->UseActionLocation(ActionType.EventItem, itemId, CurrentTarget, &spot))
+                return true;
+            _log($"Ground-targeted item {itemId} at {spot} was refused.");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _log($"UseItemOnGround {itemId} failed: {ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>Event item ids start here; below it is an ordinary inventory item.</summary>
     private const uint EventItemBase = 2_000_000;
 
@@ -1202,6 +1229,20 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
             options.Add(Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue);
         }
         return options;
+    }
+
+    public string? QuestName(ushort questId)
+    {
+        try
+        {
+            var name = _data.GetExcelSheet<Lumina.Excel.Sheets.Quest>()
+                .GetRowOrDefault(Quest.QuestCatalog.RowIdBase + questId)?.Name.ExtractText();
+            return string.IsNullOrEmpty(name) ? null : name;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public IReadOnlyList<string> SelectIconStringEntries()

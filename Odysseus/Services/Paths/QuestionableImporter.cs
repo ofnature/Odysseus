@@ -166,7 +166,8 @@ public static class QuestionableImporter
         return path;
     }
 
-    private static QuestStep ParseStep(JsonElement e)
+    /// <summary>Internal so the gathering importer parses travel steps with the same code.</summary>
+    internal static QuestStep ParseStep(JsonElement e)
     {
         var kindName = Str(e, "InteractionType") ?? "None";
         var step = new QuestStep
@@ -211,6 +212,7 @@ public static class QuestionableImporter
 
         step.ActionName = Str(e, "Action");
         step.GroundTarget = Bool(e, "GroundTarget") ?? false;
+        step.Land = Bool(e, "Land") ?? false;
         step.TargetClass = Str(e, "TargetClass");
 
         // Gather and Fish carry a list, not a single ItemId — one step can want two things at once.
@@ -407,6 +409,6 @@ public static class QuestionableImporter
         return reader.ReadToEnd();
     }
 
-    private static string Hash(string json)
+    internal static string Hash(string json)
         => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)))[..16];
 }

@@ -466,6 +466,56 @@ public class ItemRefusalTests
     }
 
     [Fact]
+    public void The_items_cast_is_seen_out_before_the_step_lets_anything_move()
+    {
+        // The smothering ash: the use is a cast, and the next leg mounting through it cancels the
+        // use silently — item spent, objective 0/5. The step must hold while the cast runs and
+        // settle only after it ends.
+        var w = AtTheSurvivor();
+        var ex = new StepExecutor(w);
+        ex.Begin(Treat(1008830));
+        for (var i = 0; i < 6 && !w.Calls.Contains("UseItem 2001288"); i++) { ex.Tick(); w.Advance(0.5); }
+
+        w.IsCasting = true;   // the cast bar is up
+        for (var i = 0; i < 12; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Equal(StepStatus.Running, ex.Status);   // six seconds of casting, still held
+
+        w.IsCasting = false;  // the cast lands
+        ex.Tick(); w.Advance(0.5);
+        Assert.Equal(StepStatus.Running, ex.Status);   // and the settle still runs after it
+
+        for (var i = 0; i < 8 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    [Fact]
+    public void A_combat_step_that_spawns_from_a_thrown_item_throws_it_then_waits_for_the_fight()
+    {
+        // "Not Who They Seem": truesight scalebombs at suspicious objects, kill what appears.
+        // Routing Combat straight to CombatWait sat next to the object doing nothing.
+        var step = new QuestStep
+        {
+            Kind = StepKind.Combat, KindName = "Combat", DataId = 2003039, ItemId = 2001153,
+            GroundTarget = true, EnemySpawnType = EnemySpawnType.AfterItemUse,
+            KillEnemyDataIds = [72], TerritoryId = 152,
+            Position = new System.Numerics.Vector3(245, -1, 101),
+        };
+        var w = new FakeStepWorld { TerritoryId = 152, ArriveOnMove = true };
+        w.PlayerPosition = new System.Numerics.Vector3(245, -1, 101);
+        w.Spawned.Add(2003039);
+        w.Positions[2003039] = new System.Numerics.Vector3(246, -1, 100);
+
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+        for (var i = 0; i < 20 && !ex.PhaseName.Contains("Combat"); i++) { ex.Tick(); w.Advance(0.5); }
+
+        // Thrown at where the object stands, not used on a target — and then the fight is waited for.
+        Assert.Contains(w.Calls, c => c.StartsWith("ThrowItem 2001153 @246"));
+        Assert.DoesNotContain(w.Calls, c => c == "UseItem 2001153");
+        Assert.Equal("CombatWait", ex.PhaseName);
+    }
+
+    [Fact]
     public void You_cannot_use_a_quest_item_from_the_saddle()
     {
         var w = AtTheSurvivor();
@@ -483,5 +533,113 @@ public class ItemRefusalTests
         for (var i = 0; i < 20 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }
         Assert.Contains(w.Calls, c => c == "UseItem 2001288");
         Assert.Equal(StepStatus.Done, ex.Status);
+    }
+    [Fact]
+    public void A_combat_step_baited_by_an_emote_dozes_at_the_mark_then_waits_for_the_fight()
+    {
+        // Yellow-jacket ambushes: doze at the bed and kill what wakes you.
+        var step = new QuestStep
+        {
+            Kind = StepKind.Combat, KindName = "Combat", DataId = 2005940, Emote = "doze",
+            EnemySpawnType = EnemySpawnType.AfterEmote, KillEnemyDataIds = [5042, 4619],
+            TerritoryId = 152, Position = new System.Numerics.Vector3(245, -1, 101),
+        };
+        var w = new FakeStepWorld { TerritoryId = 152, ArriveOnMove = true };
+        w.PlayerPosition = step.Position!.Value;
+        w.Spawned.Add(2005940);
+
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+        for (var i = 0; i < 30 && !ex.PhaseName.Contains("Combat"); i++) { ex.Tick(); w.Advance(0.5); }
+
+        Assert.Contains(w.Calls, c => c == "Chat /doze");
+        Assert.Equal("CombatWait", ex.PhaseName);
+    }
+
+    [Fact]
+    public void A_combat_step_baited_by_a_cast_fires_it_then_waits_for_the_fight()
+    {
+        // The brazier that answers to Fire III, and what it spawns.
+        var step = new QuestStep
+        {
+            Kind = StepKind.Combat, KindName = "Combat", DataId = 2007872, ActionName = "Fire III",
+            EnemySpawnType = EnemySpawnType.AfterAction, KillEnemyDataIds = [7232],
+            TerritoryId = 152, Position = new System.Numerics.Vector3(245, -1, 101),
+        };
+        var w = new FakeStepWorld { TerritoryId = 152, ArriveOnMove = true };
+        w.PlayerPosition = step.Position!.Value;
+        w.Spawned.Add(2007872);
+        w.Actions["Fire III"] = 153;
+
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+        for (var i = 0; i < 30 && !ex.PhaseName.Contains("Combat"); i++) { ex.Tick(); w.Advance(0.5); }
+
+        Assert.Contains(w.Calls, c => c.StartsWith("UseAction 153"));
+        Assert.Equal("CombatWait", ex.PhaseName);
+    }
+
+    [Fact]
+    public void Optional_combat_with_no_one_here_finishes_without_sitting_out_the_spawn_wait()
+    {
+        var step = new QuestStep
+        {
+            Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.FinishCombatIfAny,
+            KillEnemyDataIds = [2870], TerritoryId = 152, Position = new System.Numerics.Vector3(245, -1, 101),
+        };
+        var w = new FakeStepWorld { TerritoryId = 152, ArriveOnMove = true };
+        w.PlayerPosition = step.Position!.Value;
+
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+        for (var i = 0; i < 6 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }
+
+        // Three seconds, not the fifteen the mandatory spawn wait takes.
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    [Fact]
+    public void Optional_combat_still_kills_the_leftovers_that_are_here()
+    {
+        var step = new QuestStep
+        {
+            Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.FinishCombatIfAny,
+            KillEnemyDataIds = [2870], TerritoryId = 152, Position = new System.Numerics.Vector3(245, -1, 101),
+        };
+        var w = new FakeStepWorld { TerritoryId = 152, ArriveOnMove = true };
+        w.PlayerPosition = step.Position!.Value;
+        w.AttackResults.Enqueue(true);
+
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+        for (var i = 0; i < 10 && ex.PhaseName != "Combat"; i++) { ex.Tick(); w.Advance(0.5); }
+
+        Assert.Equal("Combat", ex.PhaseName);
+    }
+
+    [Fact]
+    public void A_step_marked_land_gets_off_the_mount_before_it_acts()
+    {
+        // Land: true — the flight ends in the air over the mark; the interact happens from the ground.
+        var step = new QuestStep
+        {
+            Kind = StepKind.Interact, KindName = "Interact", DataId = 2002979, Land = true, Fly = true,
+            TerritoryId = 152, Position = new System.Numerics.Vector3(245, -1, 101),
+        };
+        var w = new FakeStepWorld { TerritoryId = 152, ArriveOnMove = true, IsMounted = true };
+        w.PlayerPosition = step.Position!.Value;
+        w.Spawned.Add(2002979);
+        w.Positions[2002979] = new System.Numerics.Vector3(246, -1, 100);
+
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+        for (var i = 0; i < 30 && ex.Status == StepStatus.Running && !w.Calls.Contains("Interact 2002979"); i++)
+        { ex.Tick(); w.Advance(0.5); }
+
+        var dismount = w.Calls.IndexOf("Dismount");
+        var interact = w.Calls.IndexOf("Interact 2002979");
+        Assert.True(dismount >= 0, "never dismounted");
+        Assert.True(interact >= 0, "never interacted");
+        Assert.True(dismount < interact, "interacted from the saddle");
     }
 }

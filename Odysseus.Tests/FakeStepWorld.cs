@@ -15,6 +15,7 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool IsMoving { get; set; }
     public int PathWaypointCount { get; set; } = 5;
     public bool IsMounted { get; set; }
+    public bool IsInFlight { get; set; }
     public bool CanFlyHere { get; set; }
     public bool InBaseGameZone { get; set; }
     /// <summary>Cities forbid mounts; the sheet says which.</summary>
@@ -207,6 +208,9 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Dictionary<uint, Vector3> Positions { get; } = new();
     public Vector3? PositionOfDataId(uint dataId)
         => Spawned.Contains(dataId) ? Positions.GetValueOrDefault(dataId, PlayerPosition) : null;
+    public Dictionary<ushort, string> QuestNames { get; } = new();
+    public string? QuestName(ushort questId) => QuestNames.GetValueOrDefault(questId);
+
     public void FaceDataId(uint dataId) => Calls.Add($"Face {dataId}");
 
     public bool TryInteractWithDataId(uint dataId)
@@ -312,6 +316,11 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public void SendChatCommand(string command) => Calls.Add($"Chat {command}");
     public bool UseItemAccepted { get; set; } = true;
     public bool UseItem(uint itemId) { Calls.Add($"UseItem {itemId}"); return UseItemAccepted; }
+    public bool UseItemOnGround(uint itemId, Vector3 position)
+    {
+        Calls.Add($"ThrowItem {itemId} @{position.X:F0},{position.Y:F0},{position.Z:F0}");
+        return UseItemAccepted;
+    }
     public Dictionary<string, uint> Actions { get; } = new(StringComparer.OrdinalIgnoreCase);
     public uint? ResolveAction(string name) => Actions.TryGetValue(name, out var id) ? id : null;
     public bool UseActionAccepted { get; set; } = true;

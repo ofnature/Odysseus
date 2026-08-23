@@ -95,6 +95,9 @@ public interface IStepWorld
     /// <summary>Mounted right now.</summary>
     bool IsMounted { get; }
 
+    /// <summary>Airborne on the mount. Dismounting from here is a fall; landing first is not.</summary>
+    bool IsInFlight { get; }
+
     /// <summary>Summon a mount (mount roulette). Async — poll <see cref="IsMounted"/>.</summary>
     void Mount();
 
@@ -359,6 +362,9 @@ public interface IStepWorld
     /// <summary>Uses an inventory item by id, on the current target if it needs one.</summary>
     bool UseItem(uint itemId);
 
+    /// <summary>Throw a ground-targeted quest item at a spot — a scalebomb at a suspicious object.</summary>
+    bool UseItemOnGround(uint itemId, Vector3 position);
+
     /// <summary>Action row id for a name as the path data spells it, or null when unknown.</summary>
     uint? ResolveAction(string name);
 
@@ -432,6 +438,9 @@ public interface IStepWorld
 
     /// <summary>The entries of the icon-list dialog (quest offers) currently showing; empty when none.</summary>
     System.Collections.Generic.IReadOnlyList<string> SelectIconStringEntries();
+
+    /// <summary>The quest's display name, for matching it against a hand-in menu. Null if unknown.</summary>
+    string? QuestName(ushort questId);
 
     /// <summary>Picks an entry in the icon-list dialog if one is showing.</summary>
     void SelectIconStringIndex(int index);
