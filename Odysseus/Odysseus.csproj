@@ -3,7 +3,7 @@
   <PropertyGroup>
     <AssemblyName>Odysseus</AssemblyName>
     <RootNamespace>Odysseus</RootNamespace>
-    <Version>0.2.1</Version>
+    <Version>0.2.2</Version>
     <DalamudLibPath>$(AppData)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
 
     <!--

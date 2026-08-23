@@ -1,6 +1,14 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.2 — 2026-08-23
+
+### Quest running
+- A destination the mesh does not cover — an NPC's platform painted non-walkable, like Hamujj Gah's — is reached by pathing to the nearest point the mesh does reach and walking the last few yalms directly, instead of faulting "no path" three times
+- When "no path" is final, the message now says whether the loaded mesh fails to cover where you stand (stale mesh: `/vnav rebuild`, then Retry) or has no route to the destination
+- Overworld combat walks to a mob that is standing off before engaging, and honours a step's kill count (from v0.2.1's fix, noted again here because 0.2.1 shipped minutes earlier)
+<!-- LATEST-END -->
+
 ## v0.2.1 — 2026-08-23
 
 ### Paths
@@ -13,7 +21,6 @@
 
 ### Build
 - Releases are built against the release-channel Dalamud the clients run, not staging
-<!-- LATEST-END -->
 
 ## v0.2.0 — 2026-08-22
 
