@@ -61,6 +61,7 @@ public class TravelExecutorTests
         w.Aetherytes["Lochs - Ala Mhigan Quarter"] = 98;
         w.AetheryteTerritories[98] = 621;
         w.Spawned.Add(7);
+        w.Positions[7] = new Vector3(50, 0, 0); // where the steps put it — reach is measured for real
         return w;
     }
 

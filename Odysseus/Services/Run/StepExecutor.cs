@@ -1348,6 +1348,15 @@ public sealed class StepExecutor
 
         var arrived = distance <= tolerance + ArrivalSlack
                       || (_detourNeedsShard && _world.AtAethernetShard);
+        // The mark is where the recording stood; the step's business is the object. Within
+        // interact reach of the thing itself is arrival, however far the mark sits — marks get
+        // recorded from mid-dismount, sit inside the object's own collision, or claim a spot the
+        // world refuses by a yalm. The interact phase re-measures for itself either way.
+        if (!arrived && detour is null && _world.TerritoryId == step.TerritoryId && step.DataId is { } objectId
+            && step.Kind is StepKind.Interact or StepKind.AcceptQuest or StepKind.CompleteQuest
+                or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent
+            && _world.DistanceToDataId(objectId) is { } reach && reach <= InteractReach)
+            arrived = true;
         if (arrived)
         {
             _world.StopMoving();

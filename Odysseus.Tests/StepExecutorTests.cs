@@ -238,6 +238,27 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void Within_reach_of_the_object_is_arrived_wherever_the_mark_sits()
+    {
+        // The Zanr'ak succulent: the recorded mark is inside the plant's own collision, the world
+        // refuses the last yalm, and the walk laddered every remedy at 2.9y — within interact
+        // reach the whole time — while the interact never got its turn.
+        var mark = new Vector3(-29, 7, -88);
+        var world = new FakeStepWorld { PathWaypointCount = 0, TerritoryId = 146 };
+        world.PlayerPosition = new Vector3(-31.5f, 7, -87);           // 2.6y from the mark
+        world.Spawned.Add(2002981);
+        world.Positions[2002981] = new Vector3(-29.5f, 7, -87.5f);   // the plant, well in reach
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.Interact, KindName = "Interact", DataId = 2002981,
+            TerritoryId = 146, Position = mark,
+        });
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Contains("Interact 2002981", world.Calls);
+    }
+
+    [Fact]
     public void A_leg_the_ground_cannot_route_flies_when_the_path_says_to()
     {
         // Zanr'ak's succulents: fenced camp, Fly true in the data, ground-only for tribe runs —
