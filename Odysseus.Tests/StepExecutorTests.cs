@@ -355,6 +355,27 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void An_interact_the_ground_cannot_serve_flies_to_the_object_itself()
+    {
+        // Kurobana on his knoll: 4.2y away through a lip, every press eaten, every walk short.
+        // The universal escape — fly to the thing, land on its floor, press from there.
+        var world = new FakeStepWorld { TerritoryId = 614, CanFlyHere = true, TalksWhenInteracted = false, ArriveOnMove = true };
+        world.PlayerPosition = new Vector3(366, 97, -94);
+        world.Spawned.Add(1022417);
+        world.Positions[1022417] = new Vector3(366, 101, -94);
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 1022417, TerritoryId = 614, Position = new Vector3(366, 101, -94) });
+
+        for (var i = 0; i < 120 && !world.Calls.Any(c => c.StartsWith("Log") && c.Contains("flying to it")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("flying to it"));
+
+        // Put the character back below the knoll so the flight has somewhere to go.
+        world.PlayerPosition = new Vector3(366, 97, -94);
+        for (var i = 0; i < 20 && !world.Calls.Any(c => c.StartsWith("Move 366,101,-94 fly=True")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Move 366,101,-94 fly=True"));
+    }
+
+    [Fact]
     public void Standing_under_the_objects_ledge_is_not_arrival()
     {
         // Kurobana stands on a ledge at Y=86; the ride ended a floor below him and the symmetric

@@ -264,6 +264,8 @@ public sealed class StepExecutor
     private bool _combatLanded;
     private bool _landedToFinish;
     private bool _creptToMark;
+    private bool _interactFlew;
+    private bool _detourFly;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -387,6 +389,8 @@ public sealed class StepExecutor
         _lastDiveTry = default;
         _diveAttempts = 0;
         _creptToMark = false;
+        _interactFlew = false;
+        _detourFly = false;
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
@@ -1527,6 +1531,7 @@ public sealed class StepExecutor
             _detourTo = null;
             _detourNudged = false;
             _detourNeedsShard = false;
+            _detourFly = false;
             Enter(next);
             return;
         }
@@ -1594,8 +1599,10 @@ public sealed class StepExecutor
         // The mesh has done all it can and we are nearly there: close the gap directly. Only for a
         // detour, where the target is an object the mesh cannot path onto rather than a step's own
         // destination, and only once — a second failure is a real one.
-        if (detour is not null && !_detourNudged && distance <= DetourNudgeDistance)
+        if (detour is not null && !_detourNudged && distance <= DetourNudgeDistance && !_detourFly)
         {
+            // (A flown detour skips the walk-the-rest nudge outright — the whole point of the
+            // flight is that walking the rest is what kept failing.)
             _detourNudged = true;
             _lastMoveIssue = now;
             _world.Log($"Mesh path to {Fmt(target)} ended {distance:F1}y short; walking the rest directly.");
@@ -1604,8 +1611,10 @@ public sealed class StepExecutor
         }
 
         // While diving, every move is a volume move — the ground mesh has nothing down here.
+        // A flown detour (the ledge escape) flies regardless of what the step says.
         var fly = (step.Fly && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded)
-                  || _world.IsDiving;
+                  || _world.IsDiving
+                  || (_detourFly && detour is not null);
 
         // The mesh answered nothing and we are standing still. Before asking again: a destination
         // that is simply off the mesh — an NPC's platform painted non-walkable is the usual shape,
@@ -2416,12 +2425,33 @@ public sealed class StepExecutor
                 _detourTolerance = InteractReach - ArrivalSlack;
                 _detourNudged = false;
                 _detourNeedsShard = false;
+                _detourFly = false;
                 Enter(Phase.Move);
                 return;
             }
 
             _world.Log($"Nothing opened after interacting with {target} — asking again ({_interactRetries}/{MaxInteractRetries}).");
             Enter(Phase.Interact);
+            return;
+        }
+
+        // The universal ledge escape: retries spent, nothing ever opened, and the object is
+        // simply somewhere the ground approach cannot serve — up a lip, across a mesh gap, at
+        // the wrong angle. Fly to the thing itself; the landing machinery puts us on its floor,
+        // and the press happens from where a person would stand. One flight, then the verdict.
+        if (!_sawOccupied && step.DataId is { } flyTarget && !_interactFlew && _world.CanFlyHere
+            && _world.PositionOfDataId(flyTarget) is { } flyWhere)
+        {
+            _interactFlew = true;
+            _interactRetries = 0;
+            _world.Log($"The ground cannot reach {flyTarget} — flying to it.");
+            _detourTo = flyWhere;
+            _detourThen = Phase.Interact;
+            _detourTolerance = InteractReach - ArrivalSlack;
+            _detourNudged = false;
+            _detourNeedsShard = false;
+            _detourFly = true;
+            Enter(_world.IsMounted ? Phase.Move : Phase.Mount);
             return;
         }
 
