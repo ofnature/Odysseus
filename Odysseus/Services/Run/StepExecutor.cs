@@ -1607,7 +1607,10 @@ public sealed class StepExecutor
             // frozen to the yalm — a roofline in Yanxia held one fight's approach at 25.1y for a
             // full minute of hopeful jumping. Frozen means stop and hand the leg to the remedy
             // ladder, which knows about footing, flight and rebuilds; jumping does not.
-            if (Vector3.Distance(_world.PlayerPosition, _frozenAt) > 0.5f)
+            // The epsilon must exceed a jump's bob: the stall hop moves the character a yalm
+            // and a half, which reset this clock every eight seconds and kept the wedge alive
+            // in place — the user broke the loop by flipping Fly off by hand, again.
+            if (Vector3.Distance(_world.PlayerPosition, _frozenAt) > 2.5f)
             {
                 _frozenAt = _world.PlayerPosition;
                 _frozenSince = now;
@@ -1641,8 +1644,10 @@ public sealed class StepExecutor
                 _stalledSince = now;
             }
             else if (now - _stalledSince > StallJumpAfter && now - _lastStallJump > StallJumpGap
-                     && !(step.DataId is not null && distance <= 10f))
+                     && !(step.DataId is not null && distance <= 10f) && !_world.IsInFlight)
             {
+                // (No hopping from the saddle in the air either — a flying mount cannot jump,
+                // and the attempt only jitters the position under the frozen detector.)
                 // Close quarters to an interact target are exempt: the game refuses commands
                 // mid-jump, and the hop was eating the very press that would finish the step.
                 _lastStallJump = now;
