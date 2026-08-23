@@ -1266,21 +1266,22 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     public const string CutsceneChoice = "CutSceneSelectString";
 
     /// <summary>
-    /// Its options are the string AtkValues, in order. The prompt lives in the window's own text
-    /// node rather than among them, so every string here is an option — and the index of one is the
-    /// index the callback takes.
+    /// Its options are the string AtkValues, in order — but the FIRST string is the prompt, shown
+    /// as the header inside the window, and the callback indexes only the options after it.
+    /// Returning the prompt as entry zero made every answer off by one: Clutch and Kin's join
+    /// choice resolved to the right text, then declined the clutch.
     /// </summary>
     private static IReadOnlyList<string> ReadCutsceneOptions(AtkUnitBase* addon)
     {
-        var options = new List<string>();
+        var strings = new List<string>();
         for (var i = 0; i < addon->AtkValuesCount; i++)
         {
             var value = addon->AtkValues[i];
             if (value.Type is not (AtkValueType.String or AtkValueType.ManagedString) || value.String.Value == null)
                 continue;
-            options.Add(Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue);
+            strings.Add(Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue);
         }
-        return options;
+        return strings.Count > 1 ? strings.GetRange(1, strings.Count - 1) : strings;
     }
 
     public string? QuestName(ushort questId)

@@ -2513,6 +2513,8 @@ public sealed class StepExecutor
             index = 0;
         }
 
+        _world.Log($"List choice: picking {index + 1}/{entries.Count} \"{entries[index]}\" "
+            + $"(key {listChoice.Answer ?? "-"} resolved to \"{wanted ?? "-"}\") from [{string.Join(" | ", entries)}]");
         _world.SelectStringIndex(index);
         _listAnswered = true;
     }
