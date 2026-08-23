@@ -567,6 +567,31 @@ public class StepExecutorTests
         Assert.True(dismount < interact, "interacted from the saddle");
     }
     [Fact]
+    public void Combat_gets_off_the_mount_before_it_pulls()
+    {
+        // Borderline Slaughter: ride to the spot, sit in the saddle, target mobs, swing nothing.
+        var step = new QuestStep
+        {
+            Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.OverworldEnemies,
+            KillEnemyDataIds = [742, 739], MinimumKillCount = 2,
+            TerritoryId = 146, Position = new System.Numerics.Vector3(38, 3, -275),
+        };
+        var w = new FakeStepWorld { TerritoryId = 146, ArriveOnMove = true, IsMounted = true };
+        w.PlayerPosition = step.Position!.Value;
+        w.AttackResults.Enqueue(true);
+
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+        for (var i = 0; i < 20 && !w.Calls.Contains("Attack"); i++) { ex.Tick(); w.Advance(0.5); }
+
+        var dismount = w.Calls.IndexOf("Dismount");
+        var attack = w.Calls.IndexOf("Attack");
+        Assert.True(dismount >= 0, "never dismounted");
+        Assert.True(attack >= 0, "never pulled");
+        Assert.True(dismount < attack, "pulled from the saddle");
+    }
+
+    [Fact]
     public void A_kill_count_is_paid_in_fights_before_the_step_calls_it_done()
     {
         // "Blitzing the Beacons" shape: overworld mobs, MinimumKillCount from ComplexCombatData.

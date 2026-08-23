@@ -985,9 +985,11 @@ public sealed class StepExecutor
                     return _world.IsMounted ? BeginDismount(Phase.EmoteUse) : Phase.EmoteUse;
                 if (step.EnemySpawnType == EnemySpawnType.AfterAction && step.ActionName is not null)
                     return _world.IsMounted ? BeginDismount(Phase.ActionUse) : Phase.ActionUse;
-                return step.EnemySpawnType == EnemySpawnType.AfterInteraction && step.DataId is not null
-                    ? Phase.Interact
-                    : Phase.CombatWait;
+                if (step.EnemySpawnType == EnemySpawnType.AfterInteraction && step.DataId is not null)
+                    return Phase.Interact;
+                // Nothing swings from the saddle: a pull made mounted targets the mob and does
+                // nothing else, and the fight never starts. Feet first, then the fight.
+                return _world.IsMounted ? BeginDismount(Phase.CombatWait) : Phase.CombatWait;
 
             case StepKind.SinglePlayerDuty:
                 if (_handoffDone)
