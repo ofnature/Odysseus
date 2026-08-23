@@ -100,12 +100,19 @@ public static class PathPack
     {
         if (string.IsNullOrEmpty(assemblyDirectory))
             return null;
-        var dir = new DirectoryInfo(assemblyDirectory);
-        for (var i = 0; i < 3 && dir is not null; i++, dir = dir.Parent)
+        // Walked as a string rather than through DirectoryInfo: the paths this sees are the
+        // game host's, which are Windows-shaped even under Wine, and the test runner's
+        // filesystem is not always. Both separators count.
+        var dir = assemblyDirectory.TrimEnd('\\', '/');
+        for (var i = 0; i < 3; i++)
         {
-            if (!string.Equals(dir.Name, "bin", StringComparison.OrdinalIgnoreCase) || dir.Parent is null)
-                continue;
-            return Path.Combine(dir.Parent.FullName, AssetFolder, FileName);
+            var cut = dir.LastIndexOfAny(['\\', '/']);
+            if (cut <= 0)
+                return null;
+            var name = dir[(cut + 1)..];
+            dir = dir[..cut];
+            if (string.Equals(name, "bin", StringComparison.OrdinalIgnoreCase))
+                return Path.Combine(dir, AssetFolder, FileName);
         }
         return null;
     }

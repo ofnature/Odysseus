@@ -29,8 +29,9 @@ public sealed record BaitPlan(uint ItemId, uint Bait, IReadOnlyList<uint> Mooche
 /// </summary>
 public sealed class BaitCatalog
 {
-    /// <summary>Relative to an AutoHook installation's folder.</summary>
-    public const string RelativePath = @"Data\FishData\fish_list.json";
+    /// <summary>Relative to an AutoHook installation's folder, in the host's separator —
+    /// a literal backslash is a filename character, not a separator, everywhere but Windows.</summary>
+    public static readonly string RelativePath = Path.Combine("Data", "FishData", "fish_list.json");
 
     private readonly Func<string?> _autoHookFolder;
     private readonly Action<string>? _log;
