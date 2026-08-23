@@ -90,6 +90,12 @@ public interface IStepWorld
     bool ConfirmOvercapDialog();
 
     /// <summary>
+    /// Press Accept on the quest-offer window (JournalAccept). False when it is not up or the
+    /// button cannot be found. The society issuers put this window up for each daily.
+    /// </summary>
+    bool AcceptOfferedQuest();
+
+    /// <summary>
     /// How far through building this zone's mesh the pathfinder is, or negative when it is not
     /// building. A mesh on its way is worth waiting for; one that is not coming is a fault.
     /// </summary>

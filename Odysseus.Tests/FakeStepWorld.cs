@@ -15,6 +15,13 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Vector3? NearestReachablePoint(Vector3 near, float within) => NearestReachableFn is { } f ? f(near, within) : near;
     public bool RebuildAccepted { get; set; } = true;
     public bool RebuildNavmesh() { Calls.Add("RebuildNavmesh"); return RebuildAccepted; }
+    public bool AcceptOfferedQuest()
+    {
+        if (!VisibleAddons.Contains("JournalAccept")) return false;
+        Calls.Add("AcceptQuestOffer");
+        VisibleAddons.Remove("JournalAccept");
+        return true;
+    }
     /// <summary>True models the overcap warning being the open yes/no.</summary>
     public bool OvercapDialogUp { get; set; }
     public bool ConfirmOvercapDialog()

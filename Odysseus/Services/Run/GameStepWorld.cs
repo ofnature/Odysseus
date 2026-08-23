@@ -1567,6 +1567,29 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
+    /// <summary>The Accept button's node id in JournalAccept — the same id TextAdvance presses (ExecQuestAccept, reference/TextAdvance).</summary>
+    private const uint JournalAcceptButtonNode = 44;
+
+    public bool AcceptOfferedQuest()
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName("JournalAccept");
+            if (addon.IsNull || !addon.IsVisible)
+                return false;
+            var unit = (AtkUnitBase*)addon.Address;
+            var button = unit->GetComponentButtonById(JournalAcceptButtonNode);
+            if (button == null || !button->IsEnabled)
+                return false; // disabled Accept = "not yet available"; pressing it does nothing
+            return AtkClick.Button(unit, button);
+        }
+        catch (Exception ex)
+        {
+            _log($"Quest accept press failed: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
     public void HoldDialogue() => _textAdvance.Hold();
 
     public void ReleaseDialogue() => _textAdvance.Release();

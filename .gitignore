@@ -11,3 +11,6 @@ obj/
 *.md
 !README.md
 !CHANGELOG.md
+
+# Third-party source kept locally for study only — never built, never shipped. See NOTICE.md.
+reference/

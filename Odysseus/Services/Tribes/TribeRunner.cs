@@ -208,7 +208,13 @@ public sealed class TribeRunner
 
         // Answer whatever the issuer put up, else (re)interact.
         if (_world.IsAddonVisible("SelectYesno")) { _world.SelectYesNo(true); Bump(); return; }
-        if (_world.IsAddonVisible("JournalAccept")) { _world.SelectYesNo(true); Bump(); return; } // confirm = the yes-callback
+        if (_world.IsAddonVisible("JournalAccept"))
+        {
+            // The offer window's own Accept button. The yes-callback fired at "SelectYesno" went
+            // nowhere — that addon is not on screen — and TextAdvance had been covering for it.
+            if (_world.AcceptOfferedQuest()) Bump();
+            return;
+        }
         if (_world.IsAddonVisible("SelectIconString")) { _world.SelectIconStringIndex(0); Bump(); return; }
         if (_world.IsAddonVisible("SelectString")) { _world.SelectStringIndex(0); Bump(); return; }
 
