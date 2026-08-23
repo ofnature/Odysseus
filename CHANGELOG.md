@@ -1,13 +1,36 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.3 — 2026-08-23
+
+An afternoon of field-hardening on the Amalj'aa dailies. Every fix below came from a live failure.
+
+### Allied societies
+- A day of dailies runs all its objectives first, then makes one trip home and hands everything in from the same visit
+
+### Getting there
+- Steps whose business is an object arrive by the object: within reach counts, wherever the recorded mark sits, and a flight ending up to ten yalms above it lands on it
+- Every such step dismounts before it acts — a mid-air dismount is the game's own descent, so interactions are pinned to the floor
+- Combat lands fifteen yalms out and walks the rest in; nothing pulls from the saddle
+- A leg the ground mesh cannot route flies when the path says to (tribe runs stay ground-preferred otherwise); the mesh is rebuilt once when it contradicts itself; off-mesh feet step back onto it before pathing
+- A WalkTo the world stops a few yalms short of is a waypoint reached, not a fault
+
+### Quest running
+- Steps whose completion flags are already set are skipped — no more chasing a despawned objective the character already did
+- The reward-overcap warning ("you will not be able to receive all the following") is answered Yes so the run keeps moving — a Settings toggle holds it for you instead, and delivery turn-ins never answer it, since the delivery planner stops short of the cap on purpose
+
+### Tools
+- Path Tools shows where the character stands, with a copy button that produces the path-step JSON snippet
+- Odysseus writes its own log (odysseus.log beside the config) — Dalamud's stops at its size cap
+- The editor's current-step marker is a plain arrow every font can draw
+<!-- LATEST-END -->
+
 ## v0.2.2 — 2026-08-23
 
 ### Quest running
 - A destination the mesh does not cover — an NPC's platform painted non-walkable, like Hamujj Gah's — is reached by pathing to the nearest point the mesh does reach and walking the last few yalms directly, instead of faulting "no path" three times
 - When "no path" is final, the message now says whether the loaded mesh fails to cover where you stand (stale mesh: `/vnav rebuild`, then Retry) or has no route to the destination
 - Overworld combat walks to a mob that is standing off before engaging, and honours a step's kill count (from v0.2.1's fix, noted again here because 0.2.1 shipped minutes earlier)
-<!-- LATEST-END -->
 
 ## v0.2.1 — 2026-08-23
 
