@@ -67,6 +67,13 @@ public interface IStepWorld
     bool NavmeshReady { get; }
 
     /// <summary>
+    /// The loaded mesh has a point within <paramref name="within"/> yalms of <paramref name="point"/>
+    /// that is reachable from where the player stands. False at the player's own feet means the mesh
+    /// that is loaded does not cover this spot at all — a stale mesh for the zone, usually.
+    /// </summary>
+    bool MeshReaches(Vector3 point, float within);
+
+    /// <summary>
     /// How far through building this zone's mesh the pathfinder is, or negative when it is not
     /// building. A mesh on its way is worth waiting for; one that is not coming is a fault.
     /// </summary>

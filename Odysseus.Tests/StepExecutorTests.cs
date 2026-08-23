@@ -236,6 +236,28 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void No_path_says_whether_it_is_the_mesh_under_your_feet_or_the_destination()
+    {
+        // Korha, Peace for Thanalan: every walk in the zone "no path" — vnavmesh was ready and
+        // holding a mesh that did not cover where she stood. The message should say so, because
+        // the fix (/vnav rebuild) is nothing like the fix for a destination behind a door.
+        var stale = new FakeStepWorld { PathWaypointCount = 0, PlayerPosition = new Vector3(1, 0, 1) };
+        stale.MeshReachesFn = (p, _) => false;   // nothing reachable, not even our own feet
+        var ex = new StepExecutor(stale);
+        ex.Begin(Step(StepKind.WalkTo, new Vector3(10, 0, 10)));
+        Assert.Equal(StepStatus.Failed, Run(ex, stale));
+        Assert.Contains("does not cover where you stand", ex.FailReason);
+        Assert.Contains("/vnav rebuild", ex.FailReason);
+
+        var door = new FakeStepWorld { PathWaypointCount = 0, PlayerPosition = new Vector3(1, 0, 1) };
+        door.MeshReachesFn = (p, _) => p == door.PlayerPosition;   // our feet are fine; the target is not
+        ex = new StepExecutor(door);
+        ex.Begin(Step(StepKind.WalkTo, new Vector3(10, 0, 10)));
+        Assert.Equal(StepStatus.Failed, Run(ex, door));
+        Assert.Contains("no route from here to there", ex.FailReason);
+    }
+
+    [Fact]
     public void Interact_walks_up_interacts_waits_out_the_dialogue_and_is_done()
     {
         var world = new FakeStepWorld { ArriveOnMove = true };

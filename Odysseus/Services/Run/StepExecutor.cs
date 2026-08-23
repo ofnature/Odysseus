@@ -1409,7 +1409,7 @@ public sealed class StepExecutor
         if (_moveRetries >= MaxMoveRetries)
         {
             Fail(!direct && _world.PathWaypointCount == 0
-                ? $"no path to {Fmt(target)} after {_moveRetries} attempts"
+                ? $"no path to {Fmt(target)} after {_moveRetries} attempts{MeshDiagnosis(target)}"
                 : $"stalled {_moveRetries} times short of {Fmt(target)} ({distance:F1}y left)");
             return;
         }
@@ -1424,6 +1424,21 @@ public sealed class StepExecutor
         _moveRetries++;
         if (!ok)
             _world.Log($"move{(direct ? " direct" : "")} to {Fmt(target)} refused (attempt {_moveRetries})");
+    }
+
+    /// <summary>
+    /// Why the mesh gave nothing — asked only once it is being given up on. "No path" from a mesh
+    /// that says it is ready has two usual causes, and they want different hands: a mesh that does
+    /// not cover where we stand is vnavmesh holding a stale one (every walk in the zone fails the
+    /// same way, and a rebuild fixes it); a destination nothing reaches is the data's, or a door's.
+    /// </summary>
+    private string MeshDiagnosis(Vector3 target)
+    {
+        if (!_world.MeshReaches(_world.PlayerPosition, 3f))
+            return " — the loaded navmesh does not cover where you stand, so it is probably stale for this zone: /vnav rebuild, then Retry";
+        if (!_world.MeshReaches(target, 3f))
+            return " — the mesh has no route from here to there (off the mesh, or behind a door or zone line)";
+        return string.Empty;
     }
 
     /// <summary>
