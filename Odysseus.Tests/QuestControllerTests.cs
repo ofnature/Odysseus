@@ -98,6 +98,27 @@ public class QuestControllerTests : IDisposable
     }
 
     [Fact]
+    public void A_step_whose_completion_flags_are_set_is_skipped_not_chased()
+    {
+        // A Sappy Ending: the spot with bit 32 was already tapped — its plant is despawned — and
+        // the spot with bit 16 still stands. The run goes to the one still standing.
+        _world.Spawned.Add(111u);
+        _world.Spawned.Add(222u);
+        StorePath(new QuestSequence
+        {
+            Sequence = 1,
+            Steps = [Interact(222, [null, null, null, null, null, 16]), Interact(111, [null, null, null, null, null, 32])],
+        });
+        _quests.Set(1622, 1, 0, 0, 0, 0, 0, 32);
+        Assert.True(_controller.Start(1622));
+        Ticks(40);
+
+        Assert.DoesNotContain("Interact 111", _world.Calls);
+        Assert.Contains("Interact 222", _world.Calls);
+        Assert.Contains(_log, l => l.Contains("completion flags are already set"));
+    }
+
+    [Fact]
     public void A_step_that_did_not_take_is_retried_quickly_then_patiently()
     {
         // Accepting Brotherhood of Ash landed while the previous turn-in was still closing: the

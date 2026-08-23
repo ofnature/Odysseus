@@ -483,6 +483,18 @@ public sealed class QuestController
                 _stepIndex++;
                 return;
             }
+            // The other gate: a step whose own completion flags are already set is done — the
+            // vial was taken, the plant despawned. Chasing it anyway ground a whole afternoon
+            // against a mark whose object was gone. Done-ness is per step, not a prefix, so the
+            // resume index alone cannot cover this.
+            if (snap.IsAvailable && step.CompletionQuestVariablesFlags is { } doneMask && snap.Satisfies(doneMask))
+            {
+                _log($"Skip step {_stepIndex} ({step}) — its completion flags are already set ({snap}).");
+                _stepStarted = _world.UtcNow;
+                LogStep(step, "Skipped", "already done per quest variables");
+                _stepIndex++;
+                return;
+            }
             if (!step.IsReplaySafe && _replays > 0)
             {
                 _log($"Not replaying step {_stepIndex} ({step}) — not replay-safe; skipping.");
