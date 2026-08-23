@@ -238,6 +238,24 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_hand_over_window_is_joined_from_any_phase_of_any_step()
+    {
+        // Kurobana's vinegar: the Request window opened while the step was mid-move, and the
+        // fill-and-confirm lives in the dialogue machinery. A Request can only belong to the
+        // quest being run — join it whatever the step kind.
+        var w = new FakeStepWorld { TerritoryId = 614, TalksWhenInteracted = false };
+        w.PlayerPosition = new Vector3(600, 68, -137);
+        w.Spawned.Add(1022414);
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("Request");
+        w.Requests.Add(new HandOverRequest(2003718, "Vial of Wood Vinegar", 1));
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 1022414, TerritoryId = 614, Position = new Vector3(605, 68, -137) });
+        for (var i = 0; i < 30 && !w.Calls.Any(c => c.StartsWith("HandOver")); i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains(w.Calls, c => c.StartsWith("HandOver"));
+    }
+
+    [Fact]
     public void A_turn_in_whose_chain_opened_mid_travel_joins_the_choice_instead_of_freezing()
     {
         // Clutch and Kin: the join choice opened straight off the last objective, the

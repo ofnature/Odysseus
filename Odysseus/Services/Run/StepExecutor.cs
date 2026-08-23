@@ -84,6 +84,18 @@ public sealed class StepExecutor
     /// <summary>How far above an object a flight may end and still count as arrived — the dismount descends the rest.</summary>
     private const float HoverAboveObject = 10f;
 
+    /// <summary>
+    /// A window that needs the dialogue machinery is up: for an accept or turn-in, any of the
+    /// choice windows (the chain rolled ahead of us); for every step, the hand-over Request —
+    /// it can only belong to the quest being run, and the fill-and-confirm lives in Dialogue.
+    /// Kurobana's vinegar hand-over sat open while the move phase froze its clocks politely.
+    /// </summary>
+    private bool NeedsDialogueJoin(QuestStep step)
+        => _world.IsAddonVisible("Request")
+           || (step.Kind is StepKind.CompleteQuest or StepKind.AcceptQuest
+               && (_world.IsAddonVisible("SelectString") || _world.IsAddonVisible("SelectYesno")
+                   || _world.IsAddonVisible("SelectIconString") || _world.IsAddonVisible("JournalResult")));
+
     /// <summary>Steps whose business is a thing in the world, reached when the thing is, done from the ground.</summary>
     private static bool IsObjectStep(StepKind kind) => kind is StepKind.Interact or StepKind.AcceptQuest
         or StepKind.CompleteQuest or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent;
@@ -595,7 +607,7 @@ public sealed class StepExecutor
             case Phase.WaitReady:
                 if (_world.IsReady && !_world.IsOccupied)
                     Enter(NextAfterArrival(step));
-                else if (_world.IsOccupied && step.Kind is StepKind.CompleteQuest or StepKind.AcceptQuest)
+                else if (_world.IsOccupied && NeedsDialogueJoin(step))
                 {
                     // The previous hand-in's chain is still open, and for an accept or turn-in
                     // that conversation IS the step — join it rather than waiting behind it.
@@ -1428,9 +1440,7 @@ public sealed class StepExecutor
             // travelling — Clutch and Kin's join choice opened off the last objective, and the
             // move phase sat behind it with every clock frozen while the choice sat unanswered.
             // A choice window during an accept or turn-in IS the step: join it.
-            if (step.Kind is StepKind.CompleteQuest or StepKind.AcceptQuest
-                && (_world.IsAddonVisible("SelectString") || _world.IsAddonVisible("SelectYesno")
-                    || _world.IsAddonVisible("SelectIconString") || _world.IsAddonVisible("JournalResult")))
+            if (NeedsDialogueJoin(step))
             {
                 _sawOccupied = true;
                 Enter(Phase.Dialogue);
@@ -2212,7 +2222,7 @@ public sealed class StepExecutor
             // the step: join it and let the dialogue machinery answer it, rather than waiting
             // behind it for thirty seconds and calling the player not ready. The third Kobold
             // hand-in of the day sat exactly there, one Yes away from done.
-            if (_world.IsOccupied && step.Kind is StepKind.CompleteQuest or StepKind.AcceptQuest)
+            if (_world.IsOccupied && NeedsDialogueJoin(step))
             {
                 _sawOccupied = true;
                 Enter(Phase.Dialogue);
