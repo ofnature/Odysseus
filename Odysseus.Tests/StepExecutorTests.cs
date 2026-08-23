@@ -419,6 +419,25 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void Moving_without_moving_stops_and_hands_the_leg_to_the_remedies()
+    {
+        // A Yanxia roofline held a combat approach at exactly 25.1y with vnav claiming motion
+        // the whole time — the not-moving ladder never got a turn while the jump hoped.
+        var world = new FakeStepWorld { TerritoryId = 614, CanFlyHere = true };
+        world.PlayerPosition = new Vector3(721, 117, -85);   // 25y out, wedged
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Combat, KindName = "Combat", Fly = true, EnemySpawnType = EnemySpawnType.AutoOnEnterArea, KillEnemyDataIds = [7601], TerritoryId = 614, Position = new Vector3(721, 117, -60) });
+
+        // The first move claims motion forever; the position never changes.
+        for (var i = 0; i < 6 && !world.Calls.Any(c => c.StartsWith("Move ")); i++) { ex.Tick(); world.Advance(0.5); }
+        world.IsMoving = true;
+        for (var i = 0; i < 40 && !world.Calls.Any(c => c.StartsWith("Log") && c.Contains("Moving without moving")); i++)
+        { ex.Tick(); world.IsMoving = true; world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("Moving without moving"));
+        Assert.Contains("Stop", world.Calls);
+    }
+
+    [Fact]
     public void A_leg_the_ground_cannot_route_flies_when_the_path_says_to()
     {
         // Zanr'ak's succulents: fenced camp, Fly true in the data, ground-only for tribe runs —

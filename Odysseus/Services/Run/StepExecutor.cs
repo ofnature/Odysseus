@@ -195,6 +195,9 @@ public sealed class StepExecutor
 
     /// <summary>How long an arrival-spawn fight waits before creeping onto the exact mark.</summary>
     private static readonly TimeSpan CombatCreepAfter = TimeSpan.FromSeconds(4);
+
+    /// <summary>"Moving" with the position frozen this long is a wedge, not a walk.</summary>
+    private static readonly TimeSpan FrozenStallLimit = TimeSpan.FromSeconds(12);
     private static readonly TimeSpan CombatMax = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan TravelStart = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan TravelMax = TimeSpan.FromSeconds(90);
@@ -266,6 +269,8 @@ public sealed class StepExecutor
     private bool _creptToMark;
     private bool _interactFlew;
     private bool _detourFly;
+    private Vector3 _frozenAt;
+    private DateTime _frozenSince;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -391,6 +396,8 @@ public sealed class StepExecutor
         _creptToMark = false;
         _interactFlew = false;
         _detourFly = false;
+        _frozenAt = default;
+        _frozenSince = default;
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
@@ -1564,6 +1571,23 @@ public sealed class StepExecutor
 
         if (_world.IsMoving)
         {
+            // Moving in name only: the pathfollower can wedge against geometry with the position
+            // frozen to the yalm — a roofline in Yanxia held one fight's approach at 25.1y for a
+            // full minute of hopeful jumping. Frozen means stop and hand the leg to the remedy
+            // ladder, which knows about footing, flight and rebuilds; jumping does not.
+            if (Vector3.Distance(_world.PlayerPosition, _frozenAt) > 0.5f)
+            {
+                _frozenAt = _world.PlayerPosition;
+                _frozenSince = now;
+            }
+            else if (_frozenSince != default && now - _frozenSince > FrozenStallLimit)
+            {
+                _world.Log($"Moving without moving for {(now - _frozenSince).TotalSeconds:F0}s at {Fmt(_world.PlayerPosition)} — stopping and re-pathing.");
+                _world.StopMoving();
+                _frozenSince = now;
+                _lastMoveIssue = default; // the not-moving flow may reissue immediately
+                return;
+            }
             _lastMoveIssue = now;
 
             // Moving but not getting anywhere: running into scenery the mesh thinks is passable, or
