@@ -82,12 +82,17 @@ public sealed class MainWindow : OdysseusWindow
         {
             RefreshFrontier();
             DrawTopRow();
+            // The hero card: the running quest, its state and its controls as one panel.
+            OdysseusTheme.BeginCard("hero");
             DrawNotice();
             DrawQuestBlock();
             DrawPrimaryControls();
+            if (!Cfg.CompactMode)
+                DrawSecondaryControls();
+            OdysseusTheme.EndCard();
             if (Cfg.CompactMode)
                 return;
-            DrawSecondaryControls();
+            DrawPriorityQueue();
             DrawFleetSection();
             DrawQuickAccessSection();
             DrawPathToolsSection();
@@ -353,17 +358,111 @@ public sealed class MainWindow : OdysseusWindow
 
     // ── sections ──
 
+    /// <summary>
+    /// The priority queue, in the main window: what runs before the story continues, in order,
+    /// each row saying whether it can. The full add-by-search lives in Settings; here the one
+    /// quick add is "the quest on screen".
+    /// </summary>
+    private void DrawPriorityQueue()
+    {
+        var entries = _d.Priority.Entries(_d.PriorityWorld);
+        OdysseusTheme.SectionHeader($"PRIORITY QUESTS ({entries.Count})", OdysseusTheme.WakeDim);
+
+        if (entries.Count == 0)
+        {
+            ImGui.TextColored(OdysseusTheme.TextDisabled, "Empty — the story runs on its own.");
+            ImGui.SameLine();
+            DrawPriorityFooterButtons();
+            return;
+        }
+
+        var next = _d.Priority.NextReady(_d.PriorityWorld);
+        OdysseusTheme.BeginCard("prioritycard");
+        if (ImGui.BeginTable("##priolist", 3, ImGuiTableFlags.SizingStretchProp))
+        {
+            ImGui.TableSetupColumn("quest", ImGuiTableColumnFlags.WidthStretch);
+            ImGui.TableSetupColumn("status", ImGuiTableColumnFlags.WidthFixed, 132f);
+            ImGui.TableSetupColumn("actions", ImGuiTableColumnFlags.WidthFixed, 78f);
+            for (var i = 0; i < entries.Count; i++)
+            {
+                var e = entries[i];
+                using var rowId = Dalamud.Interface.Utility.Raii.ImRaii.PushId(e.QuestId);
+                var isNext = e.QuestId == next;
+                ImGui.TableNextRow();
+                if (isNext || e.Status == PriorityStatus.Accepted)
+                    ImGui.TableSetBgColor(ImGuiTableBgTarget.RowBg0,
+                        ImGui.ColorConvertFloat4ToU32(OdysseusTheme.WakeWash));
+
+                ImGui.TableNextColumn();
+                ImGui.TextColored(OdysseusTheme.TextDisabled, $"{i + 1}");
+                ImGui.SameLine(0f, 8f);
+                var (dot, statusText, statusColor) = e.Status switch
+                {
+                    PriorityStatus.Accepted => (OdysseusTheme.WakeFoam, "under way", OdysseusTheme.WakeFoam),
+                    PriorityStatus.Ready => (OdysseusTheme.StatusGreen, isNext ? "ready · next" : "ready", OdysseusTheme.StatusGreen),
+                    PriorityStatus.Complete => (OdysseusTheme.TextDisabled, "complete", OdysseusTheme.TextDisabled),
+                    PriorityStatus.NoPath or PriorityStatus.UnknownQuest => (OdysseusTheme.StatusYellow, e.Detail, OdysseusTheme.StatusYellow),
+                    _ => (OdysseusTheme.StatusGrey, e.Detail, OdysseusTheme.TextDisabled),
+                };
+                ImGui.TextColored(dot, "●");
+                ImGui.SameLine(0f, 6f);
+                ImGui.TextColored(e.Status == PriorityStatus.Complete ? OdysseusTheme.TextDisabled : OdysseusTheme.TextPrimary, e.Name);
+                ImGui.SameLine(0f, 6f);
+                ImGui.TextColored(OdysseusTheme.TextDisabled, $"#{e.QuestId}");
+
+                ImGui.TableNextColumn();
+                ImGui.TextColored(statusColor, statusText);
+                if (ImGui.IsItemHovered() && e.Detail.Length > 0)
+                    ImGui.SetTooltip(e.Detail);
+
+                ImGui.TableNextColumn();
+                var sq = new Vector2(22, 20);
+                using (ImRaii.Disabled(i == 0))
+                {
+                    if (OdysseusTheme.IconButton("up", FontAwesomeIcon.ArrowUp, "Move up", sq)) _d.Priority.Move(e.QuestId, -1);
+                }
+                ImGui.SameLine(0f, 2f);
+                using (ImRaii.Disabled(i == entries.Count - 1))
+                {
+                    if (OdysseusTheme.IconButton("dn", FontAwesomeIcon.ArrowDown, "Move down", sq)) _d.Priority.Move(e.QuestId, +1);
+                }
+                ImGui.SameLine(0f, 2f);
+                if (OdysseusTheme.IconButton("rm", FontAwesomeIcon.Trash, "Remove from the list", sq)) _d.Priority.Remove(e.QuestId);
+            }
+            ImGui.EndTable();
+        }
+        OdysseusTheme.EndCard();
+        DrawPriorityFooterButtons();
+    }
+
+    private void DrawPriorityFooterButtons()
+    {
+        var canAdd = _selectedQuest != 0 && !_d.Priority.Contains(_selectedQuest);
+        using (ImRaii.Disabled(!canAdd))
+        {
+            if (ImGui.SmallButton("+ Add current") && canAdd)
+                _d.Priority.Add(_selectedQuest);
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(canAdd ? "Put the quest shown above at the end of the list."
+                : "The quest on screen is already listed, or there is none.");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Search / settings…"))
+            _d.OpenConfig();
+    }
+
     private void DrawFleetSection()
     {
         var peers = _d.Fleet.Roster.Peers(DateTime.UtcNow, TimeSpan.FromSeconds(Math.Max(1f, Cfg.PeerStaleSeconds)));
-        if (!ImGui.CollapsingHeader($"FLEET ({1 + peers.Count})###fleetsec", ImGuiTreeNodeFlags.DefaultOpen))
-            return;
+        OdysseusTheme.SectionHeader($"FLEET ({1 + peers.Count})", OdysseusTheme.WakeDim);
+        OdysseusTheme.BeginCard("fleetcard");
         if (_d.Fleet.Own is { } own) FleetRow(own, OdysseusTheme.PeerOnline, "you");
         foreach (var p in peers)
         {
             var color = p.Liveness switch { PeerLiveness.Online => OdysseusTheme.PeerOnline, PeerLiveness.Stale => OdysseusTheme.PeerStale, _ => OdysseusTheme.PeerGone };
             FleetRow(p.Status, color, p.Liveness == PeerLiveness.Online ? null : $"{p.Age.TotalSeconds:F0}s");
         }
+        OdysseusTheme.EndCard();
     }
 
     private static void FleetRow(FleetStatus s, Vector4 dot, string? tag)

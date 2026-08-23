@@ -178,6 +178,43 @@ internal static class OdysseusTheme
         ImGui.Spacing();
     }
 
+    // ── cards ──
+    // These bindings predate auto-resizing children, so a card is drawn behind its content: split
+    // the draw list, lay the content out in a group on the top channel, then paint the panel and
+    // border underneath on the bottom one. Not nestable, which no window here needs.
+    private static Vector2 _cardOrigin;
+    private static float _cardRight;
+    private const float CardPadX = 10f;
+    private const float CardPadY = 8f;
+
+    /// <summary>Open a panel card; close with <see cref="EndCard"/>. Content is inset by the pad.</summary>
+    public static void BeginCard(string id)
+    {
+        var dl = ImGui.GetWindowDrawList();
+        dl.ChannelsSplit(2);
+        dl.ChannelsSetCurrent(1);
+        _cardOrigin = ImGui.GetCursorScreenPos();
+        _cardRight = _cardOrigin.X + ImGui.GetContentRegionAvail().X;
+        ImGui.SetCursorScreenPos(_cardOrigin + new Vector2(CardPadX, CardPadY));
+        ImGui.BeginGroup();
+        ImGui.PushID(id);
+    }
+
+    public static void EndCard()
+    {
+        ImGui.PopID();
+        ImGui.EndGroup();
+        var bottom = ImGui.GetItemRectMax().Y + CardPadY;
+        var dl = ImGui.GetWindowDrawList();
+        dl.ChannelsSetCurrent(0);
+        var max = new Vector2(_cardRight, bottom);
+        dl.AddRectFilled(_cardOrigin, max, ImGui.ColorConvertFloat4ToU32(_p.BgPanel), 4f);
+        dl.AddRect(_cardOrigin, max, ImGui.ColorConvertFloat4ToU32(_p.Border), 4f);
+        dl.ChannelsMerge();
+        ImGui.SetCursorScreenPos(new Vector2(_cardOrigin.X, bottom + 6f));
+        ImGui.Dummy(System.Numerics.Vector2.Zero); // registers the cursor move with the layout
+    }
+
     /// <summary>Coloured status dot + label.</summary>
     public static void StatusDot(bool active, string activeLabel = "Active", string inactiveLabel = "Idle")
     {
