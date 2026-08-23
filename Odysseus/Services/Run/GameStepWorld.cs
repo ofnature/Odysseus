@@ -1525,7 +1525,12 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
             if (!_overcapPrompts.Any(line => prompt.Contains(line, StringComparison.OrdinalIgnoreCase)))
                 return false;
 
-            return AtkClick.Button(&yesno->AtkUnitBase, yesno->YesButton);
+            // The callback, not the button: this window comes in more than one skin — the field
+            // dump of a live one showed no plain Button components at all, and the YesButton
+            // click returned false forever, silently. The callback (0 = yes) is the one interface
+            // every skin answers to, and it is how SelectYesNo already says yes elsewhere.
+            SelectYesNo(true);
+            return true;
         }
         catch (Exception ex)
         {
