@@ -1759,6 +1759,17 @@ public sealed class StepExecutor
                 Enter(Phase.WaitReady);
                 return;
             }
+            // A step with an object gives its last stretch to the interact machinery rather than
+            // burning a mesh rebuild on a porch step: the press has its own walk-to and, past
+            // that, the fly-to-the-object escape. Amber Alert's accept sat three yalms from
+            // Fukudo rebuilding a mesh that was never wrong.
+            if (step.DataId is not null && detour is null && distance <= 10f)
+            {
+                _world.Log($"The move gave up {distance:F1}y from the mark — handing the last stretch to the interact.");
+                _world.StopMoving();
+                Enter(Phase.WaitReady);
+                return;
+            }
             // The ground has no route and the path itself says to fly. The ground-only rule for
             // allied-society runs in old zones is a preference; a leg that cannot be walked at
             // all — a fenced camp, a cave with a doorway the mesh does not span — yields to the
