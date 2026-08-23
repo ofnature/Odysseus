@@ -227,6 +227,7 @@ public sealed class StepExecutor
     private bool _offMeshNudged;
     private bool _footingTaken;
     private bool _meshRebuilt;
+    private bool _flyFallback;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -343,6 +344,7 @@ public sealed class StepExecutor
         _stalledSince = default;
         _lastStallJump = default;
         _sawCombat = false;
+        _flyFallback = false;
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
@@ -1426,7 +1428,7 @@ public sealed class StepExecutor
             return;
         }
 
-        var fly = step.Fly && _world.CanFlyHere && !_groundOnly;
+        var fly = step.Fly && _world.CanFlyHere && (!_groundOnly || _flyFallback);
 
         // The mesh answered nothing and we are standing still. Before asking again: a destination
         // that is simply off the mesh — an NPC's platform painted non-walkable is the usual shape,
@@ -1484,6 +1486,17 @@ public sealed class StepExecutor
                 _world.Log($"Ended {distance:F1}y short of the mark {Fmt(target)} and can get no closer — near enough for a waypoint.");
                 _world.StopMoving();
                 Enter(Phase.WaitReady);
+                return;
+            }
+            // The ground has no route and the path itself says to fly. The ground-only rule for
+            // allied-society runs in old zones is a preference; a leg that cannot be walked at
+            // all — a fenced camp, a cave with a doorway the mesh does not span — yields to the
+            // path's own answer. One leg, not the run.
+            if (!_flyFallback && _groundOnly && step.Fly && _world.CanFlyHere)
+            {
+                _flyFallback = true;
+                _world.Log($"The ground mesh has no route to {Fmt(target)} and the path says to fly — flying this leg.");
+                Enter(_world.IsMounted ? Phase.Move : Phase.Mount);
                 return;
             }
             // Both ends on the mesh and still nothing: the mesh is lying about the world — built

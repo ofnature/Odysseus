@@ -238,6 +238,26 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_leg_the_ground_cannot_route_flies_when_the_path_says_to()
+    {
+        // Zanr'ak's succulents: fenced camp, Fly true in the data, ground-only for tribe runs —
+        // and five mesh rebuilds proved the ground truly has no way in. The preference yields.
+        var world = new FakeStepWorld { PathWaypointCount = 0, CanFlyHere = true, TerritoryId = 146 };
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.WalkTo, KindName = "WalkTo", Fly = true,
+            TerritoryId = 146, Position = new Vector3(-116, -1, -33),
+        }, groundOnly: true);
+
+        for (var i = 0; i < 20 && !world.Calls.Any(c => c.Contains("fly=True")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Move ") && c.Contains("fly=True"));
+
+        world.PathWaypointCount = 5; world.ArriveOnMove = true;
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+    }
+
+    [Fact]
     public void A_mesh_that_lies_about_the_world_is_rebuilt_and_the_step_then_succeeds()
     {
         // Korha after unlocking the Amalj'aa: the zone changed shape, the cached mesh predates it,
