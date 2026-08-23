@@ -803,8 +803,9 @@ public class StepExecutorTests
     [Fact]
     public void Named_overworld_targets_are_hunted_wide_and_unnamed_pulls_stay_close()
     {
-        // The Banestools roam past the thirty-yalm ring; with ids in hand the hunt goes as far
-        // as the object table sees, and the engage walk covers the distance.
+        // The Banestools roam past the thirty-yalm ring — and Courage the Cowardly Lupin's
+        // ambush stood off the mark the same way. With ids in hand the hunt goes as far as the
+        // object table sees, whatever spawned them; the engage walk covers the distance.
         var step = new QuestStep
         {
             Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.OverworldEnemies,

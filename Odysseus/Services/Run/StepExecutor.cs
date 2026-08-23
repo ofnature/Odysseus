@@ -2618,9 +2618,9 @@ public sealed class StepExecutor
         // in plain sight past the thirty-yalm ring while the step waited at the mark for nothing.
         // With ids to look for, hunt as far as the object table sees and walk to the nearest;
         // the tight ring stays for unnamed pulls, where wide means someone else's mobs.
-        var radius = enemies.Count > 0 && step.EnemySpawnType == EnemySpawnType.OverworldEnemies
-            ? OverworldHuntRadius
-            : CombatSearchRadius;
+        // With ids in hand the hunt is safe at range whatever spawned them — an ambush that
+        // triggered on the fly-over can stand well off the mark by the time we land and walk in.
+        var radius = enemies.Count > 0 ? OverworldHuntRadius : CombatSearchRadius;
         if (_world.AttackNearestEnemy(enemies, radius))
         {
             _phase = Phase.Combat;
