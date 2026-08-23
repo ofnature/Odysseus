@@ -61,6 +61,9 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>Answer the "you will not be able to receive all the…" warning with Yes and keep going.</summary>
     public bool AcceptRewardOvercap { get; set; } = true;
 
+    /// <summary>Advance subtitle boxes and confirm cutscene skips ourselves — works without TextAdvance.</summary>
+    public bool AutoAdvanceDialogue { get; set; } = true;
+
     // ── Priority quests ──
 
     /// <summary>The list, in priority order. Only meaningful while <see cref="PersistPriorityList"/> is on.</summary>

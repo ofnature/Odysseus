@@ -292,6 +292,15 @@ public sealed class ConfigWindow : OdysseusWindow
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("The capped-reward warning (tomestones, seals, gil). On: answer Yes and keep the run moving, losing the excess. Off: the dialog waits for you.");
+
+        var advance = _config.AutoAdvanceDialogue;
+        if (ImGui.Checkbox("Advance dialogue ourselves", ref advance))
+        {
+            _config.AutoAdvanceDialogue = advance;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Subtitle boxes advanced and cutscene skips confirmed during runs, without needing TextAdvance. Cutscene ESC and optional-reward picking still come from TextAdvance when it is installed.");
         OdysseusTheme.HelpMarker(
             "Done by TextAdvance under Odysseus's control, using TextAdvance's own reward priority (gil, vendor " +
             "value, gear coffers, gear for your job). Odysseus then presses Complete. Off = the reward window " +

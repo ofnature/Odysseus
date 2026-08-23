@@ -86,6 +86,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly PathEditorWindow _pathEditorWindow;
     private readonly LogWindow _logWindow;
     private readonly PathRecorder _recorder = new();
+    private readonly Services.Run.DialogueStagehand _stagehand = new();
     private readonly RecorderFeed _recorderFeed;
 
     public OdysseusPlugin(IDalamudPluginInterface pluginInterface)
@@ -496,6 +497,16 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 _controller.Stop();
             return;
         }
+
+        // The dialogue chores every run needs each frame, whoever owns it below: the subtitle
+        // box advanced, the skip-cutscene prompt answered. Built-in, so a client without
+        // TextAdvance still talks its way through.
+        if (_config.AutoAdvanceDialogue
+            && (_controller.State.IsDriving()
+                || _tribeRunner.State is not (Services.Tribes.TribeRunState.Idle or Services.Tribes.TribeRunState.Done or Services.Tribes.TribeRunState.Faulted)
+                || _deliveryRunner.State is not (Services.Deliveries.DeliveryRunState.Idle or Services.Deliveries.DeliveryRunState.Done
+                    or Services.Deliveries.DeliveryRunState.Faulted or Services.Deliveries.DeliveryRunState.Blocked)))
+            _stagehand.Tick(_world);
 
         // Fetching from the chest is something you asked for by pressing a button, so it runs
         // whatever else is going on and owns the frame until it is done.

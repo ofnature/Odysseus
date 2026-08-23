@@ -95,6 +95,12 @@ public interface IStepWorld
     /// </summary>
     bool AcceptOfferedQuest();
 
+    /// <summary>A cutscene is playing or being watched.</summary>
+    bool InCutscene { get; }
+
+    /// <summary>Click the subtitle box (Talk) once, advancing the line. No-op when it is not up.</summary>
+    void AdvanceTalk();
+
     /// <summary>
     /// How far through building this zone's mesh the pathfinder is, or negative when it is not
     /// building. A mesh on its way is worth waiting for; one that is not coming is a fault.

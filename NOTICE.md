@@ -92,6 +92,24 @@ what was changed (format conversion; selection by delivery item).
 Apache 2.0 is one-way compatible with GPL-3, so it can be combined into this project. The reverse is
 not true, and nothing here is contributed back under Apache terms.
 
+## Code studied, code ported
+
+### ECommons (`NightmareXIV/ECommons`) — MIT
+
+The subtitle-box click in `GameStepWorld.AdvanceTalk` is ported from ECommons'
+`AddonMaster.Talk.Click` (MIT, © 2023 NightmareXIV). MIT permits this with attribution, which this
+notice is.
+
+### TextAdvance (`NightmareXIV/TextAdvance`) — no licence published
+
+Studied, never copied: it publishes no licence file, so only the game-interface facts it
+demonstrates are used — which addon, which button id, which condition flags — and every
+implementation here is our own. Its cutscene-ESC (a code hook and patch) and reward picking are
+deliberately not reimplemented; both still come from an installed TextAdvance.
+
+A `reference/` folder in the working tree may hold copies of third-party sources for study. It is
+gitignored: nothing in it is built, linked, or shipped.
+
 ## Handoffs, not data
 
 Artisan, GatherBuddy Reborn, vnavmesh, Lifestream, TextAdvance, BossMod Reborn, Theseus and

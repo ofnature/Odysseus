@@ -705,6 +705,41 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
            || _condition[ConditionFlag.WatchingCutscene]
            || _condition[ConditionFlag.WatchingCutscene78];
 
+    public bool InCutscene
+        => _condition[ConditionFlag.OccupiedInCutSceneEvent]
+           || _condition[ConditionFlag.WatchingCutscene]
+           || _condition[ConditionFlag.WatchingCutscene78];
+
+    /// <summary>
+    /// The subtitle box advances on a click, and this is that click: a fresh AtkEvent aimed at
+    /// the addon and a MouseDown/Click/Up triple. Ported from ECommons' AddonMaster.Talk.Click
+    /// (MIT, NightmareXIV) — see NOTICE.md.
+    /// </summary>
+    public void AdvanceTalk()
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName("Talk");
+            if (addon.IsNull || !addon.IsVisible)
+                return;
+            var unit = (AtkUnitBase*)addon.Address;
+            var evt = new AtkEvent
+            {
+                Listener = (AtkEventListener*)unit,
+                Target = &AtkStage.Instance()->AtkEventTarget,
+                State = new() { StateFlags = (AtkEventStateFlags)132 },
+            };
+            var data = default(AtkEventData);
+            unit->ReceiveEvent(AtkEventType.MouseDown, 0, &evt, &data);
+            unit->ReceiveEvent(AtkEventType.MouseClick, 0, &evt, &data);
+            unit->ReceiveEvent(AtkEventType.MouseUp, 0, &evt, &data);
+        }
+        catch (Exception ex)
+        {
+            _log($"Talk advance failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     public bool IsDead => _objectTable.LocalPlayer?.IsDead ?? false;
 
     // ── IRecorderWorld ──
