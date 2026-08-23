@@ -18,6 +18,7 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool InCutscene { get; set; }
     public bool IsDiving { get; set; }
     public bool IsSwimming { get; set; }
+    public bool IsJumping { get; set; }
     /// <summary>Presses until this many calls, then the water accepts us.</summary>
     public int DivePressesNeeded { get; set; } = 3;
     private int _divePresses;

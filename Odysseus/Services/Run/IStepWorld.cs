@@ -104,6 +104,9 @@ public interface IStepWorld
     /// <summary>On the water's surface.</summary>
     bool IsSwimming { get; }
 
+    /// <summary>Mid-jump — the game refuses commands, interacts included, until landing.</summary>
+    bool IsJumping { get; }
+
     /// <summary>
     /// Press the game's own descent keybind (MOVE_DESCENT), one key message per call — call it
     /// every frame until <see cref="IsDiving"/>. Ported from Questionable's Dive task (AGPL-3.0,

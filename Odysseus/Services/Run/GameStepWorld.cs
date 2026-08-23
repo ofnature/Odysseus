@@ -709,6 +709,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public bool IsSwimming => _condition[ConditionFlag.Swimming];
 
+    public bool IsJumping => _condition[ConditionFlag.Jumping] || _condition[ConditionFlag.Jumping61];
+
     /// <summary>
     /// The descent keypress, spread over frames the way the game expects: modifiers down, key
     /// down, a few quiet frames, then everything up. The keybind is read from the game's own

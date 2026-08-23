@@ -1276,7 +1276,9 @@ public sealed class StepExecutor
             _world.Dismount();
         }
         if (now - _phaseStart > ReadyWait)
-            Fail("could not get off the mount");
+            Fail($"could not get off the mount (at {Fmt(_world.PlayerPosition)}, "
+                 + $"{(_world.IsInFlight ? "in flight" : "mounted on the ground")}, "
+                 + $"target {Fmt(step.Position ?? default)})");
     }
 
     /// <summary>
@@ -1568,8 +1570,11 @@ public sealed class StepExecutor
                 _closestSeen = distance;
                 _stalledSince = now;
             }
-            else if (now - _stalledSince > StallJumpAfter && now - _lastStallJump > StallJumpGap)
+            else if (now - _stalledSince > StallJumpAfter && now - _lastStallJump > StallJumpGap
+                     && !(step.DataId is not null && distance <= 10f))
             {
+                // Close quarters to an interact target are exempt: the game refuses commands
+                // mid-jump, and the hop was eating the very press that would finish the step.
                 _lastStallJump = now;
                 _stalledSince = now;
                 _world.Log($"Not getting any closer to {Fmt(target)} ({distance:F1}y for {StallJumpAfter.TotalSeconds:F0}s) — jumping.");
@@ -2244,7 +2249,8 @@ public sealed class StepExecutor
                 _world.Dismount();
             }
             if (now - _phaseStart > ReadyWait)
-                Fail($"could not get off the mount to interact with {dataId}");
+                Fail($"could not get off the mount to interact with {dataId} (at {Fmt(_world.PlayerPosition)}, "
+                     + $"{(_world.IsInFlight ? "in flight" : "mounted on the ground")})");
             return;
         }
         if (_dismountAsked && !DismountSettled(now))
@@ -2260,6 +2266,9 @@ public sealed class StepExecutor
             }
             return;
         }
+
+        if (_world.IsJumping)
+            return; // the game refuses commands mid-jump — the press would be eaten silently
 
         _world.FaceDataId(dataId);
         _world.HoldDialogue();
