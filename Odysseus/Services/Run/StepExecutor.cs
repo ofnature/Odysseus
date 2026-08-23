@@ -275,6 +275,8 @@ public sealed class StepExecutor
     private Vector3 _frozenAt;
     private DateTime _frozenSince;
     private bool _descentRerouted;
+    private bool _groundFallback;
+    private bool _lastIssuedFly;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -403,6 +405,8 @@ public sealed class StepExecutor
         _frozenAt = default;
         _frozenSince = default;
         _descentRerouted = false;
+        _groundFallback = false;
+        _lastIssuedFly = false;
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
@@ -1610,7 +1614,16 @@ public sealed class StepExecutor
             }
             else if (_frozenSince != default && now - _frozenSince > FrozenStallLimit)
             {
-                _world.Log($"Moving without moving for {(now - _frozenSince).TotalSeconds:F0}s at {Fmt(_world.PlayerPosition)} — stopping and re-pathing.");
+                // A flown leg that wedges reissues on the ground once: the volume path is what
+                // snags on rooflines and branches, and the walk beneath them often just works —
+                // the user proved it by flipping Fly off by hand, step after step.
+                if (_lastIssuedFly && !_groundFallback)
+                {
+                    _groundFallback = true;
+                    _world.Log($"The flight is wedged at {Fmt(_world.PlayerPosition)} — trying this leg on the ground.");
+                }
+                else
+                    _world.Log($"Moving without moving for {(now - _frozenSince).TotalSeconds:F0}s at {Fmt(_world.PlayerPosition)} — stopping and re-pathing.");
                 _world.StopMoving();
                 _frozenSince = now;
                 _lastMoveIssue = default; // the not-moving flow may reissue immediately
@@ -1664,9 +1677,10 @@ public sealed class StepExecutor
 
         // While diving, every move is a volume move — the ground mesh has nothing down here.
         // A flown detour (the ledge escape) flies regardless of what the step says.
-        var fly = (step.Fly && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded)
+        var fly = (step.Fly && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback)
                   || _world.IsDiving
                   || (_detourFly && detour is not null);
+        _lastIssuedFly = fly;
 
         // The mesh answered nothing and we are standing still. Before asking again: a destination
         // that is simply off the mesh — an NPC's platform painted non-walkable is the usual shape,

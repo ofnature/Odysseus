@@ -1453,7 +1453,9 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
                 {
                     var item = requests.Items[i];
                     if (item.ItemId == 0) continue;
-                    var name = item.ItemName.ToString();
+                    var name = item.ItemName.StringPtr.Value == null
+                        ? string.Empty
+                        : Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)item.ItemName.StringPtr.Value).TextValue;
                     list.Add(new HandOverRequest(item.ItemId,
                         name.Length > 0 ? name : $"item {item.ItemId}",
                         Math.Max(1, item.RequiredQuantity)));
@@ -1490,48 +1492,57 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// first offered item — the offers are already filtered to what that slot accepts, so "the
     /// first one" cannot be the wrong item, only the wrong copy of the right one.
     /// </summary>
+    /// <summary>How many slots have had their picker opened this window; reset when it closes.</summary>
+    private int _handOverSlotCursor;
+    private bool _handOverWindowSeen;
+
+    /// <summary>
+    /// Fill every slot then press Hand Over, one beat per call: open a slot's item picker
+    /// (callback 2, slot), pick the first offer from the ContextIconMenu it opens (callback 0,
+    /// index, 1021003), and press the button once every slot has been fed. The callback pair is
+    /// the community-proven mechanism (Taurenkey's AutoSelectTurnin; the agent-based fill this
+    /// replaces sat silent for two minutes on Fresh Flesh's three fish).
+    /// </summary>
     public bool CompleteHandOverWindow()
     {
         try
         {
             var addon = _gameGui.GetAddonByName(HandOverWindow);
             if (addon.IsNull || !addon.IsVisible)
-                return false;
-            var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentNpcTrade.Instance();
-            if (agent == null || !agent->IsAgentActive())
-                return false;
-
-            var state = UIState.Instance();
-            if (state == null)
-                return false;
-
-            // How many slots there are is the trade state's answer, not the addon's: the same field
-            // the delivery turn-in reads, and the one that says what each slot will accept.
-            var request = (FFXIVClientStructs.FFXIV.Client.UI.AddonRequest*)addon.Address;
-            var slots = Math.Clamp((int)state->NpcTrade.Requests.Count, 0, 5);
-            var result = default(AtkValue);
-            Span<AtkValue> args = stackalloc AtkValue[4];
-            for (var slot = 0; slot < slots; slot++)
             {
-                if (agent->SelectedTurnInSlot >= 0)
-                    return false; // a slot is mid-flight; come back next tick
+                _handOverSlotCursor = 0;
+                _handOverWindowSeen = false;
+                return false;
+            }
+            if (!_handOverWindowSeen)
+            {
+                _handOverWindowSeen = true;
+                _handOverSlotCursor = 0;
+            }
 
-                agent->SelectTurnInSlot((ushort)slot, 0, 0);
-                if (agent->SelectedTurnInSlot != slot || agent->SelectedTurnInSlotItemOptions <= 0)
-                    continue; // already filled, or it has nothing to offer for this one
+            // An item picker is open: take its first offer.
+            var menu = _gameGui.GetAddonByName("ContextIconMenu");
+            if (!menu.IsNull && menu.IsVisible)
+            {
+                FireCallback((AtkUnitBase*)menu.Address, false, 0, 0, 1021003, 0, 0);
+                return false;
+            }
 
-                // Take the first offer. Same event the delivery turn-in uses to choose its item.
-                args[0].SetInt(0);
-                args[1].SetInt(0);
-                args[2].SetInt(0);
-                args[3].SetInt(0);
-                fixed (AtkValue* p = args)
-                    agent->ReceiveEvent(&result, p, 4, 1);
+            var request = (FFXIVClientStructs.FFXIV.Client.UI.AddonRequest*)addon.Address;
+            if (_handOverSlotCursor < request->EntryCount)
+            {
+                FireCallback(&request->AtkUnitBase, false, 2, _handOverSlotCursor, 0, 0);
+                _handOverSlotCursor++;
+                return false;
             }
 
             var button = request->HandOverButton;
             if (button == null || !button->IsEnabled)
+            {
+                // A slot did not take (its picker never opened, or the pick failed): start over.
+                _handOverSlotCursor = 0;
                 return false;
+            }
             return AtkClick.Button(&request->AtkUnitBase, button);
         }
         catch (Exception ex)
@@ -1539,6 +1550,15 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
             _log($"Hand-over failed: {ex.GetType().Name}: {ex.Message}");
             return false;
         }
+    }
+
+    /// <summary>Fire an addon callback with several values, the way list windows expect.</summary>
+    private static void FireCallback(AtkUnitBase* unit, bool updateState, params int[] values)
+    {
+        var atk = stackalloc AtkValue[values.Length];
+        for (var i = 0; i < values.Length; i++)
+            atk[i].SetInt(values[i]);
+        unit->FireCallback((uint)values.Length, atk, updateState);
     }
 
     /// <summary>

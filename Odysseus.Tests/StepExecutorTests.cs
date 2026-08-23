@@ -419,7 +419,7 @@ public class StepExecutorTests
     }
 
     [Fact]
-    public void Moving_without_moving_stops_and_hands_the_leg_to_the_remedies()
+    public void A_wedged_flight_stops_and_retries_the_leg_on_the_ground()
     {
         // A Yanxia roofline held a combat approach at exactly 25.1y with vnav claiming motion
         // the whole time — the not-moving ladder never got a turn while the jump hoped.
@@ -433,8 +433,14 @@ public class StepExecutorTests
         world.IsMoving = true;
         for (var i = 0; i < 40 && !world.Calls.Any(c => c.StartsWith("Log") && c.Contains("Moving without moving")); i++)
         { ex.Tick(); world.IsMoving = true; world.Advance(0.5); }
-        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("Moving without moving"));
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("trying this leg on the ground"));
         Assert.Contains("Stop", world.Calls);
+
+        // The reissue is grounded; the stop actually took, so the follower reports still.
+        world.IsMoving = false;
+        for (var i = 0; i < 8 && !world.Calls.Any(c => c.StartsWith("Move ") && c.Contains("fly=False")); i++)
+        { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Move ") && c.Contains("fly=False"));
     }
 
     [Fact]
