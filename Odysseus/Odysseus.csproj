@@ -3,7 +3,7 @@
   <PropertyGroup>
     <AssemblyName>Odysseus</AssemblyName>
     <RootNamespace>Odysseus</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.2.1</Version>
     <DalamudLibPath>$(AppData)\XIVLauncher\addon\Hooks\dev\</DalamudLibPath>
 
     <!--
@@ -17,11 +17,18 @@
   </PropertyGroup>
 
   <!--
-    No path library is shipped. The converted paths are a derivative of Questionable's bundle, which
-    is AGPL-3.0; importing it on your own machine is your business, and putting it in our download
-    would be us redistributing their data. A pack dropped in beside the DLL by hand is still read —
-    see PathPack.ShippedPath — so a user can carry their own between their own installs.
+    The shipped quest-path library: Questionable's AGPL-3.0 bundle, converted. Odysseus is AGPL
+    for exactly this reason, and NOTICE.md carries the attribution, the modification notice and
+    which bundle it was built from. Rebuilt for a release from the PunishXIV (AGPL) install's
+    bundle.zip with the current importer, so every install — a fresh one, a fourth account, the
+    roommate's — has every path without importing anything. Anything imported, recorded or edited
+    locally is layered on top and wins, unless it was converted by an older build (see PathStore).
   -->
+  <ItemGroup>
+    <Content Include="Assets\paths.pak" Condition="Exists('Assets\paths.pak')">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 
   <!--
     GatherBuddy's node coordinates, shipped verbatim and gzipped, under Apache 2.0. Verbatim on

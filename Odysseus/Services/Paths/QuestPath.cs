@@ -310,8 +310,13 @@ public sealed class QuestPath
     /// path for any of those verbs carries no shop, no class and nothing to gather, and must be
     /// re-converted rather than kept.
     /// </para>
+    ///
+    /// <para>
+    /// 3 → 4 (2026-08-23): <c>Land</c>. Six hundred-odd steps are flown to and done from the
+    /// ground; a stored path without the flag interacts with the air over the mark.
+    /// </para>
     /// </summary>
-    public const int CurrentFormatVersion = 3;
+    public const int CurrentFormatVersion = 4;
 
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     public ushort QuestId { get; set; }

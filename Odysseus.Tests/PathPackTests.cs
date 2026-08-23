@@ -59,6 +59,31 @@ public class PathPackTests : IDisposable
     }
 
     [Fact]
+    public void A_clients_own_path_from_an_older_converter_yields_to_a_current_shipped_one()
+    {
+        // The 3 → 4 case: every stored path predates Land, the shipped library carries it.
+        // Running the stale parse because it is "mine" is the wrong kind of loyalty; a
+        // re-import would replace it with exactly the shipped conversion anyway.
+        var pack = System.IO.Path.Combine(_dir, PathPack.FileName);
+        PathPack.WriteFile(pack, [Path1(1, "Shipped, current")]);
+        var folder = System.IO.Path.Combine(_dir, "paths");
+        var stale = Path1(1, "Mine, older");
+        stale.FormatVersion = QuestPath.CurrentFormatVersion - 1;
+        new PathStore(folder).Save(stale);
+        var logged = new List<string>();
+
+        var store = new PathStore(folder, logged.Add, pack);
+        Assert.Equal("Shipped, current", store.ForQuest(1)!.Name);
+        Assert.Equal(0, store.FromFolder);
+        Assert.Contains(logged, m => m.Contains("converted by an older build"));
+
+        // A current one of mine still wins, as before.
+        new PathStore(folder).Save(Path1(1, "Mine, current"));
+        store.Reload();
+        Assert.Equal("Mine, current", store.ForQuest(1)!.Name);
+    }
+
+    [Fact]
     public void A_missing_or_unreadable_pack_leaves_the_folder_working()
     {
         var folder = System.IO.Path.Combine(_dir, "paths");

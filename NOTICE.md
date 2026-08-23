@@ -1,6 +1,6 @@
 # Notices and third-party data
 
-Odysseus is GPL-3.0 (see `COPYING`, `COPYING.LESSER`). It replaces the job of several plugins, so it
+Odysseus is AGPL-3.0 (see `COPYING`). It replaces the job of several plugins, so it
 touches several projects' work. This file records what comes from where, and on what terms — kept
 current as sources are added, because the whole point of consolidating is that nobody else is left
 tracking it.
@@ -49,17 +49,17 @@ and should not be laid at their door.
 
 Odysseus imports from an AGPL-licensed Questionable only; see the table above.
 
-### What is and is not in the download
+### What is in the download
 
-No path library is shipped today. AGPL-3.0 permits it — with attribution, the licence text, and the
-modification notice above — so this is now a choice rather than a bar. Until it is made, the
-importer converts a bundle the user supplies and the result stays on their machine, the paths folder
-is shareable across installs (Settings), and an export exists for carrying your own copy between
-your own machines.
+**From v0.2.1 the converted path library ships** as `Assets/paths.pak`, under AGPL-3.0 with this
+notice. It is built for each release from the bundle an installed **PunishXIV/Questionable** (AGPL)
+downloaded — for v0.2.1, bundle `1787426647`, generated 2026-08-22T19:25:29Z, 4,239 quests — and
+converted with the importer in that release. The WigglyMuffin build's bundle is never used, for the
+reason in the table above. The importer logs the bundle id it read, so this stays checkable.
 
-For the record: **v0.1.1 (2026-08-20) shipped `Assets/paths.pak`**, 4,240 converted quest paths,
-while Odysseus was still LGPL-3.0 and carried no attribution to Questionable. That was an oversight.
-It was removed from the build, and the relicensing here is what would make shipping it legitimate.
+History: v0.1.1 (2026-08-20) shipped the pack while Odysseus was still LGPL-3.0 and carried no
+attribution to Questionable — an oversight. v0.2.0 shipped none while the licence was put right.
+The relicensing to AGPL-3.0 and this notice are what make shipping it legitimate.
 
 ### QuestFlow (`RoseOfficial/QuestFlow`)
 

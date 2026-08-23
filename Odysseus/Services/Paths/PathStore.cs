@@ -201,12 +201,22 @@ public sealed class PathStore
         if (!System.IO.Directory.Exists(_directory)) return;
 
         var failed = 0;
+        var superseded = 0;
         foreach (var file in System.IO.Directory.EnumerateFiles(_directory, "*.json"))
         {
             try
             {
                 var path = JsonSerializer.Deserialize<QuestPath>(File.ReadAllText(file), JsonOptions);
                 if (path is null || path.QuestId == 0) { failed++; continue; }
+                // A folder entry converted by an older build does not beat the shipped one for
+                // the same quest when the shipped one is current: a re-import would replace it
+                // with exactly that conversion, and until then it would run the stale parse.
+                if (path.FormatVersion < QuestPath.CurrentFormatVersion
+                    && _paths.TryGetValue(path.QuestId, out var shipped) && shipped.FormatVersion >= QuestPath.CurrentFormatVersion)
+                {
+                    superseded++;
+                    continue;
+                }
                 if (path.NeedsReconvert) _outdated++;
                 _paths[path.QuestId] = path;
                 _fromFolder++;
@@ -218,5 +228,6 @@ public sealed class PathStore
             }
         }
         if (failed > 0) _log?.Invoke($"{failed} stored path(s) unreadable — re-import to repair.");
+        if (superseded > 0) _log?.Invoke($"{superseded} stored path(s) were converted by an older build and the shipped library is current — using the shipped copies; re-import to refresh your own.");
     }
 }

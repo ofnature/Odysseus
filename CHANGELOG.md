@@ -1,6 +1,20 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.1 — 2026-08-23
+
+### Paths
+- **The quest-path library ships again** — 4,239 quests converted from the PunishXIV (AGPL-3.0) Questionable bundle of 2026-08-22, with attribution in NOTICE.md. v0.2.0 shipped none, which left every install that had not imported its own paths with nothing to run
+- The shipped conversion is current (format 4, with Land); a client's own stored copy from an older build yields to it for the same quest. Re-import to refresh your own — hand edits in an older-format copy are superseded either way
+
+### Quest running
+- Overworld combat walks to a mob that is standing off before engaging, and stops the approach when the fight starts
+- A step's kill count is honoured: it keeps pulling, and waits for the respawn, until that many fights have happened
+
+### Build
+- Releases are built against the release-channel Dalamud the clients run, not staging
+<!-- LATEST-END -->
+
 ## v0.2.0 — 2026-08-22
 
 ### Deliveries
@@ -27,7 +41,6 @@
 ### Licence
 - AGPL-3.0, up from LGPL-3.0: the converted quest paths are Questionable's, which is AGPL, and the licence must carry what its sources carry
 - The path pack is no longer shipped — convert your installed paths locally, as before. NOTICE.md lists every source and its terms
-<!-- LATEST-END -->
 
 ## v0.1.0 — 2026-08-16
 
