@@ -281,6 +281,27 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void Off_mesh_feet_step_onto_the_mesh_before_the_next_path_is_asked_for()
+    {
+        // Having walked onto the platform for the last step, the next step's pathfind — to the
+        // other side of the zone — cannot start. The mesh's edge is two yalms away; step there first.
+        var feet = new Vector3(107, 15, -361);
+        var edge = new Vector3(105, 15, -359);
+        var far = new Vector3(-269, 5, -77);
+        var world = new FakeStepWorld { PathWaypointCount = 0, PlayerPosition = feet };
+        world.NearestReachableFn = (p, _) => Vector3.Distance(p, feet) < 1 ? edge : p;
+        var ex = new StepExecutor(world);
+        ex.Begin(Step(StepKind.WalkTo, far));
+        for (var i = 0; i < 12 && !world.Calls.Any(c => c.StartsWith("MoveDirect 105,15,-359")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("MoveDirect 105,15,-359"));
+
+        // On the mesh now: the pathfinder works, and the walk goes through.
+        world.PlayerPosition = edge; world.PathWaypointCount = 5; world.ArriveOnMove = true;
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Contains(world.Calls, c => c.StartsWith("Move -269,5,-77"));
+    }
+
+    [Fact]
     public void Standing_on_the_platform_a_few_yalms_short_it_just_walks_there()
     {
         // Off-mesh feet: the pathfind cannot start, and the nearest-point query finds the edge a

@@ -96,6 +96,10 @@ public sealed class StepExecutor
     /// <summary>The most that is walked blind from the mesh's nearest point to the destination.</summary>
     private const float OffMeshDirectMax = 15f;
 
+    /// <summary>How far around the player's own feet to look for the mesh, and how far off it counts as off.</summary>
+    private const float OffMeshFootingRange = 4f;
+    private const float OffMeshFeet = 0.75f;
+
     /// <summary>Distances past this are worth a mount.</summary>
     public const float MountWorthDistance = 30f;
     /// <summary>Overworld enemies farther than this are not "ours".</summary>
@@ -218,6 +222,7 @@ public sealed class StepExecutor
     private bool _detourNudged;
     private Vector3? _offMeshSnap;
     private bool _offMeshNudged;
+    private bool _footingTaken;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -1423,6 +1428,19 @@ public sealed class StepExecutor
         // nearer than here, and keeps its failure below.
         if (!direct && _moveRetries > 0 && _world.PathWaypointCount == 0)
         {
+            // Off-mesh feet: the pathfind cannot start from here, however good the destination.
+            // The last step's direct walk onto Hamujj Gah's platform leaves us exactly so; the
+            // mesh's edge is a yalm or two away. Step onto it, then ask again.
+            if (!_footingTaken
+                && _world.NearestReachablePoint(_world.PlayerPosition, OffMeshFootingRange) is { } footing
+                && Vector3.Distance(footing, _world.PlayerPosition) > OffMeshFeet)
+            {
+                _footingTaken = true;
+                _lastMoveIssue = now;
+                _world.Log($"Standing {Vector3.Distance(footing, _world.PlayerPosition):F1}y off the mesh — stepping onto it before pathing to {Fmt(target)}.");
+                _world.MoveDirectTo(footing, false);
+                return;
+            }
             // Close enough to walk blind: do that first. It is also what gets us off a platform
             // the mesh disowns — a pathfind cannot start from off-mesh feet even when the mesh's
             // edge is a yalm away, and the nearest-point query will not say so.
@@ -2395,6 +2413,7 @@ public sealed class StepExecutor
             _moveRetries = 0;
             _offMeshSnap = null;
             _offMeshNudged = false;
+            _footingTaken = false;
         }
     }
 

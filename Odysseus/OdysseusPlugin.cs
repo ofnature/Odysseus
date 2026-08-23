@@ -1,4 +1,6 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using Dalamud.Game.Command;
@@ -88,6 +90,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
     public OdysseusPlugin(IDalamudPluginInterface pluginInterface)
     {
+        OpenOwnLog();
         // Create<T> constructs a T. It must be given the service holder, never this plugin —
         // see Service for why that distinction silently kills the client.
         pluginInterface.Create<Service>();
@@ -101,7 +104,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         OdysseusTheme.SetMode(_config.Theme);
         _presence = new PluginPresence(PluginInterface);
         _quests = new QuestStateReader(fault => Log.Warning($"Quest state read failed. {fault}"));
-        _catalog = new QuestCatalog(DataManager, message => Log.Warning(message));
+        _catalog = new QuestCatalog(DataManager, message => Warn(message));
 
         // Several installs can share one folder — that is the multi-account answer, and it needs
         // nobody to redistribute anybody's data. A pack put beside the DLL by hand is still read
@@ -110,42 +113,42 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             _config.PathsDirectory.Length > 0
                 ? _config.PathsDirectory
                 : System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "paths"),
-            message => Log.Information(message),
+            message => Say(message),
             Services.Paths.PathPack.ShippedPath(PluginInterface.AssemblyLocation.DirectoryName));
 
-        var aetherytes = new Services.Travel.AetheryteCatalog(DataManager, message => Log.Warning(message));
-        var duties = new DutyCatalog(DataManager, message => Log.Warning(message));
+        var aetherytes = new Services.Travel.AetheryteCatalog(DataManager, message => Warn(message));
+        var duties = new DutyCatalog(DataManager, message => Warn(message));
         // Built here rather than with the rest of the delivery services: the step world buys through
         // the shop half for PurchaseItem steps and hands Craft/Gather steps to the same Artisan and
         // GatherBuddy the deliveries use, so all of it has to exist first.
-        var deliveryWorld = new Services.Deliveries.GameDeliveryWorld(DataManager, message => Log.Warning(message));
-        var artisan = new ArtisanIpc(PluginInterface, message => Log.Warning(message));
-        var gatherBuddy = new GatherBuddyIpc(PluginInterface, message => Log.Warning(message));
-        var recipes = new Services.Deliveries.RecipeLookup(DataManager, message => Log.Warning(message));
-        var ingredients = new Services.Deliveries.IngredientSource(DataManager, message => Log.Warning(message));
+        var deliveryWorld = new Services.Deliveries.GameDeliveryWorld(DataManager, message => Warn(message));
+        var artisan = new ArtisanIpc(PluginInterface, message => Warn(message));
+        var gatherBuddy = new GatherBuddyIpc(PluginInterface, message => Warn(message));
+        var recipes = new Services.Deliveries.RecipeLookup(DataManager, message => Warn(message));
+        var ingredients = new Services.Deliveries.IngredientSource(DataManager, message => Warn(message));
         var making = new ItemMaking(artisan, gatherBuddy, recipes, ingredients,
             () => _config.DeliveryCraftJob, () => deliveryWorld.CurrentCraftType, id => deliveryWorld.ItemCount(id));
         _world = new GameStepWorld(
             ClientState, ObjectTable, Condition, GameGui, TargetManager, DataManager,
-            new VnavIpc(PluginInterface, message => Log.Warning(message)),
-            new DaedalusIpc(PluginInterface, message => Log.Warning(message)),
-            new TextAdvanceIpc(PluginInterface, () => _config.PickQuestRewards, message => Log.Warning(message)),
-            new LifestreamIpc(PluginInterface, message => Log.Warning(message)),
+            new VnavIpc(PluginInterface, message => Warn(message)),
+            new DaedalusIpc(PluginInterface, message => Warn(message)),
+            new TextAdvanceIpc(PluginInterface, () => _config.PickQuestRewards, message => Warn(message)),
+            new LifestreamIpc(PluginInterface, message => Warn(message)),
             aetherytes,
-            new TheseusIpc(PluginInterface, message => Log.Warning(message)),
-            new ChatCommandSender(message => Log.Warning(message)),
+            new TheseusIpc(PluginInterface, message => Warn(message)),
+            new ChatCommandSender(message => Warn(message)),
             duties,
-            _quests, deliveryWorld, making, message => Log.Information(message));
+            _quests, deliveryWorld, making, message => Say(message));
         _recorderFeed = new RecorderFeed(_world, _quests, aetherytes, duties);
-        var dialogue = new DialogueCatalog(DataManager, message => Log.Warning(message));
+        var dialogue = new DialogueCatalog(DataManager, message => Warn(message));
         _runLog = new RunLog(
             System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "runlog.jsonl"),
-            message => Log.Warning(message));
+            message => Warn(message));
         _frontier = new StoryFrontier(_quests, _catalog, () => _config.PreferredGrandCompany);
         _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world, dialogue), _world, _world, _config,
             _frontier.Next,
             id => _catalog.ById(id)?.ClassJobLevel ?? 0,
-            _runLog, message => Log.Information(message),
+            _runLog, message => Say(message),
             // Lets a purchase step see whether the craft it feeds is already made.
             itemId => making.Ingredients(itemId, 1).Select(i => i.ItemId).ToList(),
             // Custom delivery unlocks can only be taken as a crafter or gatherer.
@@ -165,7 +168,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // Reward sweep. The ledger measures across the hand-in — counted as the CompleteQuest step
         // begins and again when the quest is confirmed complete — so only what the quest actually
         // added is ever offered to a vendor.
-        var rewards = new QuestRewards(DataManager, message => Log.Warning(message));
+        var rewards = new QuestRewards(DataManager, message => Warn(message));
         _rewardLedger = new RewardLedger(_config.PendingRewardSales);
         _controller.QuestCompleting += id => _rewardLedger.Before(id, rewards.Candidates(id), itemId => deliveryWorld.ItemCount(itemId));
         _controller.QuestCompleted += id =>
@@ -178,18 +181,18 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         };
         _seller = new RewardSeller(
             new GameSellWorld(DataManager, () => deliveryWorld.IsShopOpen(0), itemId => deliveryWorld.ItemCount(itemId),
-                message => Log.Information(message)),
+                message => Say(message)),
             _rewardLedger, () => _config.SellQuestRewards, SaveRewardLedger);
 
         // Fetching from the FC chest. Manual only, and gated on the chest window being open — that
         // window is the transfer session, so there is no version of this that works from anywhere.
-        _chestWorld = new GameChestWorld(GameGui, DataManager, id => deliveryWorld.ItemCount(id), message => Log.Information(message));
+        _chestWorld = new GameChestWorld(GameGui, DataManager, id => deliveryWorld.ItemCount(id), message => Say(message));
         _withdrawer = new ChestWithdrawer(_chestWorld);
 
-        _tribes = new Services.Tribes.TribeCatalog(DataManager, message => Log.Warning(message));
-        _tribeState = new Services.Tribes.TribeState(_tribes, message => Log.Warning(message));
+        _tribes = new Services.Tribes.TribeCatalog(DataManager, message => Warn(message));
+        _tribeState = new Services.Tribes.TribeState(_tribes, message => Warn(message));
         _tribeRunner = new Services.Tribes.TribeRunner(_world, _tribeState, _controller,
-            new StepExecutor(_world, dialogue), message => Log.Information(message));
+            new StepExecutor(_world, dialogue), message => Say(message));
 
         // Published once the controller exists, so the gate never reports on a half-built run.
         _ipc = new OdysseusIpc(PluginInterface, () => _config.Enabled && _controller.State.IsDriving());
@@ -197,7 +200,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _chocobo = new Services.Run.ChocoboKeeper(_world, () => _config.KeepChocoboOut, ChocoboUnlocked);
 
         _fleet = new FleetPublisher(
-            new RelayIpc(PluginInterface, message => Log.Warning(message)),
+            new RelayIpc(PluginInterface, message => Warn(message)),
             BuildFleetStatus,
             () => _config.PublishFleetStatus);
 
@@ -215,25 +218,25 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _debugWindow = new DebugWindow(_quests, _catalog);
         _fleetWindow = new FleetWindow(_config, _fleet);
 
-        var unlockPlanner = new UnlockPlanner(_catalog, _quests, _priority, _pathStore.Has, message => Log.Information(message));
+        var unlockPlanner = new UnlockPlanner(_catalog, _quests, _priority, _pathStore.Has, message => Say(message));
         _tribesWindow = new TribesWindow(_config, _tribes, _tribeState, _tribeRunner, unlockPlanner, new GameIcons(TextureProvider),
             id => { if (!_tribeQueue.Contains(id)) _tribeQueue.Enqueue(id); },
             () => { _tribeQueue.Clear(); _tribeRunner.Stop(); });
-        _deliveries = new Services.Deliveries.DeliveryCatalog(DataManager, message => Log.Warning(message));
-        var deliveryState = new Services.Deliveries.DeliveryState(_quests, DataManager, message => Log.Warning(message));
-        var deliveryBonus = new Services.Deliveries.DeliveryBonus(DataManager, message => Log.Warning(message));
-        var deliveryRewards = new Services.Deliveries.DeliveryRewards(DataManager, message => Log.Warning(message));
+        _deliveries = new Services.Deliveries.DeliveryCatalog(DataManager, message => Warn(message));
+        var deliveryState = new Services.Deliveries.DeliveryState(_quests, DataManager, message => Warn(message));
+        var deliveryBonus = new Services.Deliveries.DeliveryBonus(DataManager, message => Warn(message));
+        var deliveryRewards = new Services.Deliveries.DeliveryRewards(DataManager, message => Warn(message));
         var scrips = new Services.Deliveries.ScripLedger(DataManager, new Services.Deliveries.InventoryCurrencyReader(),
-            _deliveries, deliveryState, deliveryRewards, deliveryBonus, message => Log.Warning(message));
-        var deliveryRequests = new Services.Deliveries.DeliveryRequests(DataManager, message => Log.Warning(message), deliveryBonus);
-        var gatheringSource = new Services.Deliveries.GatheringSource(DataManager, message => Log.Warning(message));
+            _deliveries, deliveryState, deliveryRewards, deliveryBonus, message => Warn(message));
+        var deliveryRequests = new Services.Deliveries.DeliveryRequests(DataManager, message => Warn(message), deliveryBonus);
+        var gatheringSource = new Services.Deliveries.GatheringSource(DataManager, message => Warn(message));
 
 #if DEBUG
         // Our own gathering, offered to the delivery runner in place of the GatherBuddy handoff.
         // Debug only until it has worked once: without it the gather route behaves exactly as it
         // does today, which is to stop and say what it needs.
         _gatherWorld = new Services.Gathering.GameGatherWorld(
-            ClientState, ObjectTable, Condition, GameGui, _world, message => Log.Information(message));
+            ClientState, ObjectTable, Condition, GameGui, _world, message => Say(message));
         // Probe by default. Opening a node has locked this client up more than once and the cause
         // is not yet understood, so the interaction is something you turn on deliberately in the
         // Workbench, not something a delivery does to you.
@@ -242,8 +245,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             gatheringSource,
             new Services.Gathering.NodeAtlas(
                 Services.Gathering.NodeAtlas.PathBeside(PluginInterface.AssemblyLocation.DirectoryName),
-                message => Log.Warning(message)),
-            message => Log.Information(message));
+                message => Warn(message)),
+            message => Say(message));
 #endif
 
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(
@@ -259,7 +262,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             gatherBuddy,
             new StepExecutor(_world, dialogue),
             () => _config.DeliveryCraftJob,
-            message => Log.Information(message)
+            message => Say(message)
 #if DEBUG
             , _ownGatherer
 #endif
@@ -269,22 +272,22 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // is exactly the sort of thing that gets built too early and hands itself nulls.
         _workRunner = new Services.Work.WorkRunner(
             new WorkEngines(_tribes, _deliveries, _tribeRunner, _deliveryRunner),
-            message => Log.Information(message));
+            message => Say(message));
         _ownGatherer.ProbeOnly = true;
         _workbenchWindow = new WorkbenchWindow(_tribes, _deliveries, _workList, _workRunner, _ownGatherer, _gatherWorld);
 #endif
 
-        var scripShop = new Services.Deliveries.ScripShop(DataManager, scrips.Kinds, message => Log.Warning(message));
+        var scripShop = new Services.Deliveries.ScripShop(DataManager, scrips.Kinds, message => Warn(message));
         var spending = new Services.Deliveries.SpendPlanner(scripShop, scrips, id => deliveryWorld.ItemCount(id));
-        _spender = new Services.Deliveries.SpendRunner(deliveryWorld, message => Log.Information(message));
+        _spender = new Services.Deliveries.SpendRunner(deliveryWorld, message => Say(message));
         _deliveriesWindow = new DeliveriesWindow(_deliveries, deliveryState, deliveryBonus, scrips,
             artisan, unlockPlanner, _deliveryRunner, deliveryRequests, _config, SaveConfig, gatherBuddy,
             scripShop, spending, _spender);
 
-        var currents = new Services.Flight.AetherCurrentCatalog(DataManager, _pathStore, message => Log.Warning(message));
-        var flightState = new Services.Flight.FlightState(message => Log.Warning(message));
+        var currents = new Services.Flight.AetherCurrentCatalog(DataManager, _pathStore, message => Warn(message));
+        var flightState = new Services.Flight.FlightState(message => Warn(message));
         _collector = new Services.Flight.CurrentCollector(_world, flightState,
-            new StepExecutor(_world, dialogue), message => Log.Information(message));
+            new StepExecutor(_world, dialogue), message => Say(message));
         _flightWindow = new FlightWindow(currents, flightState, _collector, _priority, _catalog, unlockPlanner,
             () => ClientState.TerritoryType);
 
@@ -384,8 +387,40 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         }
     }
 
+    // ── Odysseus's own log file ──
+    // Dalamud's log stops writing at its size cap (100 MB on the korha client, mid-afternoon),
+    // and a run's own narration is the one thing worth having when something goes wrong. So it
+    // also goes to odysseus.log beside the config, trimmed at start when it grows past a few MB.
+    private StreamWriter? _ownLog;
+
+    private void Say(string message) { Log.Information(message); WriteOwn("INF", message); }
+    private void Warn(string message) { Log.Warning(message); WriteOwn("WRN", message); }
+
+    private void OpenOwnLog()
+    {
+        try
+        {
+            var file = System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "odysseus.log");
+            if (File.Exists(file) && new FileInfo(file).Length > 8_000_000)
+                File.Move(file, System.IO.Path.ChangeExtension(file, ".old.log"), overwrite: true);
+            _ownLog = new StreamWriter(file, append: true) { AutoFlush = true };
+            WriteOwn("INF", $"— Odysseus v{typeof(OdysseusPlugin).Assembly.GetName().Version} —");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning($"Own log file unavailable ({ex.GetType().Name}: {ex.Message}); Dalamud's log only.");
+        }
+    }
+
+    private void WriteOwn(string level, string message)
+    {
+        try { _ownLog?.WriteLine($"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} [{level}] {message}"); }
+        catch { /* a log line is never worth a fault */ }
+    }
+
     public void Dispose()
     {
+        _ownLog?.Dispose();
         CommandManager.RemoveHandler(CommandMain);
         CommandManager.RemoveHandler(CommandShort);
 
