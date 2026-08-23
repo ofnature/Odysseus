@@ -58,6 +58,9 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// </summary>
     public bool PickQuestRewards { get; set; } = true;
 
+    /// <summary>Answer the "you will not be able to receive all the…" warning with Yes and keep going.</summary>
+    public bool AcceptRewardOvercap { get; set; } = true;
+
     // ── Priority quests ──
 
     /// <summary>The list, in priority order. Only meaningful while <see cref="PersistPriorityList"/> is on.</summary>

@@ -238,6 +238,31 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void The_reward_overcap_warning_is_answered_yes_unless_the_toggle_says_wait()
+    {
+        // Capped tomestones at a turn-in: "you will not be able to receive all the following" sat
+        // unanswered until the dialogue clock faulted the hand-in.
+        var w = new FakeStepWorld { ArriveOnMove = true, TalkLength = TimeSpan.FromSeconds(60) };
+        w.Spawned.Add(1005550);
+        w.VisibleAddons.Add("SelectYesno");
+        w.OvercapDialogUp = true;
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.CompleteQuest, KindName = "CompleteQuest", DataId = 1005550, TerritoryId = 400, Position = new Vector3(0, 0, 0) });
+        for (var i = 0; i < 30 && !w.Calls.Contains("OvercapYes"); i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains("OvercapYes", w.Calls);
+
+        // Toggled off: the dialog is the player's to answer.
+        var held = new FakeStepWorld { ArriveOnMove = true, TalkLength = TimeSpan.FromSeconds(60) };
+        held.Spawned.Add(1005550);
+        held.VisibleAddons.Add("SelectYesno");
+        held.OvercapDialogUp = true;
+        ex = new StepExecutor(held, acceptOvercap: () => false);
+        ex.Begin(new QuestStep { Kind = StepKind.CompleteQuest, KindName = "CompleteQuest", DataId = 1005550, TerritoryId = 400, Position = new Vector3(0, 0, 0) });
+        for (var i = 0; i < 20; i++) { ex.Tick(); held.Advance(0.5); }
+        Assert.DoesNotContain("OvercapYes", held.Calls);
+    }
+
+    [Fact]
     public void Within_reach_of_the_object_is_arrived_wherever_the_mark_sits()
     {
         // The Zanr'ak succulent: the recorded mark is inside the plant's own collision, the world

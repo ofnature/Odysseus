@@ -83,6 +83,13 @@ public interface IStepWorld
     bool RebuildNavmesh();
 
     /// <summary>
+    /// If the open yes/no is one of the game's reward-overcap warnings ("you will not be able to
+    /// receive all the…"), press Yes and return true. Recognised against the Addon sheet's own
+    /// strings, so it answers exactly those and no other question.
+    /// </summary>
+    bool ConfirmOvercapDialog();
+
+    /// <summary>
     /// How far through building this zone's mesh the pathfinder is, or negative when it is not
     /// building. A mesh on its way is worth waiting for; one that is not coming is a fault.
     /// </summary>

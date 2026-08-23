@@ -1492,6 +1492,48 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         return prompt.Contains(_highQualityPrompt, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// Addon sheet rows for the reward-overcap warnings — gil (4474), company seals (4605),
+    /// tomestones (4606), seals and tomestones (4607), and "all the following:" (4609), the one a
+    /// capped weekly turn-in raises. Read 2026-08-23. Matched by each row's first line, since the
+    /// live prompt appends the list of what would be lost.
+    /// </summary>
+    private static readonly uint[] OvercapWarningRows = [4474, 4605, 4606, 4607, 4609];
+
+    private string[]? _overcapPrompts;
+
+    public bool ConfirmOvercapDialog()
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName("SelectYesno");
+            if (addon.IsNull || !addon.IsVisible)
+                return false;
+            var yesno = (FFXIVClientStructs.FFXIV.Client.UI.AddonSelectYesno*)addon.Address;
+            if (yesno->PromptText == null)
+                return false;
+
+            _overcapPrompts ??= OvercapWarningRows
+                .Select(row => _data.GetExcelSheet<Addon>().GetRowOrDefault(row)?.Text.ExtractText() ?? string.Empty)
+                .Select(text => text.Split((char)10)[0].Trim())
+                .Where(line => line.Length > 0)
+                .ToArray();
+            if (_overcapPrompts.Length == 0)
+                return false; // no sheet, no guess — the dialog is left for the player
+
+            var prompt = yesno->PromptText->NodeText.ToString();
+            if (!_overcapPrompts.Any(line => prompt.Contains(line, StringComparison.OrdinalIgnoreCase)))
+                return false;
+
+            return AtkClick.Button(&yesno->AtkUnitBase, yesno->YesButton);
+        }
+        catch (Exception ex)
+        {
+            _log($"Overcap confirmation failed: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
     public void HoldDialogue() => _textAdvance.Hold();
 
     public void ReleaseDialogue() => _textAdvance.Release();

@@ -145,7 +145,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "runlog.jsonl"),
             message => Warn(message));
         _frontier = new StoryFrontier(_quests, _catalog, () => _config.PreferredGrandCompany);
-        _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world, dialogue), _world, _world, _config,
+        _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), _world, _world, _config,
             _frontier.Next,
             id => _catalog.ById(id)?.ClassJobLevel ?? 0,
             _runLog, message => Say(message),
@@ -192,7 +192,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _tribes = new Services.Tribes.TribeCatalog(DataManager, message => Warn(message));
         _tribeState = new Services.Tribes.TribeState(_tribes, message => Warn(message));
         _tribeRunner = new Services.Tribes.TribeRunner(_world, _tribeState, _controller,
-            new StepExecutor(_world, dialogue), message => Say(message));
+            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
 
         // Published once the controller exists, so the gate never reports on a half-built run.
         _ipc = new OdysseusIpc(PluginInterface, () => _config.Enabled && _controller.State.IsDriving());
@@ -241,7 +241,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // is not yet understood, so the interaction is something you turn on deliberately in the
         // Workbench, not something a delivery does to you.
         _ownGatherer = new Services.Gathering.OwnGatherer(
-            new Services.Gathering.GatherRunner(_gatherWorld, new StepExecutor(_world, dialogue)),
+            new Services.Gathering.GatherRunner(_gatherWorld, new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap)),
             gatheringSource,
             new Services.Gathering.NodeAtlas(
                 Services.Gathering.NodeAtlas.PathBeside(PluginInterface.AssemblyLocation.DirectoryName),
@@ -260,7 +260,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             ingredients,
             gatheringSource,
             gatherBuddy,
-            new StepExecutor(_world, dialogue),
+            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap),
             () => _config.DeliveryCraftJob,
             message => Say(message)
 #if DEBUG
@@ -287,7 +287,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var currents = new Services.Flight.AetherCurrentCatalog(DataManager, _pathStore, message => Warn(message));
         var flightState = new Services.Flight.FlightState(message => Warn(message));
         _collector = new Services.Flight.CurrentCollector(_world, flightState,
-            new StepExecutor(_world, dialogue), message => Say(message));
+            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
         _flightWindow = new FlightWindow(currents, flightState, _collector, _priority, _catalog, unlockPlanner,
             () => ClientState.TerritoryType);
 

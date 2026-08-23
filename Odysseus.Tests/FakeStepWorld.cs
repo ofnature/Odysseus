@@ -15,6 +15,16 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Vector3? NearestReachablePoint(Vector3 near, float within) => NearestReachableFn is { } f ? f(near, within) : near;
     public bool RebuildAccepted { get; set; } = true;
     public bool RebuildNavmesh() { Calls.Add("RebuildNavmesh"); return RebuildAccepted; }
+    /// <summary>True models the overcap warning being the open yes/no.</summary>
+    public bool OvercapDialogUp { get; set; }
+    public bool ConfirmOvercapDialog()
+    {
+        if (!OvercapDialogUp) return false;
+        Calls.Add("OvercapYes");
+        OvercapDialogUp = false;
+        VisibleAddons.Remove("SelectYesno");
+        return true;
+    }
     /// <summary>0..1 while the mesh builds; negative means it is not building.</summary>
     public float NavmeshBuildProgress { get; set; } = -1f;
     public bool IsMoving { get; set; }

@@ -236,7 +236,7 @@ public sealed class PathEditorWindow : OdysseusWindow
                     : StepExecutor.IsSupported(step.Kind) ? OdysseusTheme.TextPrimary
                     : OdysseusTheme.StatusYellow;
                 ImGui.PushStyleColor(ImGuiCol.Text, color);
-                if (ImGui.Selectable($"{(running ? "▶" : " ")} {i + 1}. {step}##s{s}i{i}", selected))
+                if (ImGui.Selectable($"{(running ? ">" : " ")} {i + 1}. {step}##s{s}i{i}", selected))
                 {
                     _selectedSeq = s;
                     _selectedStep = i;

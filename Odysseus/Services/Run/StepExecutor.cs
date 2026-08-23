@@ -237,6 +237,8 @@ public sealed class StepExecutor
     private bool _offMeshNudged;
     private bool _footingTaken;
     private bool _meshRebuilt;
+    private readonly Func<bool> _acceptOvercap;
+    private DateTime _lastOvercapYes;
     private bool _flyFallback;
     private bool _combatLanded;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
@@ -290,8 +292,9 @@ public sealed class StepExecutor
     private bool _sawTravelBusy;
 
     /// <param name="texts">Resolves dialogue text keys for the current quest; null means List choices and Say cannot be answered.</param>
-    public StepExecutor(IStepWorld world, Quest.IDialogueTexts? texts = null)
+    public StepExecutor(IStepWorld world, Quest.IDialogueTexts? texts = null, Func<bool>? acceptOvercap = null)
     {
+        _acceptOvercap = acceptOvercap ?? (() => true);
         _world = world;
         _texts = texts;
     }
@@ -2120,6 +2123,20 @@ public sealed class StepExecutor
         {
             _sawOccupied = true;
             AnswerDialogue(step, now);
+        }
+
+        // A capped reward: the game warns that not everything will be received and waits. The
+        // run proceeding without the excess is the whole point of automating the day — and the
+        // toggle exists for whoever disagrees. Matched against the game's own warning strings,
+        // never any other question.
+        if (_world.IsAddonVisible("SelectYesno") && _acceptOvercap()
+            && now - _lastOvercapYes > TimeSpan.FromSeconds(1) && _world.ConfirmOvercapDialog())
+        {
+            _lastOvercapYes = now;
+            _sawOccupied = true;
+            _phaseStart = now;
+            _world.Log("Reward overcap warning — proceeding without the excess (Settings has the toggle).");
+            return;
         }
 
         // The multi-quest hand-in menu: an issuer holding several finished dailies asks which one,

@@ -283,6 +283,15 @@ public sealed class ConfigWindow : OdysseusWindow
             _config.PickQuestRewards = pickRewards;
             _save();
         }
+
+        var acceptOvercap = _config.AcceptRewardOvercap;
+        if (ImGui.Checkbox("Proceed through reward overcap warnings", ref acceptOvercap))
+        {
+            _config.AcceptRewardOvercap = acceptOvercap;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("The capped-reward warning (tomestones, seals, gil). On: answer Yes and keep the run moving, losing the excess. Off: the dialog waits for you.");
         OdysseusTheme.HelpMarker(
             "Done by TextAdvance under Odysseus's control, using TextAdvance's own reward priority (gil, vendor " +
             "value, gear coffers, gear for your job). Odysseus then presses Complete. Off = the reward window " +
