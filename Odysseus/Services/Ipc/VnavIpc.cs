@@ -154,6 +154,19 @@ public sealed class VnavIpc
         }
     }
 
+    /// <summary>
+    /// Ask vnavmesh to rebuild the current zone's mesh from live collision. The cure for a cache
+    /// built before the world changed shape — a quest unlock opening a camp, a festival — which
+    /// vnavmesh's cache key does not always notice. Takes a minute; IsReady goes false meanwhile.
+    /// </summary>
+    public bool Rebuild() => Try(() =>
+    {
+        (_rebuild ??= _pluginInterface.GetIpcSubscriber<bool>("vnavmesh.Nav.Rebuild")).InvokeFunc();
+        return true;
+    });
+
+    private ICallGateSubscriber<bool>? _rebuild;
+
     public void Stop() => Try(() =>
     {
         (_stop ??= _pluginInterface.GetIpcSubscriber<object>("vnavmesh.Path.Stop")).InvokeAction();

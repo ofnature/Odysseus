@@ -226,6 +226,7 @@ public sealed class StepExecutor
     private Vector3? _offMeshSnap;
     private bool _offMeshNudged;
     private bool _footingTaken;
+    private bool _meshRebuilt;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
     private DateTime _lastBuy;
@@ -1374,6 +1375,7 @@ public sealed class StepExecutor
             if (_world.NavmeshBuildProgress >= 0f)
             {
                 _phaseStart = now;
+                _stepStart = now; // a build is not this step failing to move; hold its clock too
                 return;
             }
             if (now - _phaseStart > MoveStall)
@@ -1482,6 +1484,20 @@ public sealed class StepExecutor
                 _world.Log($"Ended {distance:F1}y short of the mark {Fmt(target)} and can get no closer — near enough for a waypoint.");
                 _world.StopMoving();
                 Enter(Phase.WaitReady);
+                return;
+            }
+            // Both ends on the mesh and still nothing: the mesh is lying about the world — built
+            // before a quest opened a gate, usually. Rebuild it once and start the attempts over;
+            // the not-ready wait above holds the clocks while it builds.
+            if (!direct && !_meshRebuilt && _world.PathWaypointCount == 0 && MeshDiagnosis(target).Length == 0
+                && _world.RebuildNavmesh())
+            {
+                _meshRebuilt = true;
+                _moveRetries = 0;
+                _lastMoveIssue = now;
+                _offMeshNudged = false;
+                _footingTaken = false;
+                _world.Log($"The mesh reaches both here and {Fmt(target)} yet gives no path — it predates the world's current shape. Rebuilding it, then trying again.");
                 return;
             }
             Fail(!direct && _world.PathWaypointCount == 0
@@ -2430,6 +2446,7 @@ public sealed class StepExecutor
             _offMeshSnap = null;
             _offMeshNudged = false;
             _footingTaken = false;
+            _meshRebuilt = false;
         }
     }
 

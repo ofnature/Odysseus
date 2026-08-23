@@ -229,10 +229,28 @@ public class StepExecutorTests
         ex.Begin(Step(StepKind.WalkTo, new Vector3(10, 0, 10)));
 
         // Zero waypoints is asked again before it is believed — a mesh still loading answers that
-        // way for a moment — so the step ends after the retries, not on the first answer.
+        // way for a moment. When the mesh claims both ends and still gives nothing, it is rebuilt
+        // once and the attempts start over; only then is the failure believed.
         Assert.Equal(StepStatus.Failed, Run(ex, world));
         Assert.Contains("no path", ex.FailReason);
-        Assert.Equal(3, world.Calls.Count(c => c.StartsWith("Move ")));
+        Assert.Equal(1, world.Calls.Count(c => c == "RebuildNavmesh"));
+        Assert.Equal(6, world.Calls.Count(c => c.StartsWith("Move ")));
+    }
+
+    [Fact]
+    public void A_mesh_that_lies_about_the_world_is_rebuilt_and_the_step_then_succeeds()
+    {
+        // Korha after unlocking the Amalj'aa: the zone changed shape, the cached mesh predates it,
+        // and three different marks "had no path" while sitting on walkable ground.
+        var world = new FakeStepWorld { PathWaypointCount = 0 };
+        var ex = new StepExecutor(world);
+        ex.Begin(Step(StepKind.WalkTo, new Vector3(50, 0, 50)));
+        for (var i = 0; i < 20 && !world.Calls.Contains("RebuildNavmesh"); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains("RebuildNavmesh", world.Calls);
+
+        // The fresh mesh knows the way.
+        world.PathWaypointCount = 5; world.ArriveOnMove = true;
+        Assert.Equal(StepStatus.Done, Run(ex, world));
     }
 
     [Fact]

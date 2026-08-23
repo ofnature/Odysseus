@@ -76,6 +76,13 @@ public interface IStepWorld
     Vector3? NearestReachablePoint(Vector3 near, float within);
 
     /// <summary>
+    /// Rebuild the zone's navmesh from live collision. For the contradiction where both ends sit
+    /// on the mesh and the pathfinder still gives nothing: a cache built before the world changed
+    /// shape. False when the rebuild could not be asked for.
+    /// </summary>
+    bool RebuildNavmesh();
+
+    /// <summary>
     /// How far through building this zone's mesh the pathfinder is, or negative when it is not
     /// building. A mesh on its way is worth waiting for; one that is not coming is a fault.
     /// </summary>

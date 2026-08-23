@@ -95,6 +95,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public Vector3? NearestReachablePoint(Vector3 near, float within) => _vnav.NearestReachablePoint(near, within, within);
 
+    public bool RebuildNavmesh() => _vnav.Rebuild();
+
     public float NavmeshBuildProgress => _vnav.BuildProgress;
 
     public bool IsMoving => _vnav.IsBusy;

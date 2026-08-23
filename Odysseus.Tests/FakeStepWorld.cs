@@ -13,6 +13,8 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     /// <summary>Null = everything is on the mesh (the point itself comes back); otherwise answers per point.</summary>
     public Func<Vector3, float, Vector3?>? NearestReachableFn { get; set; }
     public Vector3? NearestReachablePoint(Vector3 near, float within) => NearestReachableFn is { } f ? f(near, within) : near;
+    public bool RebuildAccepted { get; set; } = true;
+    public bool RebuildNavmesh() { Calls.Add("RebuildNavmesh"); return RebuildAccepted; }
     /// <summary>0..1 while the mesh builds; negative means it is not building.</summary>
     public float NavmeshBuildProgress { get; set; } = -1f;
     public bool IsMoving { get; set; }
