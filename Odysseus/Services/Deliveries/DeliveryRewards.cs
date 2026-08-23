@@ -80,7 +80,12 @@ public sealed class DeliveryRewards : IDeliveryRewards
                         if (sub.Slot != (byte)route || sub.IsBonus != bonus || sub.Reward.ValueNullable is not { } reward) continue;
                         foreach (var entry in reward.SatisfactionSupplyRewardData)
                             if (entry.RewardCurrency != 0 && entry.QuantityHigh > 0)
-                                result[entry.RewardCurrency] = entry.QuantityHigh;
+                                // The reward row's own multiplier — 150 on a bonus subrow, 100
+                                // otherwise. Verified against a live ledger 2026-08-22: Rainbow
+                                // Pigment paid 270 purple a turn-in where QuantityHigh said 180,
+                                // and the shortfall is how four good turn-ins ran the fifth into
+                                // the game's "unable to receive" overcap warning.
+                                result[entry.RewardCurrency] = entry.QuantityHigh * reward.BonusMultiplier / 100;
                         satisfaction = reward.SatisfactionHigh;
                         break;
                     }

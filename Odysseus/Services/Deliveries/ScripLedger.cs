@@ -168,7 +168,7 @@ public sealed class ScripLedger
     /// allowance counts.
     /// </para>
     /// </summary>
-    public int PayingDeliveries(DeliveryClient client)
+    public int PayingDeliveries(DeliveryClient client, DeliveryRoute? route = null)
     {
         var remaining = RemainingDeliveries(client);
         if (remaining <= 0) return 0;
@@ -176,7 +176,16 @@ public sealed class ScripLedger
         var (current, max) = _state.Satisfaction(client);
         if (max <= current) return remaining;
 
-        var perDelivery = _rewards.SatisfactionPerDelivery(client, _state.Rank(client), _bonus.For(client).Craft);
+        // The bonus doubles satisfaction too, so which route is being run changes how many
+        // turn-ins the gauge has room for. No route given keeps the craft-centred estimate.
+        var flags = _bonus.For(client);
+        var bonus = route switch
+        {
+            DeliveryRoute.Gather => flags.Gather,
+            DeliveryRoute.Fish => flags.Fish,
+            _ => flags.Craft,
+        };
+        var perDelivery = _rewards.SatisfactionPerDelivery(client, _state.Rank(client), bonus);
         if (perDelivery <= 0) return remaining;
 
         return Math.Min(remaining, (int)Math.Ceiling((max - current) / (double)perDelivery));

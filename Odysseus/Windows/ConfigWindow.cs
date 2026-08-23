@@ -429,6 +429,25 @@ public sealed class ConfigWindow : OdysseusWindow
             "once, and runs from the converted copy. Nothing is downloaded and nothing leaves this PC.");
         ImGui.Spacing();
 
+        var folder = _config.PathsDirectory;
+        ImGui.SetNextItemWidth(-90f);
+        if (ImGui.InputTextWithHint("##pathsdir", "shared paths folder — blank for this install's own", ref folder, 512))
+        {
+            _config.PathsDirectory = folder.Trim();
+            _save();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Apply##paths"))
+        {
+            _pathStore.Reload();
+            _importStatus = $"Reading {_pathStore.Directory}: {_pathStore.Count} quest paths. " +
+                            "A restart makes it stick for everything else that holds the store.";
+        }
+        OdysseusTheme.HelpMarker(
+            "Point every install at one folder and they share a single import — one machine, one " +
+            "import, four accounts. Nothing is redistributed: the paths are a conversion of " +
+            "Questionable's data, and moving your own copy between your own installs is yours to do.");
+
         var shipped = _pathStore.FromPack;
         var mine = _pathStore.FromFolder;
         ImGui.TextColored(OdysseusTheme.TextSecondary, shipped == 0
@@ -479,14 +498,14 @@ public sealed class ConfigWindow : OdysseusWindow
         if (_packTarget is not null)
         {
             ImGui.Spacing();
-            if (ImGui.Button("Pack for release"))
+            if (ImGui.Button("Export as one file"))
             {
                 try
                 {
                     _pathStore.Pack(_packTarget);
                     var size = new FileInfo(_packTarget).Length / 1024d / 1024d;
                     _importStatus = $"Packed {_pathStore.Count} paths into {_packTarget} ({size:F2} MB). " +
-                                    "Commit it and every build ships with them.";
+                                    "Yours to carry between your own installs — it is not shipped.";
                 }
                 catch (Exception ex)
                 {

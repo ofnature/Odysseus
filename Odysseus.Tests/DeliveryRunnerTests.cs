@@ -27,7 +27,8 @@ public class DeliveryRunnerTests
         public int Rank(DeliveryClient c) => 1;
         public bool DataLoaded { get; set; } = true;
         public int WeeklyAllowanceUsed { get; set; }
-        public (int Current, int Max) Satisfaction(DeliveryClient c) => (0, 0);
+        public (int Current, int Max) SatisfactionGauge { get; set; } = (0, 0);
+        public (int Current, int Max) Satisfaction(DeliveryClient c) => SatisfactionGauge;
     }
 
     private sealed class Rewards : IDeliveryRewards
@@ -35,7 +36,8 @@ public class DeliveryRunnerTests
         public int PerTurnIn { get; set; } = 100;
         public IReadOnlyDictionary<int, int> PerDelivery(DeliveryClient c, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft)
             => new Dictionary<int, int> { [2] = PerTurnIn };
-        public int SatisfactionPerDelivery(DeliveryClient c, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft) => 0;
+        public int PerDeliverySatisfaction { get; set; }
+        public int SatisfactionPerDelivery(DeliveryClient c, int rank, bool bonus = false, DeliveryRoute route = DeliveryRoute.Craft) => PerDeliverySatisfaction;
     }
 
     private sealed class Bonus : IDeliveryBonus
@@ -85,6 +87,39 @@ public class DeliveryRunnerTests
     {
         public GatheringOrigin? Origin { get; set; } = new("Botanist", 100, "Ok'hanu", "Yak T'el");
         public GatheringOrigin? For(uint itemId) => Origin;
+        public Dictionary<uint, IReadOnlyList<uint>> Bases { get; } = new();
+        public IReadOnlyList<uint> BasesFor(uint itemId) => Bases.GetValueOrDefault(itemId, []);
+        public Dictionary<uint, IReadOnlyList<GatheringPointRef>> Points { get; } = new();
+        public IReadOnlyList<GatheringPointRef> PointsFor(uint itemId) => Points.GetValueOrDefault(itemId, []);
+    }
+
+    private sealed class Own : Odysseus.Services.Gathering.IOwnGatherer
+    {
+        public HashSet<uint> Knows { get; } = [];
+        public int Starts { get; private set; }
+        public int Ticks { get; private set; }
+        public int Stops { get; private set; }
+        public bool Busy { get; set; }
+        public bool Faulted { get; set; }
+        public string Status { get; set; } = string.Empty;
+        public (uint Item, int Count, int Collectability) LastStart { get; private set; }
+
+        public bool CanGather(uint itemId) => Knows.Contains(itemId);
+
+        public bool Start(uint itemId, int count, int collectability)
+        {
+            if (!Knows.Contains(itemId)) return false;
+            Starts++;
+            LastStart = (itemId, count, collectability);
+            Busy = true;
+            return true;
+        }
+
+        public bool DryRun { get; set; }
+        public bool ProbeOnly { get; set; }
+        public bool Enabled { get; set; } = true;
+        public void Tick() => Ticks++;
+        public void Stop() { Stops++; Busy = false; }
     }
 
     private sealed class Crafter : ICrafter
@@ -192,6 +227,8 @@ public class DeliveryRunnerTests
     private readonly Gatherer _gatherer = new();
     private readonly ScripLedger _scrips;
     private readonly DeliveryRunner _runner;
+    private readonly DeliveryRunner _ownRunner;
+    private readonly Own _own = new();
     private readonly List<string> _log = [];
     private int _preferredJob = -1;
 
@@ -200,6 +237,8 @@ public class DeliveryRunnerTests
         _scrips = new ScripLedger([Purple], _currency, new DeliveryCatalog([Zhloe]), _state, _rewards, new Bonus());
         _runner = new DeliveryRunner(_world, _game, _state, _requests, _scrips, _crafter, _recipes, _ingredients, _gathering, _gatherer,
             new StepExecutor(_world), () => _preferredJob, _log.Add);
+        _ownRunner = new DeliveryRunner(_world, _game, _state, _requests, _scrips, _crafter, _recipes, _ingredients, _gathering, _gatherer,
+            new StepExecutor(_world), () => _preferredJob, _log.Add, _own);
         _world.PlayerPosition = Zhloe.Position;   // standing at the client
         _world.Spawned.Add(Zhloe.NpcDataId);
         _world.Spawned.Add(VendorId);             // ...with the merchant beside them
@@ -463,6 +502,111 @@ public class DeliveryRunnerTests
     /// GatherBuddy takes no request and reports no progress, so the handoff is: switch on, watch
     /// the bag, switch off. Nothing is ever asked of it beyond running or not.
     /// </summary>
+    [Fact]
+    public void A_run_stops_at_the_rank_up_because_the_request_changes_there()
+    {
+        // A fresh client fills the gauge in about three turn-ins, and the rank-up re-rolls what
+        // they ask for — so a run sized to six spends its back half handing over the wrong item.
+        _state.SatisfactionGauge = (0, 300);
+        _rewards.PerDeliverySatisfaction = 100;      // three fills it
+        _game.Bag[ItemId] = 6;
+
+        Assert.True(_runner.Start(Zhloe, DeliveryRoute.Craft));
+        RunTo(DeliveryRunState.Done, frames: 200);
+
+        Assert.Equal(DeliveryRunState.Done, _runner.State);
+        Assert.Equal(3, _game.Committed);
+        Assert.Contains("rank-up changes", _runner.StatusLine);
+    }
+
+    [Fact]
+    public void The_gather_route_gets_the_item_before_going_to_the_client()
+    {
+        // Travelling to the client first is right for the craft route — the ingredient merchant
+        // stands beside them — and a wasted trip on this one, which is sent straight back out.
+        _own.Knows.Add(GatherItemId);
+        _game.Bag[GatherItemId] = 0;
+        _world.PlayerPosition = new Vector3(500, 0, 500);   // nowhere near the client
+
+        Assert.True(_ownRunner.Start(Zhloe, DeliveryRoute.Gather, limit: 6));
+        Assert.Equal(DeliveryRunState.Gather, _ownRunner.State);
+
+        Own_RunTo(() => _own.Starts > 0);
+        Assert.Equal(1, _own.Starts);
+
+        // Once the bag is full it goes to the client, not before.
+        _game.Bag[GatherItemId] = 6;
+        _own.Busy = false;
+        Own_RunTo(() => _ownRunner.State == DeliveryRunState.Travel);
+        Assert.Equal(DeliveryRunState.Travel, _ownRunner.State);
+    }
+
+    [Fact]
+    public void The_craft_route_still_travels_first_for_the_merchant()
+    {
+        _game.Bag[ItemId] = 0;
+        _world.PlayerPosition = new Vector3(500, 0, 500);
+        Assert.True(_runner.Start(Zhloe, DeliveryRoute.Craft, limit: 1));
+        Assert.Equal(DeliveryRunState.Travel, _runner.State);
+    }
+
+    [Fact]
+    public void Arriving_with_a_full_bag_hands_over_rather_than_looking_for_more()
+    {
+        _game.Bag[GatherItemId] = 6;                        // already have them
+        Assert.True(_ownRunner.Start(Zhloe, DeliveryRoute.Gather, limit: 6));
+        Assert.Equal(DeliveryRunState.Travel, _ownRunner.State);   // nothing to gather, so straight there
+
+        Own_RunTo(() => _ownRunner.IsFinished, frames: 80);
+        Assert.Equal(DeliveryRunState.Done, _ownRunner.State);
+        Assert.Equal(0, _own.Starts);
+    }
+
+    [Fact]
+    public void Our_own_gathering_is_preferred_over_the_handoff_where_we_have_a_node()
+    {
+        // GatherBuddy's lists cannot say "at this collectability or better", which is all a
+        // delivery asks for — so where we know a node, we go ourselves.
+        _own.Knows.Add(GatherItemId);
+        _game.Bag[GatherItemId] = 4;
+        Assert.True(_ownRunner.Start(Zhloe, DeliveryRoute.Gather, limit: 6));
+        Own_RunTo(() => _own.Starts > 0);
+
+        Assert.Equal(1, _own.Starts);
+        Assert.Equal(0, _gatherer.Starts);                       // the handoff was not touched
+        Assert.Equal((GatherItemId, 2, 400), _own.LastStart);    // the shortfall, aimed at the top band
+
+        _ownRunner.Tick();                                       // busy: it is driven, not just watched
+        Assert.True(_own.Ticks > 0);
+
+        _game.Bag[GatherItemId] = 6;
+        _own.Busy = false;
+        Own_RunTo(() => _ownRunner.IsFinished, frames: 80);
+        Assert.Equal(DeliveryRunState.Done, _ownRunner.State);
+        Assert.Equal(6, _game.Committed);
+    }
+
+    /// <summary>The same tick-with-time loop the other tests use, against the runner that has ours.</summary>
+    private void Own_RunTo(Func<bool> until, int frames = 40)
+    {
+        for (var i = 0; i < frames && !until(); i++)
+        {
+            _ownRunner.Tick();
+            _world.UtcNow = _world.UtcNow.AddSeconds(2);
+        }
+    }
+
+    [Fact]
+    public void An_item_we_have_no_node_for_still_goes_to_the_handoff()
+    {
+        _game.Bag[GatherItemId] = 4;                             // _own.Knows is empty
+        Assert.True(_ownRunner.Start(Zhloe, DeliveryRoute.Gather, limit: 6));
+        Own_RunTo(() => _gatherer.Starts > 0);
+
+        Assert.Equal(0, _own.Starts);
+        Assert.Equal(1, _gatherer.Starts);
+    }
+
     [Fact]
     public void Gathering_is_handed_to_gatherbuddy_and_the_bag_is_the_progress_meter()
     {

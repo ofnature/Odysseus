@@ -59,6 +59,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly FlightWindow _flightWindow;
     private readonly JournalWindow _journalWindow;
     private readonly System.Collections.Generic.Queue<byte> _tribeQueue = new();
+    private System.DateTime _lastQueueNote;
     private readonly TribesWindow _tribesWindow;
     private readonly Services.Deliveries.DeliveryCatalog _deliveries;
     private readonly DeliveriesWindow _deliveriesWindow;
@@ -70,6 +71,15 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly ConfigWindow _configWindow;
     private readonly MainWindow _mainWindow;
     private readonly DebugWindow _debugWindow;
+#if DEBUG
+    private readonly Services.Gathering.GameGatherWorld _gatherWorld;
+    private readonly Services.Gathering.IOwnGatherer _ownGatherer;
+
+    // The work-list bench: debug builds only, so a release carries no half-finished feature.
+    private readonly Services.Work.WorkList _workList = new();
+    private readonly Services.Work.WorkRunner _workRunner;
+    private readonly WorkbenchWindow _workbenchWindow;
+#endif
     private readonly FleetWindow _fleetWindow;
     private readonly PathEditorWindow _pathEditorWindow;
     private readonly LogWindow _logWindow;
@@ -93,11 +103,13 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _quests = new QuestStateReader(fault => Log.Warning($"Quest state read failed. {fault}"));
         _catalog = new QuestCatalog(DataManager, message => Log.Warning(message));
 
-        // The library ships beside the DLL, so four accounts in four folders get the same 4,240
-        // quests from the build rather than four imports kept in step by hand. Anything this client
-        // imported or recorded still wins: the config folder is laid over the pack, not under it.
+        // Several installs can share one folder — that is the multi-account answer, and it needs
+        // nobody to redistribute anybody's data. A pack put beside the DLL by hand is still read
+        // under it; none is shipped.
         _pathStore = new PathStore(
-            System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "paths"),
+            _config.PathsDirectory.Length > 0
+                ? _config.PathsDirectory
+                : System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "paths"),
             message => Log.Information(message),
             Services.Paths.PathPack.ShippedPath(PluginInterface.AssemblyLocation.DirectoryName));
 
@@ -213,7 +225,27 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var deliveryRewards = new Services.Deliveries.DeliveryRewards(DataManager, message => Log.Warning(message));
         var scrips = new Services.Deliveries.ScripLedger(DataManager, new Services.Deliveries.InventoryCurrencyReader(),
             _deliveries, deliveryState, deliveryRewards, deliveryBonus, message => Log.Warning(message));
-        var deliveryRequests = new Services.Deliveries.DeliveryRequests(DataManager, message => Log.Warning(message));
+        var deliveryRequests = new Services.Deliveries.DeliveryRequests(DataManager, message => Log.Warning(message), deliveryBonus);
+        var gatheringSource = new Services.Deliveries.GatheringSource(DataManager, message => Log.Warning(message));
+
+#if DEBUG
+        // Our own gathering, offered to the delivery runner in place of the GatherBuddy handoff.
+        // Debug only until it has worked once: without it the gather route behaves exactly as it
+        // does today, which is to stop and say what it needs.
+        _gatherWorld = new Services.Gathering.GameGatherWorld(
+            ClientState, ObjectTable, Condition, GameGui, _world, message => Log.Information(message));
+        // Probe by default. Opening a node has locked this client up more than once and the cause
+        // is not yet understood, so the interaction is something you turn on deliberately in the
+        // Workbench, not something a delivery does to you.
+        _ownGatherer = new Services.Gathering.OwnGatherer(
+            new Services.Gathering.GatherRunner(_gatherWorld, new StepExecutor(_world, dialogue)),
+            gatheringSource,
+            new Services.Gathering.NodeAtlas(
+                Services.Gathering.NodeAtlas.PathBeside(PluginInterface.AssemblyLocation.DirectoryName),
+                message => Log.Warning(message)),
+            message => Log.Information(message));
+#endif
+
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(
             _world,
             deliveryWorld,
@@ -223,11 +255,25 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             artisan,
             recipes,
             ingredients,
-            new Services.Deliveries.GatheringSource(DataManager, message => Log.Warning(message)),
+            gatheringSource,
             gatherBuddy,
             new StepExecutor(_world, dialogue),
             () => _config.DeliveryCraftJob,
+            message => Log.Information(message)
+#if DEBUG
+            , _ownGatherer
+#endif
+            );
+#if DEBUG
+        // After the catalogues and both runners exist — it takes all four, and a debug-only window
+        // is exactly the sort of thing that gets built too early and hands itself nulls.
+        _workRunner = new Services.Work.WorkRunner(
+            new WorkEngines(_tribes, _deliveries, _tribeRunner, _deliveryRunner),
             message => Log.Information(message));
+        _ownGatherer.ProbeOnly = true;
+        _workbenchWindow = new WorkbenchWindow(_tribes, _deliveries, _workList, _workRunner, _ownGatherer, _gatherWorld);
+#endif
+
         var scripShop = new Services.Deliveries.ScripShop(DataManager, scrips.Kinds, message => Log.Warning(message));
         var spending = new Services.Deliveries.SpendPlanner(scripShop, scrips, id => deliveryWorld.ItemCount(id));
         _spender = new Services.Deliveries.SpendRunner(deliveryWorld, message => Log.Information(message));
@@ -291,6 +337,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _windowSystem.AddWindow(_flightWindow);
         _windowSystem.AddWindow(_journalWindow);
         _windowSystem.AddWindow(_debugWindow);
+#if DEBUG
+        _windowSystem.AddWindow(_workbenchWindow);
+#endif
         _windowSystem.AddWindow(_fleetWindow);
         _windowSystem.AddWindow(_pathEditorWindow);
         _windowSystem.AddWindow(_logWindow);
@@ -361,6 +410,19 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         return quest != 0 && _quests.IsComplete(quest);
     }
 
+    /// <summary>
+    /// Say who is eating the frames while something is queued behind them. Five runners take the
+    /// frame with a bare return, and a stuck one is invisible: a Run click enqueues, the queue is
+    /// never reached, and nothing anywhere says why. Once every ten seconds, this does.
+    /// </summary>
+    private void NameFrameOwner(string owner)
+    {
+        if (_tribeQueue.Count == 0) return;
+        if (System.DateTime.UtcNow - _lastQueueNote < System.TimeSpan.FromSeconds(10)) return;
+        _lastQueueNote = System.DateTime.UtcNow;
+        Log.Information($"A society run is queued, but {owner} owns the frame.");
+    }
+
     private void OnFrameworkUpdate(IFramework framework)
     {
         // The dashboard is useful even with the runner off: it says who is where.
@@ -400,18 +462,19 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         // Fetching from the chest is something you asked for by pressing a button, so it runs
         // whatever else is going on and owns the frame until it is done.
-        if (_withdrawer.Busy) { _withdrawer.Tick(); return; }
+        if (_withdrawer.Busy) { NameFrameOwner("the chest withdrawal"); _withdrawer.Tick(); return; }
 
         // Collecting currents owns the frame; it drives its own executor, not the controller.
-        if (!_collector.IsFinished) { _collector.Tick(); return; }
+        if (!_collector.IsFinished) { NameFrameOwner($"the current collector ({_collector.State})"); _collector.Tick(); return; }
 
         // Spending owns the frame while it runs; it is short and never touches the controller.
-        if (!_spender.IsFinished) { _spender.Tick(); return; }
+        if (!_spender.IsFinished) { NameFrameOwner($"scrip spending ({_spender.State}: {_spender.StatusLine})"); _spender.Tick(); return; }
 
         // A delivery run owns the frame outright — it never uses the quest controller.
         if (_deliveryRunner.State is not (Services.Deliveries.DeliveryRunState.Idle or Services.Deliveries.DeliveryRunState.Done
             or Services.Deliveries.DeliveryRunState.Faulted or Services.Deliveries.DeliveryRunState.Blocked))
         {
+            NameFrameOwner($"the delivery runner ({_deliveryRunner.State}: {_deliveryRunner.StatusLine})");
             _deliveryRunner.Tick();
             return;
         }
@@ -419,6 +482,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // Tribe dailies own the controller while a run is active; otherwise the MSQ controller does.
         if (_tribeRunner.State is not (Services.Tribes.TribeRunState.Idle or Services.Tribes.TribeRunState.Done or Services.Tribes.TribeRunState.Faulted))
         {
+            NameFrameOwner($"the tribe runner ({_tribeRunner.State}: {_tribeRunner.StatusLine})");
             _tribeRunner.Tick();
             return;
         }
@@ -429,15 +493,34 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         if (!_controller.Phase.StartsWith("Shop", System.StringComparison.Ordinal))
             _seller.Tick();
 
-        if (_tribeQueue.Count > 0 && _controller.State == RunState.Idle)
+#if DEBUG
+        _workRunner.Tick();
+#endif
+
+        if (_tribeQueue.Count > 0)
         {
-            var next = _tribeQueue.Peek();
-            if (_tribes.ById(next) is { } tribe && _tribeRunner.Start(tribe))
+            if (_controller.State != RunState.Idle)
             {
-                _tribeQueue.Dequeue();
-                return;
+                // Not silently: a queued society waiting on a busy controller looked, from the
+                // window, like a click that did nothing.
+                if (System.DateTime.UtcNow - _lastQueueNote > System.TimeSpan.FromSeconds(10))
+                {
+                    _lastQueueNote = System.DateTime.UtcNow;
+                    Log.Information($"Tribe queue waiting: the quest controller is {_controller.State} ({_controller.StatusLine}).");
+                }
             }
-            _tribeQueue.Dequeue(); // could not start (nothing left / not unlocked) — drop and move on
+            else
+            {
+                var next = _tribeQueue.Dequeue();
+                if (_tribes.ById(next) is not { } tribe)
+                    Log.Information($"Tribe queue: id {next} is not in the catalogue — dropped.");
+                else if (_tribeRunner.Start(tribe))
+                    return;
+                else
+                    // The refusal was being discarded with the queue entry, which made every
+                    // failure here read as a click that did nothing.
+                    Log.Information($"{tribe.Name}: not started — {_tribeRunner.StatusLine}");
+            }
         }
 
         _controller.Tick();
@@ -501,6 +584,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             case "debug":
                 _debugWindow.IsOpen = true;
                 break;
+#if DEBUG
+            case "work":
+                _workbenchWindow.IsOpen = true;
+                break;
+#endif
             case "fleet":
                 _fleetWindow.IsOpen = true;
                 break;

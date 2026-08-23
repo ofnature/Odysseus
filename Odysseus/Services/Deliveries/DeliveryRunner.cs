@@ -109,6 +109,10 @@ public sealed class DeliveryRunner
     private readonly IIngredientSource _ingredients;
     private readonly IGatheringSource _gathering;
     private readonly IGatherer _gatherer;
+
+    /// <summary>Odysseus gathering it itself, when it can. Null falls back to the GatherBuddy handoff.</summary>
+    private readonly Gathering.IOwnGatherer? _own;
+    private bool _ownStarted;
     private readonly StepExecutor _travel;
     private readonly Func<int> _preferredCraftType;
     private readonly Action<string> _log;
@@ -118,6 +122,7 @@ public sealed class DeliveryRunner
     private DateTime _phaseStart;
     private DateTime _lastAction;
     private int _delivered;
+    private bool _rankCapped;
     private int _target;
     private bool _craftStarted;
     private bool _gatherStarted;
@@ -127,8 +132,9 @@ public sealed class DeliveryRunner
     public DeliveryRunner(IStepWorld world, IDeliveryWorld game, IDeliveryState state, IDeliveryRequests requests,
         ScripLedger scrips, ICrafter crafter, IRecipeLookup recipes, IIngredientSource ingredients,
         IGatheringSource gathering, IGatherer gatherer, StepExecutor travel, Func<int> preferredCraftType,
-        Action<string> log)
+        Action<string> log, Gathering.IOwnGatherer? ownGatherer = null)
     {
+        _own = ownGatherer;
         _preferredCraftType = preferredCraftType;
         _ingredients = ingredients;
         _gathering = gathering;
@@ -200,12 +206,29 @@ public sealed class DeliveryRunner
         _route = route;
         _delivered = 0;
         _target = limit > 0 ? Math.Min(limit, remaining) : remaining;
+
+        // Never past the next rank-up. Filling the gauge changes what the client asks for — a
+        // fresh client re-rolls after roughly three — so a run sized to six would spend its back
+        // half gathering and handing over an item that is no longer wanted. Stop at the boundary
+        // instead, and the next Start reads the new rank and rolls the new request.
+        _rankCapped = false;
+        var untilRankUp = _scrips.PayingDeliveries(client, route);
+        if (untilRankUp > 0 && untilRankUp < _target)
+        {
+            _target = untilRankUp;
+            _rankCapped = true;
+        }
         _craftStarted = false;
         _gatherStarted = false;
         _recipe = null;
         StoppedBecause = DeliveryStop.None;
-        // Travel first: the merchant that stocks the ingredients stands beside the client.
-        Enter(DeliveryRunState.Travel);
+        // Travel first on the craft route, because the merchant that stocks the ingredients stands
+        // beside the client. On the others there is nothing to buy there, so going to the client
+        // before the item exists is a wasted trip to be sent straight back from — get the item
+        // first, then go and hand it over.
+        Enter(_route == DeliveryRoute.Craft || Shortfall() <= 0
+            ? DeliveryRunState.Travel
+            : DeliveryRunState.Gather);
         _log($"{client.Name}: {_target} deliver{(_target == 1 ? "y" : "ies")} of {request.ItemName} " +
              $"(collectability {request.CollectabilityHigh}){(limit > 0 ? " — test run" : "")}.");
         return true;
@@ -257,6 +280,44 @@ public sealed class DeliveryRunner
     /// minimum collectability — anything below it cannot be handed over, so counting it would leave
     /// the run thinking it was ready and then stalling at the trade window.
     /// </summary>
+    /// <summary>Returns true when our own gatherer has the job in hand and nothing else should act.</summary>
+    private bool TickOwnGather(Gathering.IOwnGatherer own, DeliveryClient client, DeliveryRequest request, int short_)
+    {
+        if (own.Busy)
+        {
+            own.Tick();
+            StatusLine = $"{client.Name}: gathering {request.ItemName} — {own.Status}";
+            _phaseStart = _world.UtcNow;
+            return true;
+        }
+
+        if (_ownStarted)
+        {
+            // Finished or gave up with the bag still short. Say which, and let the usual block
+            // message carry the item, the collectability and where it is found.
+            _ownStarted = false;
+            BlockNeedingItems(short_, own.Faulted && own.Status.Length > 0 ? own.Status : "gathering stopped short");
+            return true;
+        }
+
+        // The top band, not the bottom one. Every band is deliverable, but they pay differently
+        // and the difference is the whole point of gathering it well.
+        if (!own.Start(request.ItemId, short_, request.CollectabilityHigh))
+            return false; // nothing to gather it from; fall through to the handoff and its message
+
+        _ownStarted = true;
+        _phaseStart = _world.UtcNow;
+        StatusLine = $"{client.Name}: gathering {request.ItemName}";
+        return true;
+    }
+
+    /// <summary>Standing with the client, so a hand-over can begin without moving.</summary>
+    private bool AtClient()
+        => _client is { } client
+           && _world.TerritoryId == client.TerritoryId
+           && Vector3.Distance(_world.PlayerPosition, client.Position)
+              <= StepExecutor.DefaultStopDistance + StepExecutor.ArrivalSlack;
+
     private int Shortfall()
         => Math.Max(0, _target - _delivered - _game.ItemCount(_request!.ItemId, _request.CollectabilityLow));
 
@@ -329,8 +390,11 @@ public sealed class DeliveryRunner
             && Vector3.Distance(_world.PlayerPosition, client.Position) <= StepExecutor.DefaultStopDistance + StepExecutor.ArrivalSlack)
         {
             _travel.Cancel();
-            // Buying and crafting only exist for the craft route; the others just check the bag.
-            Enter(_route == DeliveryRoute.Craft ? DeliveryRunState.Shop : DeliveryRunState.Gather);
+            // Buying and crafting only exist for the craft route. On the others, arriving with the
+            // bag already full means there is nothing left to do but hand it over.
+            Enter(_route == DeliveryRoute.Craft ? DeliveryRunState.Shop
+                : Shortfall() > 0 ? DeliveryRunState.Gather
+                : DeliveryRunState.Interact);
             return;
         }
 
@@ -370,8 +434,32 @@ public sealed class DeliveryRunner
         if (short_ <= 0)
         {
             if (_gatherStarted) _gatherer.Stop();
-            Enter(DeliveryRunState.Interact);
+            if (_ownStarted)
+            {
+                // Stop is not instant: a gathering window still open outlives it, and the teleport
+                // that follows is refused while it stands. Hold here until it has shut.
+                _own!.Stop();
+                if (_own.Busy)
+                {
+                    _own.Tick();
+                    StatusLine = $"{_client!.Name}: closing up at the node";
+                    _phaseStart = _world.UtcNow;
+                    return;
+                }
+                _ownStarted = false;
+            }
+            // Got what it came for. If that happened out in the field, the client still has to be
+            // walked to; Travel sends it straight on to the hand-over once it is there.
+            Enter(AtClient() ? DeliveryRunState.Interact : DeliveryRunState.Travel);
             return;
+        }
+
+        // Ours first where we have a node for it: GatherBuddy's lists cannot express "at this
+        // collectability or better", which is the whole of what a delivery asks for.
+        if (_route == DeliveryRoute.Gather && _own is { } own && own.CanGather(request.ItemId))
+        {
+            if (TickOwnGather(own, client, request, short_))
+                return;
         }
 
         if (_route == DeliveryRoute.Fish || !_gatherer.Available)
@@ -601,9 +689,12 @@ public sealed class DeliveryRunner
     {
         State = DeliveryRunState.Done;
         var weekly = _scrips.WeeklyRemaining;
-        StatusLine = weekly <= 0
-            ? $"{_client!.Name}: {_delivered} delivered — the weekly allowance of {DeliveryLimits.WeeklyAllowance} is now spent."
-            : $"{_client!.Name}: {_delivered} delivered, {weekly} left in the weekly allowance.";
+        StatusLine = _rankCapped && _delivered >= _target
+            ? $"{_client!.Name}: {_delivered} delivered and the satisfaction gauge is full — the rank-up changes " +
+              "what they ask for. Start again to run the rest against the new request."
+            : weekly <= 0
+                ? $"{_client!.Name}: {_delivered} delivered — the weekly allowance of {DeliveryLimits.WeeklyAllowance} is now spent."
+                : $"{_client!.Name}: {_delivered} delivered, {weekly} left in the weekly allowance.";
         _log(StatusLine);
     }
 

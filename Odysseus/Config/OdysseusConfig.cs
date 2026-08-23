@@ -113,6 +113,18 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     public int SpendReserve { get; set; } = 500;
 
     /// <summary>
+    /// Where the quest paths live. Empty means the plugin's own config folder.
+    ///
+    /// <para>
+    /// Point several installs at one folder and they share a single import — which is the whole of
+    /// the multi-account problem, without anyone redistributing anyone's data. The paths are a
+    /// conversion of another project's work; moving your own copy between your own machines is
+    /// yours to do, and shipping it inside our download is not ours to do.
+    /// </para>
+    /// </summary>
+    public string PathsDirectory { get; set; } = string.Empty;
+
+    /// <summary>
     /// Keep the chocobo companion summoned while running, feeding it a Gysahl Green whenever the
     /// timer runs low. Does nothing until "My Little Chocobo" is done, and never spends a green in
     /// a city or a duty, where the companion is not allowed anyway.

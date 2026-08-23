@@ -57,12 +57,14 @@ public interface IDeliveryRequests
 public sealed unsafe class DeliveryRequests : IDeliveryRequests
 {
     private readonly IDataManager _data;
+    private readonly IDeliveryBonus? _bonus;
     private readonly Action<string>? _log;
 
-    public DeliveryRequests(IDataManager data, Action<string>? log = null)
+    public DeliveryRequests(IDataManager data, Action<string>? log = null, IDeliveryBonus? bonus = null)
     {
         _data = data;
         _log = log;
+        _bonus = bonus;
     }
 
     public IReadOnlyList<DeliveryRequest> For(DeliveryClient client, int rank)
@@ -79,7 +81,22 @@ public sealed unsafe class DeliveryRequests : IDeliveryRequests
             var parms = n.SatisfactionNpcParams;
             if (rank < 0 || rank >= parms.Count) return [];
 
-            return Roll((uint)parms[rank].SupplyIndex, seed);
+            var picked = Roll((uint)parms[rank].SupplyIndex, seed);
+
+            // The bonus guarantee, applied after the roll — vsatisfy's MainWindow does exactly
+            // this. At rank 5, a week whose SatisfactionBonusGuarantee names this client for a
+            // route replaces that route's rolled request with the slot's IsBonus subrow. Missing
+            // it is how the runner went mining Glass Eye while Zhloe's window asked for Rainbow
+            // Pigment, the gather slot's bonus item.
+            if (rank == 5 && _bonus is not null)
+            {
+                var flags = _bonus.For(client);
+                if (flags != BonusFlags.None)
+                    picked = [.. picked.Select(r => WantsBonus(flags, r.Route) && !r.IsBonus
+                        ? BonusRow((uint)parms[rank].SupplyIndex, r.Route) ?? r
+                        : r)];
+            }
+            return picked;
         }
         catch (Exception ex)
         {
@@ -117,6 +134,30 @@ public sealed unsafe class DeliveryRequests : IDeliveryRequests
             _log?.Invoke($"Possible requests for {client.Name} failed: {ex.Message}");
             return [];
         }
+    }
+
+    private static bool WantsBonus(BonusFlags flags, DeliveryRoute route) => route switch
+    {
+        DeliveryRoute.Craft => flags.Craft,
+        DeliveryRoute.Gather => flags.Gather,
+        DeliveryRoute.Fish => flags.Fish,
+        _ => false,
+    };
+
+    /// <summary>The IsBonus subrow for a slot — what a guaranteed-bonus week forces the request to.</summary>
+    private DeliveryRequest? BonusRow(uint supplyIndex, DeliveryRoute route)
+    {
+        var subrows = _data.GetSubrowExcelSheet<SatisfactionSupply>().GetRowOrDefault(supplyIndex);
+        if (subrows is not { } rows) return null;
+        for (var i = 0; i < rows.Count; i++)
+        {
+            var row = rows[i];
+            if (row.Slot != (byte)route || !row.IsBonus || row.Item.RowId == 0) continue;
+            return new DeliveryRequest(route, i, row.Item.RowId,
+                row.Item.ValueNullable?.Name.ExtractText() ?? $"item {row.Item.RowId}",
+                row.CollectabilityHigh, row.CollectabilityLow, IsBonus: true);
+        }
+        return null;
     }
 
     /// <summary>The roll itself, pure so it can be checked against a known seed without the game.</summary>
