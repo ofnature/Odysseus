@@ -698,6 +698,26 @@ public class StepExecutorTests
         Assert.True(dismount < interact, "interacted from the saddle");
     }
     [Fact]
+    public void A_flight_hanging_over_a_walkto_mark_lands_before_judging_arrival()
+    {
+        // Clutch and Kin's destination ring: the flight ends hovering over it, the ring fires
+        // only for someone standing in it, and a WalkTo has no object to pin the landing to.
+        var mark = new Vector3(-41, -23, -90);
+        var world = new FakeStepWorld { TerritoryId = 138, IsMounted = true, IsInFlight = true, CanFlyHere = true };
+        world.PlayerPosition = new Vector3(-41, 2, -90);   // 25y straight up
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", Fly = true, TerritoryId = 138, Position = mark });
+
+        for (var i = 0; i < 20 && !world.Calls.Contains("Dismount"); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains("Dismount", world.Calls);
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("landing"));
+
+        // The descent puts us on the ground at the mark; the step then arrives for real.
+        world.IsInFlight = false; world.IsMounted = false; world.PlayerPosition = mark;
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+    }
+
+    [Fact]
     public void A_flight_to_a_fight_lands_in_the_radius_and_walks_the_rest()
     {
         // Arrive flying near the combat mark: land there, then close the last stretch on foot.

@@ -1396,6 +1396,19 @@ public sealed class StepExecutor
 
         var arrived = distance <= tolerance + ArrivalSlack
                       || (_detourNeedsShard && _world.AtAethernetShard);
+        // A flight that ends hanging over its mark never arrives: the walk-into rings fire for
+        // someone standing in them, and the mark's own Y is the ground. Horizontally there and
+        // above it — land, then judge arrival from the ground.
+        if (!arrived && detour is null && _world.IsInFlight
+            && _world.PlayerPosition.Y > target.Y
+            && Vector3.Distance(target with { Y = _world.PlayerPosition.Y }, _world.PlayerPosition) <= tolerance + ArrivalSlack)
+        {
+            _world.StopMoving();
+            _world.Log($"Flight ended {_world.PlayerPosition.Y - target.Y:F0}y above the mark {Fmt(target)} — landing.");
+            Enter(BeginDismount(Phase.Move));
+            return;
+        }
+
         // A fight is entered on foot: close enough to the combat mark, land (a dismount from the
         // air is the game's own descent), and walk the rest. Pulling from the saddle does
         // nothing, and a flight that circles the mark hunting the exact yalm never fights.
