@@ -302,6 +302,25 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_walkto_the_world_stops_three_yalms_short_of_is_a_waypoint_reached()
+    {
+        // Brotherhood of Ash: the mark is three yalms inside something solid. Pathfinder silent,
+        // direct walk stalled, three tries gone. The mark's job was to get us here; it has.
+        var target = new Vector3(107, 15, -361);
+        var world = new FakeStepWorld { PathWaypointCount = 0, PlayerPosition = new Vector3(104, 15, -361) };
+        var ex = new StepExecutor(world);
+        ex.Begin(Step(StepKind.WalkTo, target));
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+
+        // Six yalms is not "here"; that is still a failure.
+        world = new FakeStepWorld { PathWaypointCount = 0, PlayerPosition = new Vector3(101, 15, -361) };
+        world.NearestReachableFn = (p, _) => p;   // everything on the mesh, nothing to snap to, just no path
+        ex = new StepExecutor(world);
+        ex.Begin(Step(StepKind.WalkTo, target));
+        Assert.Equal(StepStatus.Failed, Run(ex, world));
+    }
+
+    [Fact]
     public void Standing_on_the_platform_a_few_yalms_short_it_just_walks_there()
     {
         // Off-mesh feet: the pathfind cannot start, and the nearest-point query finds the edge a

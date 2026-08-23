@@ -90,10 +90,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
     public OdysseusPlugin(IDalamudPluginInterface pluginInterface)
     {
-        OpenOwnLog();
         // Create<T> constructs a T. It must be given the service holder, never this plugin —
         // see Service for why that distinction silently kills the client.
         pluginInterface.Create<Service>();
+        OpenOwnLog(); // needs the services above; before them it is a load error
 
         // Everything below is wrapped so a construction failure lands in a file we control —
         // Dalamud's own log stops writing once it hits its size cap, and "failed to load" is all

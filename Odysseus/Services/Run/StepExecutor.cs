@@ -75,6 +75,9 @@ public sealed class StepExecutor
     public const float DefaultStopDistance = 3f;
     /// <summary>WalkTo without a StopDistance: land on the point.</summary>
     public const float WalkToStopDistance = 0.5f;
+
+    /// <summary>A WalkTo given up on this close to its mark is taken as arrived rather than faulted.</summary>
+    private const float WalkToNearEnough = 5f;
     /// <summary>
     /// Close enough to an aethernet shard to use it. Lifestream has to <i>interact</i> with the
     /// shard, so this is interact range plus the object's own bulk — not "somewhere near it". A
@@ -1468,6 +1471,17 @@ public sealed class StepExecutor
 
         if (_moveRetries >= MaxMoveRetries)
         {
+            // A waypoint, not a target: a WalkTo that the world will not let us finish — three
+            // yalms from the mark with the pathfinder silent and a straight walk stalled — has
+            // done its job, which was to get us *here*. The step that needs exactness is the next
+            // one, and it measures from its own target.
+            if (step.Kind == StepKind.WalkTo && detour is null && distance <= WalkToNearEnough)
+            {
+                _world.Log($"Ended {distance:F1}y short of the mark {Fmt(target)} and can get no closer — near enough for a waypoint.");
+                _world.StopMoving();
+                Enter(Phase.WaitReady);
+                return;
+            }
             Fail(!direct && _world.PathWaypointCount == 0
                 ? $"no path to {Fmt(target)} after {_moveRetries} attempts{MeshDiagnosis(target)}"
                 : $"stalled {_moveRetries} times short of {Fmt(target)} ({distance:F1}y left)");
