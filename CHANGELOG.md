@@ -1,6 +1,27 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.5 — 2026-08-23
+
+The Qitari and Arkasodara unlock chains, run live end to end. Every change came from a field failure and carries a test.
+
+### Class gates
+- Three gates now, each waiting for the equip to actually take before the step moves (the game silently drops a gearset change raced against a mount): Hand-or-Land, combat (best set by level), and Land-only — the gatherer, specifically, with the level judged against the gearset rather than the class you stood there as
+
+### Getting there
+- The move budget measures progress, not wall time: every ten yalms gained buys the clock back, so a long crossing is never guillotined mid-stride
+- A long leg flies even when the path says walk — six yalms a second on the ground against twenty in the air makes anything past 120 worth a take-off — and a far mark with an attuned aetheryte beside it teleports instead
+- A wedged walk takes to the air (mounting first), a wedged escape flight climbs over the mark and comes down on it vertically, and a combat mark the mesh cannot serve is near enough to fight from once the air has had its turn
+- A wedge once solved teaches the run which way works: the next visit to that spot goes straight to the winning rung
+- BossMod's AI movement controller no longer fights vnavmesh for the character: travel commands it off, fights and duties command it back on
+- A refused teleport is asked again for twelve seconds before it is believed; readiness clocks hold while a cutscene plays; Yedlihmad's meshless doorway is crossed directly by the nine paths that use it
+
+### Quests
+- WaitForNpcAtPosition is implemented — escort steps hold until the NPC stands on their spot
+- Quest gathers are done by Odysseus itself when the own gatherer is switched on: plain nodes worked by the row, quest-hidden items resolved through their own sheet, unplaced points borrowing the step's zone — and a decline names exactly which link is missing before handing to GatherBuddy
+
+<!-- LATEST-END -->
+
 ## v0.2.4 — 2026-08-23
 
 An evening of field-hardening across three allied societies and the whole eleven-quest Namazu unlock chain. Every change below came from a live failure, and each carries a test.
@@ -25,8 +46,6 @@ An evening of field-hardening across three allied societies and the whole eleven
 - Dive is implemented — the game's own descent bind, pressed the way it expects (ported from Questionable, AGPL into AGPL); underwater movement is volume movement
 - Gathers whose crafts are already made are skipped, including raws no recipe connects once the block's crafting stands done — the crate-supplied quest completes itself
 - The main window is cards now, with the priority queue in it: order, ready-states, reorder and remove on the row, add-current
-
-<!-- LATEST-END -->
 
 ## v0.2.3 — 2026-08-23
 
