@@ -41,6 +41,12 @@ public sealed record QuestListing(ushort QuestId, string Name, ushort ClassJobLe
     public bool NeedsCombat => ClassCategoryId is 33 or 34 or 108 or 142;
 
     /// <summary>
+    /// The quest can only be taken as a Disciple of the Land — a gatherer, specifically, not any
+    /// Hand-or-Land. Row 32; the Qitari tribe opener carries it (checked 2026-08-23).
+    /// </summary>
+    public bool NeedsGatherer => ClassCategoryId == 32;
+
+    /// <summary>
     /// The journal grouping this quest sits under — "Chronicles of a New Era", "Sidequests" and so
     /// on. Kept because it is the only thing that identifies a raid or trial unlock chain as such;
     /// the engine runs any quest, but nothing could <i>find</i> them without this.

@@ -46,6 +46,7 @@ public class QuestControllerTests : IDisposable
     private readonly Dictionary<ushort, ushort> _chain = new();
     private readonly Dictionary<ushort, int> _levels = new();
     private readonly HashSet<ushort> _handOrLand = [];
+    private readonly HashSet<ushort> _gathererOnly = [];
     private readonly RunLog _runLog = new(null);
 
     public QuestControllerTests()
@@ -55,7 +56,8 @@ public class QuestControllerTests : IDisposable
             id => _chain.TryGetValue(id, out var n) ? n : null,
             id => _levels.TryGetValue(id, out var l) ? l : 0,
             _runLog, _log.Add,
-            needsHandOrLand: id => _handOrLand.Contains(id));
+            needsHandOrLand: id => _handOrLand.Contains(id),
+            needsGatherer: id => _gathererOnly.Contains(id));
     }
 
     public void Dispose()
@@ -208,6 +210,41 @@ public class QuestControllerTests : IDisposable
         Assert.True(_controller.Start(1622));
         Assert.Contains(_world.Calls, c => c == "Gearset 3");
         Assert.Contains(_log, m => m.Contains("Disciple of the Hand or Land"));
+    }
+
+    [Fact]
+    public void A_gatherer_only_quest_wants_a_gatherer_not_any_hand_or_land()
+    {
+        // The Qitari opener is "Disciple of the Land": offered to a warrior — or a crafter — the
+        // window says "not yet available" and only Decline works.
+        _world.SavedGearsets.AddRange([
+            new GearsetInfo(0, 34, 0, 100, JobKind.Combat),
+            new GearsetInfo(3, 9, 0, 90, JobKind.Crafter),   // a crafter is Hand-or-Land, not Land
+            new GearsetInfo(7, 16, 0, 85, JobKind.Gatherer),
+        ]);
+        _world.CurrentJobKind = JobKind.Combat;
+        _gathererOnly.Add(1622);
+        _levels[1622] = 70;
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+
+        Assert.True(_controller.Start(1622));
+        Assert.Contains(_world.Calls, c => c == "Gearset 7");
+        Assert.Contains(_log, m => m.Contains("Disciple of the Land"));
+    }
+
+    [Fact]
+    public void Without_a_gatherer_gearset_the_land_only_quest_stops_with_a_reason()
+    {
+        _world.SavedGearsets.AddRange([
+            new GearsetInfo(0, 34, 0, 100, JobKind.Combat),
+            new GearsetInfo(3, 9, 0, 90, JobKind.Crafter),
+        ]);
+        _world.CurrentJobKind = JobKind.Combat;
+        _gathererOnly.Add(1622);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+
+        Assert.False(_controller.Start(1622));
+        Assert.Contains("no gatherer gearset", _controller.StatusLine);
     }
 
     [Fact]

@@ -68,6 +68,7 @@ public sealed class QuestController
     private readonly Func<ushort, int> _questLevel;
     private readonly Func<ushort, bool> _needsHandOrLand;
     private readonly Func<ushort, bool> _needsCombat;
+    private readonly Func<ushort, bool> _needsGatherer;
     /// <summary>What a craft consumes — lets a purchase see whether anything downstream still needs it.</summary>
     private readonly PurchasePlan.IngredientsOf _ingredientsOf;
     private readonly IStepLog _stepLog;
@@ -121,10 +122,12 @@ public sealed class QuestController
         IQuestStateReader quests, PathStore paths, StepExecutor executor,
         IStepWorld world, IConditionWorld conditions, IRunPolicy policy,
         Func<ushort, ushort?> nextQuest, Func<ushort, int> questLevel, IStepLog stepLog, Action<string> log,
-        PurchasePlan.IngredientsOf? ingredientsOf = null, Func<ushort, bool>? needsHandOrLand = null, Func<ushort, bool>? needsCombat = null)
+        PurchasePlan.IngredientsOf? ingredientsOf = null, Func<ushort, bool>? needsHandOrLand = null, Func<ushort, bool>? needsCombat = null,
+        Func<ushort, bool>? needsGatherer = null)
     {
         _needsHandOrLand = needsHandOrLand ?? (_ => false);
         _needsCombat = needsCombat ?? (_ => false);
+        _needsGatherer = needsGatherer ?? (_ => false);
         _ingredientsOf = ingredientsOf ?? (_ => []);
         _quests = quests;
         _paths = paths;
@@ -325,13 +328,46 @@ public sealed class QuestController
             AwaitJob(JobKind.Combat, best.Id);
         }
 
+        // And the narrow one: a quest only a Disciple of the Land may take — the Qitari opener,
+        // offered to a warrior with "not yet available" — needs a gatherer, not any Hand-or-Land.
+        if (_needsGatherer(questId) && !_quests.IsAccepted(questId)
+            && _world.CurrentJobKind != JobKind.Gatherer)
+        {
+            GearsetInfo? best = null;
+            foreach (var set in _world.Gearsets())
+                if (set.Kind == JobKind.Gatherer && (best is null || set.Level > best.Level))
+                    best = set;
+            var needed = _questLevel(questId);
+            if (best is null)
+            {
+                Stop();
+                StatusLine = $"{path.Name} can only be taken as a Disciple of the Land, and there is no " +
+                             "gatherer gearset to switch to. Save one, then Start.";
+                _log(StatusLine);
+                return false;
+            }
+            if (needed > 0 && best.Level < needed)
+            {
+                Stop();
+                StatusLine = $"{path.Name} needs a Disciple of the Land at level {needed}; your highest " +
+                             $"gatherer gearset is level {best.Level}. Level up, then Start.";
+                _log(StatusLine);
+                return false;
+            }
+            _log($"{path.Name} can only be taken as a Disciple of the Land — switching to gearset {best.Id} "
+                 + $"(class {best.ClassJobId}, level {best.Level}).");
+            _world.EquipGearset(best.Id);
+            AwaitJob(JobKind.Gatherer, best.Id);
+        }
+
         // The level gate: a quest the character cannot accept yet is a stop with a reason, not a
         // walk to an NPC who will not talk. (QuestFlow does the same.)
-        // Not for a Hand-or-Land quest: the level that counts there is the crafter's, checked
-        // above against the gearset, and PlayerLevel still reads whatever we were standing there as.
+        // Not for a Hand-or-Land or Land-only quest: the level that counts there is the crafter's
+        // or gatherer's, checked above against the gearset, and PlayerLevel still reads whatever
+        // we were standing there as.
         var required = _questLevel(questId);
         var have = _world.PlayerLevel;
-        if (!handOrLand && required > 0 && have > 0 && required > have && !_quests.IsAccepted(questId))
+        if (!handOrLand && !_needsGatherer(questId) && required > 0 && have > 0 && required > have && !_quests.IsAccepted(questId))
         {
             Stop();
             StatusLine = $"{path.Name} needs level {required}; you are {have}. Level up, then Start.";
