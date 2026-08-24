@@ -294,8 +294,11 @@ public sealed class QuestController
         if (_needsCombat(questId) && !_quests.IsAccepted(questId)
             && _world.CurrentJobKind is JobKind.Crafter or JobKind.Gatherer)
         {
-            var sets = _world.CombatGearsets();
-            if (sets.Count == 0)
+            GearsetInfo? best = null;
+            foreach (var set in _world.Gearsets())
+                if (set.Kind == JobKind.Combat && (best is null || set.Level > best.Level))
+                    best = set;
+            if (best is null)
             {
                 Stop();
                 StatusLine = $"{path.Name} can only be taken as a Disciple of War or Magic, and there is no " +
@@ -303,8 +306,9 @@ public sealed class QuestController
                 _log(StatusLine);
                 return false;
             }
-            _log($"{path.Name} can only be taken as a Disciple of War or Magic — switching to gearset {sets[0]}.");
-            _world.EquipGearset(sets[0]);
+            _log($"{path.Name} can only be taken as a Disciple of War or Magic — switching to gearset {best.Id} "
+                 + $"(class {best.ClassJobId}, level {best.Level}).");
+            _world.EquipGearset(best.Id);
         }
 
         // The level gate: a quest the character cannot accept yet is a stop with a reason, not a
