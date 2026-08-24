@@ -233,6 +233,20 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public uint? AetheryteTerritory(uint aetheryteId) => _aetherytes.TerritoryOf(aetheryteId);
 
+    public Vector3? AetherytePosition(uint aetheryteId) => _aetherytes.PositionOf(aetheryteId);
+
+    public uint? NearestAttunedAetheryte(uint territoryId, Vector3 near, float maxDistance)
+    {
+        foreach (var id in _aetherytes.InTerritory(territoryId, near))
+        {
+            if (_aetherytes.PositionOf(id) is not { } at || Vector3.Distance(at, near) > maxDistance)
+                continue;
+            if (Attuned([id]) is not null)
+                return id;
+        }
+        return null;
+    }
+
     /// <summary>
     /// A teleport straight into the zone, else a hop across the city aethernet, else nothing.
     ///

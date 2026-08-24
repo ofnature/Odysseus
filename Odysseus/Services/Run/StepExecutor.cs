@@ -918,6 +918,24 @@ public sealed class StepExecutor
     {
         var step = _step!;
 
+        // Same zone, no shortcut, and the mark a long ride away with an attuned aetheryte
+        // standing near it: the crystal beats even the flight. Only when it wins by a clear
+        // margin — a teleport is a cast and a loading screen.
+        if (_world.TerritoryId == step.TerritoryId && !IsPlaceless(step.Kind) && !_skipTeleport
+            && step.Position is { } sameZoneGoal
+            && Vector3.Distance(_world.PlayerPosition, sameZoneGoal) is var wayOff
+            && wayOff > TeleportWorthDistance
+            && _world.NearestAttunedAetheryte(step.TerritoryId, sameZoneGoal, 200f) is { } nearId
+            && _world.AetherytePosition(nearId) is { } nearAt
+            && Vector3.Distance(nearAt, sameZoneGoal) + 200f < wayOff)
+        {
+            _world.Log($"The mark is {wayOff:F0}y away and an attuned aetheryte stands "
+                + $"{Vector3.Distance(nearAt, sameZoneGoal):F0}y from it — teleporting there instead.");
+            _teleportTarget = nearId;
+            _teleportTerritory = step.TerritoryId;
+            return Phase.Teleport;
+        }
+
         if (step.TerritoryId == 0 || _world.TerritoryId == step.TerritoryId || IsPlaceless(step.Kind))
             return NextAfterTeleport();
 

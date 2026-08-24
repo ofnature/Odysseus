@@ -176,6 +176,12 @@ public interface IStepWorld
     /// <summary>Aetheryte id for a name as the path data spells it, or null when unknown.</summary>
     uint? ResolveAetheryte(string name);
 
+    /// <summary>The attuned aetheryte nearest <paramref name="near"/>, within <paramref name="maxDistance"/> of it, or null.</summary>
+    uint? NearestAttunedAetheryte(uint territoryId, Vector3 near, float maxDistance);
+
+    /// <summary>Where the aetheryte stands, when the sheets place it.</summary>
+    Vector3? AetherytePosition(uint aetheryteId);
+
     /// <summary>The zone an aetheryte stands in.</summary>
     uint? AetheryteTerritory(uint aetheryteId);
 

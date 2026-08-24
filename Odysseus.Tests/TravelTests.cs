@@ -447,6 +447,34 @@ public class TravelExecutorTests
     }
 
     [Fact]
+    public void A_far_mark_with_an_attuned_aetheryte_beside_it_teleports_in_zone()
+    {
+        // Thavnair: the accept NPC stood 340y off with a crystal right beside them — the
+        // crystal beats even the flight. The rung wants a clear win: mark far, aetheryte near.
+        var w = World();
+        w.TerritoryId = 957;
+        w.PlayerPosition = Vector3.Zero;
+        var mark = new Vector3(800, 0, 0);
+        w.AttunedAetherytesAt[130] = (957u, new Vector3(780, 0, 10));
+        w.AetheryteTerritories[130] = 957;
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 99, TerritoryId = 957, Position = mark });
+
+        for (var i = 0; i < 6 && !w.Calls.Any(c => c.StartsWith("Teleport")); i++) Ticks(ex, w, 1);
+        Assert.Contains("Teleport 130", w.Calls);
+
+        // Near the mark already: no teleport, however close the crystal.
+        var near = World();
+        near.TerritoryId = 957;
+        near.PlayerPosition = new Vector3(700, 0, 0);
+        near.AttunedAetherytesAt[130] = (957u, new Vector3(780, 0, 10));
+        var ex2 = new StepExecutor(near);
+        ex2.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 99, TerritoryId = 957, Position = mark });
+        for (var i = 0; i < 4 && !near.Calls.Any(c => c.StartsWith("Move")); i++) Ticks(ex2, near, 1);
+        Assert.DoesNotContain(near.Calls, c => c.StartsWith("Teleport"));
+    }
+
+    [Fact]
     public void Refused_teleport_asks_again_before_faulting_with_the_lifestream_hint()
     {
         // The Qitari opener's gearset change refused the very next cast: the action lock was

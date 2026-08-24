@@ -283,6 +283,9 @@ public sealed class AetheryteCatalog
         return _byName.TryGetValue(canon, out id) ? id : null;
     }
 
+    public System.Numerics.Vector3? PositionOf(uint aetheryteId)
+        => _byId.TryGetValue(aetheryteId, out var v) ? v.Position : null;
+
     public uint? TerritoryOf(uint aetheryteId)
         => _byId.TryGetValue(aetheryteId, out var v) ? v.TerritoryId : null;
 

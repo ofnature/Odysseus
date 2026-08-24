@@ -179,6 +179,21 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool ArriveOnTeleport { get; set; } = true;
     public uint? ResolveAetheryte(string name) => Aetherytes.TryGetValue(name, out var id) ? id : null;
     public uint? AetheryteTerritory(uint aetheryteId) => AetheryteTerritories.TryGetValue(aetheryteId, out var t) ? t : null;
+    /// <summary>Attuned aetherytes with a spot in the world: id → (territory, position).</summary>
+    public Dictionary<uint, (uint Territory, Vector3 Position)> AttunedAetherytesAt { get; } = new();
+    public Vector3? AetherytePosition(uint aetheryteId)
+        => AttunedAetherytesAt.TryGetValue(aetheryteId, out var v) ? v.Position : null;
+    public uint? NearestAttunedAetheryte(uint territoryId, Vector3 near, float maxDistance)
+    {
+        (uint Id, float D)? best = null;
+        foreach (var (id, v) in AttunedAetherytesAt)
+        {
+            if (v.Territory != territoryId) continue;
+            var d = Vector3.Distance(v.Position, near);
+            if (d <= maxDistance && (best is null || d < best.Value.D)) best = (id, d);
+        }
+        return best?.Id;
+    }
     /// <summary>Territory → an aetheryte in it the character has attuned. Absent means no way in.</summary>
     public Dictionary<uint, uint> AttunedByTerritory { get; } = new();
     /// <summary>Territory → the aethernet hop that reaches it, for a zone with no aetheryte of its own.</summary>
