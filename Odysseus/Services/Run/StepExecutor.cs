@@ -2012,6 +2012,8 @@ public sealed class StepExecutor
             {
                 _world.Log($"Ended {distance:F1}y short of the mark {Fmt(target)} and can get no closer — near enough for a waypoint. "
                     + $"(standing at {Fmt(_world.PlayerPosition)}, {(_world.IsInFlight ? "in flight" : _world.IsMounted ? "mounted" : "on foot")})");
+                if (_frozenStops > 0)
+                    _wedgeMemory[WedgeKey(target)] = !_lastIssuedFly;
                 _world.StopMoving();
                 Enter(Phase.WaitReady);
                 return;
@@ -2023,6 +2025,8 @@ public sealed class StepExecutor
             if (step.DataId is not null && detour is null && distance <= 10f)
             {
                 _world.Log($"The move gave up {distance:F1}y from the mark — handing the last stretch to the interact.");
+                if (_frozenStops > 0)
+                    _wedgeMemory[WedgeKey(target)] = !_lastIssuedFly;
                 _world.StopMoving();
                 Enter(Phase.WaitReady);
                 return;
