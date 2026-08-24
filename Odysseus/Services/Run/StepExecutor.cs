@@ -73,6 +73,15 @@ public sealed class StepExecutor
     /// </summary>
     public const float TeleportWorthDistance = 250f;
 
+    /// <summary>
+    /// A leg longer than this flies even when the path says walk. Mnemosyne's calibrated
+    /// planner speeds — 6 y/s on the ground, 20 in the air — put the break-even far lower;
+    /// this saves fourteen seconds or more, enough to be worth a take-off and a landing.
+    /// </summary>
+    public const float FlyWorthDistance = 120f;
+    private const float WalkSpeed = 6f;
+    private const float AirSpeed = 20f;
+
     /// <summary>How often a refused teleport is asked again, and for how long before faulting.</summary>
     private static readonly TimeSpan TeleportRetryEvery = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan TeleportGiveUp = TimeSpan.FromSeconds(12);
@@ -291,6 +300,9 @@ public sealed class StepExecutor
     private bool _lastIssuedFly;
     private bool _wedgeFly;
 
+    /// <summary>The leg is long enough that flying beats the authored walk. Sticky per step.</summary>
+    private bool _farFly;
+
     /// <summary>The over-the-top escape has been spent for this step.</summary>
     private bool _overTop;
     private int _frozenStops;
@@ -440,6 +452,7 @@ public sealed class StepExecutor
         _lastIssuedFly = false;
         _wedgeFly = false;
         _overTop = false;
+        _farFly = false;
         _frozenStops = 0;
         _inFight = false;
         _fights = 0;
@@ -1787,9 +1800,25 @@ public sealed class StepExecutor
             return;
         }
 
+        // A long leg flies even when the path says walk: the straight line is a floor on the
+        // walked distance, and the air is over three times the speed. Sticky once taken, so a
+        // shrinking distance does not land the flight short of the mark.
+        if (!_farFly && !step.Fly && detour is null && distance > FlyWorthDistance
+            && _world.CanFlyHere && !_groundOnly && !_groundFallback && !_combatLanded)
+        {
+            _farFly = true;
+            _world.Log($"The leg to {Fmt(target)} is {distance:F0}y — about {distance / WalkSpeed:F0}s walking, "
+                + $"{distance / AirSpeed:F0}s flying — taking the air.");
+            if (!_world.IsMounted)
+            {
+                Enter(Phase.Mount);
+                return;
+            }
+        }
+
         // While diving, every move is a volume move — the ground mesh has nothing down here.
         // A flown detour (the ledge escape) flies regardless of what the step says.
-        var fly = ((step.Fly || _wedgeFly) && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback)
+        var fly = ((step.Fly || _wedgeFly || _farFly) && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback)
                   || _world.IsDiving
                   || (_detourFly && detour is not null);
         _lastIssuedFly = fly;

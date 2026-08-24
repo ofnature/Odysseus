@@ -895,6 +895,34 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_long_walk_in_a_flyable_zone_takes_the_air_instead()
+    {
+        // Thavnair: 340y of authored walking at 6 y/s is nearly a minute; the air does it in
+        // seventeen seconds. The straight line is a floor on the walked distance, so past the
+        // threshold the leg mounts and flies without being asked.
+        var mark = new Vector3(387, 13, -311);
+        var world = new FakeStepWorld { TerritoryId = 957, CanFlyHere = true };
+        world.PlayerPosition = new Vector3(50, 13, -300);
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 957, Position = mark });
+
+        for (var i = 0; i < 12 && !world.Calls.Any(c => c.StartsWith("Move ") && c.Contains("fly=True")); i++)
+        { ex.Tick(); world.Advance(0.5); }
+
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("taking the air"));
+        Assert.Contains("Mount", world.Calls);
+        Assert.Contains(world.Calls, c => c.StartsWith("Move ") && c.Contains("fly=True"));
+
+        // A short hop keeps the authored walk.
+        var near = new FakeStepWorld { TerritoryId = 957, CanFlyHere = true };
+        near.PlayerPosition = new Vector3(380, 13, -300);
+        var ex2 = new StepExecutor(near);
+        ex2.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 957, Position = mark });
+        for (var i = 0; i < 6 && !near.Calls.Any(c => c.StartsWith("Move ")); i++) { ex2.Tick(); near.Advance(0.5); }
+        Assert.DoesNotContain(near.Calls, c => c.StartsWith("Log") && c.Contains("taking the air"));
+    }
+
+    [Fact]
     public void The_move_budget_measures_progress_not_wall_time()
     {
         // Thavnair's crossing was killed at 180s with two thirds of it done and the character
