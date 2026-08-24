@@ -338,6 +338,14 @@ public sealed class StepExecutor
     private int _fights;
     private DateTime _lastCombatSeen;
     private bool _skipTeleport;
+
+    /// <summary>
+    /// Gathering Odysseus does itself, when one is wired in and switched on — quest Gather
+    /// steps prefer it over the GatherBuddy handoff, which needs the item on an auto-gather
+    /// list the user must maintain by hand. Null (release builds today) changes nothing.
+    /// </summary>
+    public Services.Gathering.IOwnGatherer? OwnGatherer { get; set; }
+    private bool _ownGatherAsked;
     private DateTime _lastTeleportTry;
     /// <summary>The instance this step hands off has been run; arriving again means finish, not re-enter.</summary>
     private bool _handoffDone;
@@ -395,6 +403,7 @@ public sealed class StepExecutor
         _aethernetTerritory = 0;
         _aethernetRetries = 0;
         _makeAsked = false;
+        _ownGatherAsked = false;
         _craftAsked = 0;
         _craftHeldAtAsk = 0;
         _stepStart = _world.UtcNow;
@@ -455,6 +464,11 @@ public sealed class StepExecutor
         {
             if (running.Kind == StepKind.Craft && _craftAsked != 0) _world.StopCrafting();
             if (running.Kind == StepKind.Gather) _world.StopGathering();
+        }
+        if (_ownGatherAsked)
+        {
+            OwnGatherer?.Stop();
+            _ownGatherAsked = false;
         }
         _world.ReleaseDialogue();
         _step = null;
@@ -2191,6 +2205,37 @@ public sealed class StepExecutor
             Fail($"item {outstanding.ItemId} is a quest-only gathering item — no plugin can fetch it. " +
                  "Gather it yourself, then Retry");
             return;
+        }
+
+        // Our own gathering first, when it is wired in, switched on, and knows the item: the
+        // GatherBuddy handoff needs the item hand-kept on an auto-gather list, which is the
+        // failure it kept ending in. Bench modes (probe, dry-run) leave quest steps alone.
+        var own = OwnGatherer;
+        if (own is not null && own.Enabled && !own.ProbeOnly && !own.DryRun
+            && (_ownGatherAsked || own.CanGather(outstanding.ItemId)))
+        {
+            if (!_ownGatherAsked)
+            {
+                var remaining = outstanding.ItemCount - _world.ItemCount(outstanding.ItemId);
+                if (own.Start(outstanding.ItemId, remaining, 0))
+                {
+                    _ownGatherAsked = true;
+                    _world.Log($"Gathering {remaining} × item {outstanding.ItemId} ourselves.");
+                }
+            }
+            if (_ownGatherAsked)
+            {
+                own.Tick();
+                if (own.Faulted)
+                {
+                    _ownGatherAsked = false;
+                    Fail($"gathering item {outstanding.ItemId} gave up: {own.Status}");
+                    return;
+                }
+                if (!own.Busy)
+                    _ownGatherAsked = false; // finished this ask; the count check above judges it
+                return;
+            }
         }
 
         if (!_world.GathererReady)

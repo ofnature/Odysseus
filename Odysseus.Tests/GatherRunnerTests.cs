@@ -86,6 +86,9 @@ public class GatherRunnerTests
         /// <summary>The window stays up after the last collect, as a real node's does.</summary>
         public bool HoldWindowOpen { get; set; }
 
+        /// <summary>A regular node: rows gather directly and no collectable window ever opens.</summary>
+        public bool PlainNode { get; set; }
+
         public bool TryInteractWithDataId(uint dataId)
         {
             if (!Spawned.Contains(dataId)) return false;
@@ -93,7 +96,7 @@ public class GatherRunnerTests
             NodeOpen = true;
             _openedAt = UtcNow;
             // Only once the list has had time to appear, as the real one does.
-            if (WindowDelay == TimeSpan.Zero)
+            if (!PlainNode && WindowDelay == TimeSpan.Zero)
                 Collectable = new CollectableState(0, 600, Integrity, 800, false, 0, ScourYield, MeticulousYield);
             return true;
         }
@@ -104,6 +107,13 @@ public class GatherRunnerTests
         {
             if (!ItemListOpen) return false;
             SlotPicks++;
+            if (PlainNode)
+            {
+                Held++;
+                Integrity--;
+                if (Integrity <= 0) { NodeOpen = false; Spawned.Clear(); }
+                return true;
+            }
             Collectable = new CollectableState(0, 600, Integrity, 800, false, 0, ScourYield, MeticulousYield);
             return true;
         }
@@ -187,6 +197,26 @@ public class GatherRunnerTests
         Assert.Equal(22185u, world.Actions[0]);
         Assert.Contains(22184u, world.Actions);
         Assert.Contains(240u, world.Actions);
+    }
+
+    [Fact]
+    public void A_plain_item_is_gathered_by_pressing_its_row_with_no_collectable_window()
+    {
+        // Quest gathers: Sweet Marjoram wants three of a plain item. Each press of the row is
+        // one in the bag, and waiting for a collectable window that never comes must not send
+        // the run away from a working node.
+        var target = Target(new Vector3(10, 0, 10));
+        var (runner, world) = Ready(target);
+        world.PlainNode = true;
+        world.Integrity = 5;
+        runner.Begin(target, count: 3, minimumCollectability: 0);
+        Run(runner, world);
+
+        Assert.Equal(GatherRunState.Done, runner.State);
+        Assert.Equal(3, world.Held);
+        Assert.Equal(3, world.SlotPicks);
+        Assert.Empty(world.Actions);   // no rotation on a plain node
+        Assert.DoesNotContain(world.Log, m => m.Contains("collectable window did not open"));
     }
 
     [Fact]

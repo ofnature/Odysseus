@@ -576,6 +576,25 @@ public sealed class GatherRunner
             return;
         }
 
+        // A plain item: each press of its row gathers one, and no collectable window will
+        // ever open. Keep pressing while the list stands and the count is short; the node
+        // closes itself when its attempts are spent, and the outer check closes up when the
+        // bag holds enough.
+        if (_collectability <= 0)
+        {
+            if (_world.ExecutingAction || _world.UtcNow - _lastAction < ActionGap)
+                return;
+            _lastAction = _world.UtcNow;
+            if (_world.SelectSlotFor(_itemId))
+                Status = $"Node {_currentNode}: {Gathered} of {_wanted} gathered.";
+            else
+            {
+                _world.CloseNode();
+                NextSpot($"has no item {_itemId} to gather");
+            }
+            return;
+        }
+
         // Already asked for the row: the collectable window is what says whether it took.
         if (_slotChosenAt != default)
         {

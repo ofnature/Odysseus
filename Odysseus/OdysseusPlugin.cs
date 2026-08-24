@@ -146,7 +146,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "runlog.jsonl"),
             message => Warn(message));
         _frontier = new StoryFrontier(_quests, _catalog, () => _config.PreferredGrandCompany);
-        _controller = new QuestController(_quests, _pathStore, new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), _world, _world, _config,
+        var questExecutor = new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap);
+        _controller = new QuestController(_quests, _pathStore, questExecutor, _world, _world, _config,
             _frontier.Next,
             id => _catalog.ById(id)?.ClassJobLevel ?? 0,
             _runLog, message => Say(message),
@@ -250,6 +251,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 Services.Gathering.NodeAtlas.PathBeside(PluginInterface.AssemblyLocation.DirectoryName),
                 message => Warn(message)),
             message => Say(message));
+        questExecutor.OwnGatherer = _ownGatherer;
 #endif
 
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(

@@ -406,6 +406,79 @@ public class CraftGatherStepTests
         Assert.Contains("StopGather", world.Calls);
     }
 
+    private sealed class FakeOwnGatherer : Odysseus.Services.Gathering.IOwnGatherer
+    {
+        public bool Enabled { get; set; } = true;
+        public bool CanGatherAnswer { get; set; } = true;
+        public bool CanGather(uint itemId) => Enabled && CanGatherAnswer;
+        public List<(uint Item, int Count)> Starts { get; } = [];
+        public int TicksSeen { get; private set; }
+        public int TicksUntilDone { get; set; } = 3;
+        public Action? OnDone { get; set; }
+        public bool Start(uint itemId, int count, int collectability) { Starts.Add((itemId, count)); Busy = true; return Enabled; }
+        public void Tick()
+        {
+            TicksSeen++;
+            if (Busy && TicksSeen >= TicksUntilDone) { Busy = false; OnDone?.Invoke(); }
+        }
+        public bool Busy { get; private set; }
+        public bool Faulted { get; set; }
+        public string Status { get; set; } = "";
+        public bool DryRun { get; set; }
+        public bool ProbeOnly { get; set; }
+        public int Stopped { get; private set; }
+        public void Stop() { Stopped++; Busy = false; }
+    }
+
+    [Fact]
+    public void A_wired_own_gatherer_takes_the_quest_gather_instead_of_GatherBuddy()
+    {
+        // The Stewards of Note's gather ended in "check it is on one of its auto-gather lists";
+        // with our own gathering wired in and on, GatherBuddy is never asked.
+        var world = new FakeStepWorld { GathererReady = true };
+        var own = new FakeOwnGatherer();
+        own.OnDone = () => world.Bag[Ore] = 5;
+        var ex = new StepExecutor(world) { OwnGatherer = own };
+        ex.Begin(Gather(new GatherTarget(Ore, 5)));
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Equal((Ore, 5), Assert.Single(own.Starts));
+        Assert.DoesNotContain("StartGather", world.Calls);
+    }
+
+    [Fact]
+    public void Bench_modes_and_off_leave_the_quest_gather_to_GatherBuddy()
+    {
+        foreach (var own in new[]
+        {
+            new FakeOwnGatherer { Enabled = false },
+            new FakeOwnGatherer { ProbeOnly = true },
+            new FakeOwnGatherer { DryRun = true },
+            new FakeOwnGatherer { CanGatherAnswer = false },
+        })
+        {
+            var world = new FakeStepWorld { GathererReady = true };
+            var ex = new StepExecutor(world) { OwnGatherer = own };
+            ex.Begin(Gather(new GatherTarget(Ore, 5)));
+            for (var i = 0; i < 4 && !world.Calls.Contains("StartGather"); i++) { ex.Tick(); world.Advance(0.5); }
+            Assert.Empty(own.Starts);
+            Assert.Contains("StartGather", world.Calls);
+        }
+    }
+
+    [Fact]
+    public void An_own_gather_that_gives_up_faults_with_its_reason()
+    {
+        var world = new FakeStepWorld { GathererReady = true };
+        var own = new FakeOwnGatherer { Status = "no live node reachable" };
+        own.OnDone = () => own.Faulted = true;
+        var ex = new StepExecutor(world) { OwnGatherer = own };
+        ex.Begin(Gather(new GatherTarget(Ore, 5)));
+
+        Assert.Equal(StepStatus.Failed, Run(ex, world));
+        Assert.Contains("no live node reachable", ex.FailReason);
+    }
+
     [Fact]
     public void Gather_without_GatherBuddy_stops_and_says_so()
     {
