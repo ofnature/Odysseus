@@ -428,11 +428,13 @@ public class StepExecutorTests
         var ex = new StepExecutor(world);
         ex.Begin(new QuestStep { Kind = StepKind.Combat, KindName = "Combat", Fly = true, EnemySpawnType = EnemySpawnType.AutoOnEnterArea, KillEnemyDataIds = [7601], TerritoryId = 614, Position = new Vector3(721, 117, -60) });
 
-        // The first move claims motion forever; the position never changes.
+        // The first move claims motion forever; the position never changes. The ladder climbs
+        // over the mark first; when the climb wedges too, the ground gets its turn.
         for (var i = 0; i < 6 && !world.Calls.Any(c => c.StartsWith("Move ")); i++) { ex.Tick(); world.Advance(0.5); }
         world.IsMoving = true;
-        for (var i = 0; i < 40 && !world.Calls.Any(c => c.StartsWith("Log") && c.Contains("Moving without moving")); i++)
+        for (var i = 0; i < 80 && !world.Calls.Any(c => c.StartsWith("Log") && c.Contains("trying this leg on the ground")); i++)
         { ex.Tick(); world.IsMoving = true; world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("climbing over"));
         Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("trying this leg on the ground"));
         Assert.Contains("Stop", world.Calls);
 
@@ -870,6 +872,23 @@ public class StepExecutorTests
 
         Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("flying this leg"));
         Assert.DoesNotContain(world.Calls, c => c.StartsWith("Log") && c.Contains("near enough for a waypoint"));
+
+        // The flight presses into the same wall with wings out — the escape climbs over the
+        // mark instead of landing back into the wedge or giving the ground another turn.
+        world.IsMounted = true; world.IsInFlight = true; world.IsMoving = false;
+        for (var i = 0; i < 10 && !world.Calls.Any(c => c.StartsWith("Move ") && c.Contains("fly=True")); i++)
+        { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Move ") && c.Contains("fly=True"));
+        for (var i = 0; i < 60 && ex.Status == StepStatus.Running
+             && !world.Calls.Any(c => c.StartsWith("Log") && c.Contains("climbing over")); i++)
+        { ex.Tick(); world.IsMoving = true; world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("climbing over"));
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Log") && c.Contains("landing to finish on foot"));
+        // The climb is a fly move to a point above the mark, issued once the stop takes.
+        world.IsMoving = false;
+        for (var i = 0; i < 10 && !world.Calls.Any(c => c.StartsWith("Move 169,0,-482")); i++)
+        { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Move 169,0,-482") && c.Contains("fly=True"));
     }
 
     [Fact]

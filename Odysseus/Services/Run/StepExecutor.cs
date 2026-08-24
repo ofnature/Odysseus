@@ -81,6 +81,9 @@ public sealed class StepExecutor
     /// <summary>Close enough to a combat mark to land and finish the approach on foot.</summary>
     private const float CombatLandRadius = 15f;
 
+    /// <summary>How high over a wedged mark the over-the-top escape climbs before descending.</summary>
+    private const float OverTopClimb = 20f;
+
     /// <summary>How far above an object a flight may end and still count as arrived — the dismount descends the rest.</summary>
     private const float HoverAboveObject = 10f;
 
@@ -283,6 +286,9 @@ public sealed class StepExecutor
     private bool _groundFallback;
     private bool _lastIssuedFly;
     private bool _wedgeFly;
+
+    /// <summary>The over-the-top escape has been spent for this step.</summary>
+    private bool _overTop;
     private int _frozenStops;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
@@ -415,6 +421,7 @@ public sealed class StepExecutor
         _groundFallback = false;
         _lastIssuedFly = false;
         _wedgeFly = false;
+        _overTop = false;
         _frozenStops = 0;
         _inFight = false;
         _fights = 0;
@@ -1640,9 +1647,33 @@ public sealed class StepExecutor
                          + $"nowhere toward {Fmt(target)}. vnavmesh cannot serve this spot; the step's mark may need moving.");
                     return;
                 }
+                if (_lastIssuedFly && !_overTop && detour is null && _world.CanFlyHere)
+                {
+                    // A flight to a mark a few yalms away at ground level just presses into the
+                    // same wall with wings out. The obstruction is crossed from above: climb to a
+                    // point over the mark, and the hover rule lands vertically onto it.
+                    _overTop = true;
+                    _world.Log($"The flight is wedged at {Fmt(_world.PlayerPosition)} — climbing over to come down on {Fmt(target)} from above.");
+                    _world.StopMoving();
+                    _detourTo = target + new Vector3(0, OverTopClimb, 0);
+                    _detourThen = Phase.Move;
+                    _detourTolerance = 2f;
+                    _detourNudged = false;
+                    _detourNeedsShard = false;
+                    _detourFly = true;
+                    _frozenSince = now;
+                    Enter(Phase.Move);
+                    return;
+                }
                 if (_lastIssuedFly && !_groundFallback)
                 {
                     _groundFallback = true;
+                    if (_overTop && detour is not null && _detourFly)
+                    {
+                        // The climb detour is an air point; the ground retry goes to the mark.
+                        _detourTo = null;
+                        _detourFly = false;
+                    }
                     _world.Log($"The flight is wedged at {Fmt(_world.PlayerPosition)} — trying this leg on the ground.");
                 }
                 else if (!_lastIssuedFly && !_wedgeFly && _world.CanFlyHere && !_groundOnly)
@@ -1771,7 +1802,7 @@ public sealed class StepExecutor
             // Giving up while still in the air is premature: a hover is fat and snags on lips
             // and rings a walker slips past — Clutch and Kin's ring sat 2.9y away, level, for
             // ten minutes of hover. Land once and run the attempts again on foot.
-            if (_world.IsInFlight && !_landedToFinish && distance <= OffMeshDirectMax)
+            if (_world.IsInFlight && !_landedToFinish && detour is null && distance <= OffMeshDirectMax)
             {
                 // Only within the last stretch: landing fifty yalms out just trades a flight
                 // problem for a longer ground one — it did, on Kurobana's hill.
