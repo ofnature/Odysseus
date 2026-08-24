@@ -365,6 +365,7 @@ public sealed class StepExecutor
     /// </summary>
     private readonly Dictionary<(uint Territory, int X, int Y, int Z), bool> _wedgeMemory = new();
     private bool _wedgeMemoryUsed;
+    private int _stallJumps;
 
     private (uint, int, int, int) WedgeKey(Vector3 target)
         => (_world.TerritoryId, (int)MathF.Round(target.X / 8f), (int)MathF.Round(target.Y / 8f), (int)MathF.Round(target.Z / 8f));
@@ -696,6 +697,15 @@ public sealed class StepExecutor
             case Phase.Mount:
                 if (_world.IsMounted || now - _phaseStart > MountWait)
                 {
+                    if (!_world.IsMounted)
+                    {
+                        // The saddle never came — a quest section that forbids it, usually. The
+                        // fly intents die with it, or the leg presses fly-on-foot forever.
+                        _farFly = false;
+                        _wedgeFly = false;
+                        _flyFallback = false;
+                        _world.Log("The mount would not come — this leg stays on foot.");
+                    }
                     Enter(Phase.Move); // mounted, or long enough — walking is always an option
                     break;
                 }
@@ -1875,6 +1885,7 @@ public sealed class StepExecutor
             {
                 _closestSeen = distance;
                 _stalledSince = now;
+                _stallJumps = 0;
             }
             else if (now - _stalledSince > StallJumpAfter && now - _lastStallJump > StallJumpGap
                      && !(step.DataId is not null && distance <= 10f) && !_world.IsInFlight)
@@ -1885,6 +1896,18 @@ public sealed class StepExecutor
                 // mid-jump, and the hop was eating the very press that would finish the step.
                 _lastStallJump = now;
                 _stalledSince = now;
+                if (++_stallJumps >= 3)
+                {
+                    // Three hops and the distance still wobbles in place: hopping is not the
+                    // answer here. Stop and let the re-path ladder have it — the wobble defeats
+                    // the frozen detector's epsilon, so this is its way in.
+                    _stallJumps = 0;
+                    _moveRetries++;
+                    _world.Log($"Three hops gained nothing toward {Fmt(target)} ({distance:F1}y) — stopping and re-pathing.");
+                    _world.StopMoving();
+                    _lastMoveIssue = default;
+                    return;
+                }
                 _world.Log($"Not getting any closer to {Fmt(target)} ({distance:F1}y for {StallJumpAfter.TotalSeconds:F0}s) — jumping.");
                 _world.SendChatCommand("/generalaction Jump");
             }
@@ -3131,6 +3154,7 @@ public sealed class StepExecutor
             _bestMoveDistance = float.MaxValue;
             _lastMoveProgress = _world.UtcNow;
             _wedgeMemoryUsed = false;
+            _stallJumps = 0;
             _offMeshSnap = null;
             _offMeshNudged = false;
             _footingTaken = false;
