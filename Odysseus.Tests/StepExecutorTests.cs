@@ -991,6 +991,38 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void Waiting_for_an_npc_finishes_when_they_stand_on_their_spot()
+    {
+        // The Yedlihmad Hunt's escort: the NPC walks to (196,10,555) and the step holds
+        // until they stand there — then holds nothing else hostage.
+        var spot = new Vector3(196, 10, 555);
+        var world = new FakeStepWorld { TerritoryId = 957 };
+        world.PlayerPosition = spot;
+        world.Spawned.Add(1041390);
+        world.Positions[1041390] = new Vector3(180, 10, 540);   // still walking
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.WaitForNpcAtPosition, KindName = "WaitForNpcAtPosition", DataId = 1041390, TerritoryId = 957, Position = spot });
+
+        for (var i = 0; i < 20 && ex.Status == StepStatus.Running; i++) { ex.Tick(); world.Advance(1); }
+        Assert.Equal(StepStatus.Running, ex.Status);   // they are not there yet
+
+        world.Positions[1041390] = spot;               // they arrive
+        for (var i = 0; i < 10 && ex.Status == StepStatus.Running; i++) { ex.Tick(); world.Advance(1); }
+        Assert.Equal(StepStatus.Done, ex.Status);
+
+        // An NPC that never comes is an honest fault, not a forever-wait.
+        var never = new FakeStepWorld { TerritoryId = 957 };
+        never.PlayerPosition = spot;
+        never.Spawned.Add(1041390);
+        never.Positions[1041390] = new Vector3(0, 0, 0);
+        var ex2 = new StepExecutor(never);
+        ex2.Begin(new QuestStep { Kind = StepKind.WaitForNpcAtPosition, KindName = "WaitForNpcAtPosition", DataId = 1041390, TerritoryId = 957, Position = spot });
+        for (var i = 0; i < 400 && ex2.Status == StepStatus.Running; i++) { ex2.Tick(); never.Advance(1); }
+        Assert.Equal(StepStatus.Failed, ex2.Status);
+        Assert.Contains("never reached", ex2.FailReason);
+    }
+
+    [Fact]
     public void A_dive_step_presses_the_descent_bind_until_the_water_accepts()
     {
         // Gyorin the Namazu: swim to the mark, then under. The press is the game's own bind.

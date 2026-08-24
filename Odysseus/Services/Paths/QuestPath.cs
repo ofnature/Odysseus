@@ -167,6 +167,9 @@ public sealed class QuestStep
     public uint TerritoryId { get; set; }
     public uint? TargetTerritoryId { get; set; }
     public float? StopDistance { get; set; }
+
+    /// <summary>How close the waited-for NPC must stand to <see cref="Position"/> before the step is done.</summary>
+    public float? NpcWaitDistance { get; set; }
     public bool Fly { get; set; }
     public bool? Mount { get; set; }
     public bool DisableNavmesh { get; set; }

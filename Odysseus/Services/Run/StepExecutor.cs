@@ -53,6 +53,8 @@ public sealed class StepExecutor
         EmoteUse,
         /// <summary>Pressing the descent key until the water accepts us.</summary>
         Dive,
+        /// <summary>Holding until the step's NPC stands at the position it is walking to.</summary>
+        NpcWait,
         /// <summary>Vendor interacted with, waiting for the shop window.</summary>
         Shop,
         /// <summary>Shop open: buy the shortfall and watch the bag until it is covered.</summary>
@@ -85,6 +87,9 @@ public sealed class StepExecutor
 
     /// <summary>How often a refused teleport is asked again, and for how long before faulting.</summary>
     private static readonly TimeSpan TeleportRetryEvery = TimeSpan.FromSeconds(2);
+
+    /// <summary>How long a waited-for NPC gets to walk to their spot.</summary>
+    private static readonly TimeSpan NpcWaitMax = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan TeleportGiveUp = TimeSpan.FromSeconds(12);
 
     /// <summary>How close "arrived" is when the step does not say. Interact range is ~7y; 3 keeps us clearly inside it.</summary>
@@ -539,6 +544,7 @@ public sealed class StepExecutor
         StepKind.WalkTo or StepKind.Interact or StepKind.AcceptQuest or StepKind.CompleteQuest or StepKind.Combat
         or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard or StepKind.AttuneAetherCurrent or StepKind.None
         or StepKind.SinglePlayerDuty or StepKind.Duty or StepKind.Emote or StepKind.Jump or StepKind.UseItem or StepKind.Say
+        or StepKind.WaitForNpcAtPosition
         or StepKind.EquipRecommended or StepKind.Action or StepKind.Instruction or StepKind.StatusOff
         or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Craft or StepKind.Gather
         or StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset or StepKind.Dive;
@@ -725,6 +731,26 @@ public sealed class StepExecutor
             case Phase.Dive:
                 TickDive(now);
                 break;
+
+            case Phase.NpcWait:
+            {
+                // An escort's beat: the NPC is walking to a spot, and the step is done when
+                // they stand on it. They walk at their own pace — the budget is generous, and
+                // cutscenes hold it like every other wait.
+                var wanted = step.NpcWaitDistance ?? 0.5f;
+                if (step.DataId is { } npc && step.Position is { } spot
+                    && _world.PositionOfDataId(npc) is { } npcAt
+                    && Vector3.Distance(npcAt, spot) <= wanted + ArrivalSlack)
+                {
+                    Enter(Phase.Finish);
+                    break;
+                }
+                HoldClockForCutscene(now);
+                if (now - _phaseStart > NpcWaitMax)
+                    Fail($"NPC {step.DataId} never reached {(step.Position is { } p2 ? Fmt(p2) : "its spot")} "
+                        + $"in {NpcWaitMax.TotalMinutes:F0} min");
+                break;
+            }
 
             case Phase.WaitReady:
                 // A WalkTo has nothing to press: arrival is completion, whatever window is up —
@@ -1178,6 +1204,9 @@ public sealed class StepExecutor
                 if (_world.IsDiving)
                     return Phase.Finish;
                 return Phase.Dive;
+
+            case StepKind.WaitForNpcAtPosition:
+                return Phase.NpcWait;
 
             case StepKind.Action:
                 if (step.ActionName is not { } actionName || _world.ResolveAction(actionName) is not { } _)
