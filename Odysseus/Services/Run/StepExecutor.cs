@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Odysseus.Services.Paths;
 
@@ -350,6 +351,18 @@ public sealed class StepExecutor
     private int _fights;
     private DateTime _lastCombatSeen;
     private bool _skipTeleport;
+
+    /// <summary>
+    /// Which way past a wedge worked, by the mark it was reached at: true when the ground
+    /// carried it, false when the air did. Yedlihmad's doorway cost a minute of climbing
+    /// against the roof on every one of three visits; the second visit should know better.
+    /// Instance-lived: a run's executor persists across its quests.
+    /// </summary>
+    private readonly Dictionary<(uint Territory, int X, int Y, int Z), bool> _wedgeMemory = new();
+    private bool _wedgeMemoryUsed;
+
+    private (uint, int, int, int) WedgeKey(Vector3 target)
+        => (_world.TerritoryId, (int)MathF.Round(target.X / 8f), (int)MathF.Round(target.Y / 8f), (int)MathF.Round(target.Z / 8f));
 
     /// <summary>
     /// The last AI state we commanded, so transitions send one chat command, not one per tick.
@@ -1680,6 +1693,10 @@ public sealed class StepExecutor
         if (arrived)
         {
             _world.StopMoving();
+            // A leg that wedged and still arrived teaches the next visit which way works.
+            if (detour is null && _frozenStops > 0)
+                _wedgeMemory[WedgeKey(target)] = !_lastIssuedFly;
+
             var next = detour is null ? Phase.WaitReady : _detourThen;
             _detourTo = null;
             _detourNudged = false;
@@ -1748,7 +1765,24 @@ public sealed class StepExecutor
                          + $"nowhere toward {Fmt(target)}. vnavmesh cannot serve this spot; the step's mark may need moving.");
                     return;
                 }
-                if (_lastIssuedFly && !_overTop && detour is null && _world.CanFlyHere)
+                if (!_wedgeMemoryUsed && detour is null && distance <= 40f
+                    && _wedgeMemory.TryGetValue(WedgeKey(target), out var groundWon))
+                {
+                    _wedgeMemoryUsed = true;
+                    if (groundWon)
+                    {
+                        _groundFallback = true;
+                        _wedgeFly = false;
+                        _world.Log($"This spot yielded to the ground last time — going straight there.");
+                    }
+                    else if (_world.CanFlyHere && !_groundOnly)
+                    {
+                        _wedgeFly = true;
+                        _groundFallback = false;
+                        _world.Log($"This spot yielded to the air last time — going straight there.");
+                    }
+                }
+                else if (_lastIssuedFly && !_overTop && detour is null && _world.CanFlyHere)
                 {
                     // A flight to a mark a few yalms away at ground level just presses into the
                     // same wall with wings out. The obstruction is crossed from above: climb to a
@@ -3063,6 +3097,7 @@ public sealed class StepExecutor
             _moveRetries = 0;
             _bestMoveDistance = float.MaxValue;
             _lastMoveProgress = _world.UtcNow;
+            _wedgeMemoryUsed = false;
             _offMeshSnap = null;
             _offMeshNudged = false;
             _footingTaken = false;

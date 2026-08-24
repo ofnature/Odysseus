@@ -923,6 +923,40 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_wedge_once_solved_teaches_the_next_visit_which_way_works()
+    {
+        // Yedlihmad's doorway: the climb loses to the roof, the ground walks through — three
+        // visits, three minutes of re-learning. The same executor now remembers per spot.
+        var mark = new Vector3(192, 15, 509);
+        var world = new FakeStepWorld { TerritoryId = 957, PathWaypointCount = 0, CanFlyHere = true };
+        world.PlayerPosition = new Vector3(192, 15, 512);
+        world.NearestReachableFn = (p, _) => p;
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 957, Position = mark, StopDistance = 0.25f });
+
+        // First visit: wedge on foot, learn nothing yet; the ground carries it to the mark.
+        for (var i = 0; i < 6 && !world.Calls.Any(c => c.StartsWith("Move ")); i++) { ex.Tick(); world.Advance(0.5); }
+        world.IsMoving = true;
+        for (var i = 0; i < 40 && !world.Calls.Any(c => c.StartsWith("Log") && c.Contains("stopping and re-pathing")); i++)
+        { ex.Tick(); world.IsMoving = true; world.Advance(0.5); }
+        world.IsMoving = false;
+        world.PlayerPosition = mark;   // the ground walk got through the door
+        for (var i = 0; i < 10 && ex.Status == StepStatus.Running; i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Equal(StepStatus.Done, ex.Status);
+
+        // Second visit to the same mark: the first freeze goes straight to the ground.
+        world.PlayerPosition = new Vector3(192, 15, 512);
+        world.Calls.Clear();
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 957, Position = mark, StopDistance = 0.25f });
+        for (var i = 0; i < 6 && !world.Calls.Any(c => c.StartsWith("Move ")); i++) { ex.Tick(); world.Advance(0.5); }
+        world.IsMoving = true;
+        for (var i = 0; i < 40 && !world.Calls.Any(c => c.StartsWith("Log") && c.Contains("yielded to the ground last time")); i++)
+        { ex.Tick(); world.IsMoving = true; world.Advance(0.5); }
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("yielded to the ground last time"));
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Log") && c.Contains("climbing over"));
+    }
+
+    [Fact]
     public void The_move_budget_measures_progress_not_wall_time()
     {
         // Thavnair's crossing was killed at 180s with two thirds of it done and the character
