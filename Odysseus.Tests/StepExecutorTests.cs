@@ -832,6 +832,27 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_combat_mark_the_mesh_cannot_serve_is_near_enough_to_fight_from()
+    {
+        // Hearts as One: 2.9y from a mark whose authored StopDistance demanded the exact yalm,
+        // the mesh silent, the enemies in plain reach — the mark is a waypoint, the fight
+        // measures itself by the mobs it targets.
+        var mark = new Vector3(169, -20, -482);
+        var world = new FakeStepWorld { TerritoryId = 817, PathWaypointCount = 0 };
+        world.PlayerPosition = new Vector3(169, -20, -479.1f);
+        world.NearestReachableFn = (p, _) => p;   // mesh claims everything, gives nothing
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.AutoOnEnterArea, KillEnemyDataIds = [8900], TerritoryId = 817, Position = mark, StopDistance = 0.25f });
+
+        for (var i = 0; i < 60 && ex.Status == StepStatus.Running
+             && !world.Calls.Any(c => c.StartsWith("Log") && c.Contains("near enough for a waypoint")); i++)
+        { ex.Tick(); world.Advance(0.5); }
+
+        Assert.NotEqual(StepStatus.Failed, ex.Status);
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("near enough for a waypoint"));
+    }
+
+    [Fact]
     public void A_dive_step_presses_the_descent_bind_until_the_water_accepts()
     {
         // Gyorin the Namazu: swim to the mark, then under. The press is the game's own bind.

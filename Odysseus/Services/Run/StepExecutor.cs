@@ -1787,7 +1787,10 @@ public sealed class StepExecutor
             // yalms from the mark with the pathfinder silent and a straight walk stalled — has
             // done its job, which was to get us *here*. The step that needs exactness is the next
             // one, and it measures from its own target.
-            if (step.Kind == StepKind.WalkTo && detour is null && distance <= WalkToNearEnough)
+            // A Combat mark is the same kind of waypoint: the fight measures itself by the mobs
+            // it targets, not by the mark. Hearts as One faulted 2.9y from a spot the mesh could
+            // not serve, with the enemies in plain reach.
+            if (step.Kind is StepKind.WalkTo or StepKind.Combat && detour is null && distance <= WalkToNearEnough)
             {
                 _world.Log($"Ended {distance:F1}y short of the mark {Fmt(target)} and can get no closer — near enough for a waypoint. "
                     + $"(standing at {Fmt(_world.PlayerPosition)}, {(_world.IsInFlight ? "in flight" : _world.IsMounted ? "mounted" : "on foot")})");
