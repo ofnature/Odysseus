@@ -27,6 +27,9 @@ public interface IOwnGatherer
     /// <summary>There is a node with coordinates for this item, so it is worth trying.</summary>
     bool CanGather(uint itemId);
 
+    /// <summary>Why <see cref="CanGather"/> said no, for the log: which link is missing.</summary>
+    string WhyNot(uint itemId);
+
     /// <summary>Go and get <paramref name="count"/> of it at <paramref name="collectability"/> or better.</summary>
     bool Start(uint itemId, int count, int collectability);
 
@@ -76,6 +79,17 @@ public sealed class OwnGatherer : IOwnGatherer
 
     public bool CanGather(uint itemId)
         => Enabled && GatheringPlan.For(itemId, _source, _atlas) is not null;
+
+    public string WhyNot(uint itemId)
+    {
+        var points = _source.PointsFor(itemId);
+        if (points.Count == 0)
+            return $"the sheets name no gathering point for item {itemId}";
+        var placed = points.Count(p => p.HasZone);
+        var withSpawns = points.Count(p => _atlas.SpawnsOf(p.NodeId).Count > 0);
+        return $"item {itemId} has {points.Count} point(s) in the sheets, {placed} placed in a zone, " +
+               $"{withSpawns} with atlas spawns";
+    }
 
     public bool Start(uint itemId, int count, int collectability)
     {

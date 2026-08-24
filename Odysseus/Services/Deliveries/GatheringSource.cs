@@ -162,6 +162,27 @@ public sealed class GatheringSource : IGatheringSource
                     points.Add(new GatheringPointRef(
                         p.RowId, p.TerritoryType.RowId, b?.GatheringType.RowId ?? 99, (ushort)(b?.GatheringLevel ?? 0)));
                 }
+
+            // Quest-hidden items are not in the base's item slots at all — GatheringItemPoint is
+            // the sheet that hangs them off their nodes. The Qitari opener's gather is one.
+            var gatheringItem = _data.GetExcelSheet<GatheringItem>()
+                .FirstOrDefault(g => g.Item.RowId == itemId);
+            if (gatheringItem.RowId != 0 || gatheringItem.Item.RowId == itemId)
+            {
+                var seen = points.Select(x => x.NodeId).ToHashSet();
+                foreach (var rows in _data.GetSubrowExcelSheet<Lumina.Excel.Sheets.GatheringItemPoint>())
+                {
+                    if (rows.RowId != gatheringItem.RowId) continue;
+                    foreach (var sub in rows)
+                    {
+                        var p = sub.GatheringPoint.ValueNullable;
+                        if (p is not { } point || !seen.Add(point.RowId)) continue;
+                        var b = point.GatheringPointBase.ValueNullable;
+                        points.Add(new GatheringPointRef(
+                            point.RowId, point.TerritoryType.RowId, b?.GatheringType.RowId ?? 99, (ushort)(b?.GatheringLevel ?? 0)));
+                    }
+                }
+            }
         }
         catch (Exception ex)
         {

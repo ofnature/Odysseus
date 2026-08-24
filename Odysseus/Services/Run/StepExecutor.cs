@@ -346,6 +346,7 @@ public sealed class StepExecutor
     /// </summary>
     public Services.Gathering.IOwnGatherer? OwnGatherer { get; set; }
     private bool _ownGatherAsked;
+    private bool _ownGatherDeclineSaid;
     private DateTime _lastTeleportTry;
     /// <summary>The instance this step hands off has been run; arriving again means finish, not re-enter.</summary>
     private bool _handoffDone;
@@ -404,6 +405,7 @@ public sealed class StepExecutor
         _aethernetRetries = 0;
         _makeAsked = false;
         _ownGatherAsked = false;
+        _ownGatherDeclineSaid = false;
         _craftAsked = 0;
         _craftHeldAtAsk = 0;
         _stepStart = _world.UtcNow;
@@ -2236,6 +2238,14 @@ public sealed class StepExecutor
                     _ownGatherAsked = false; // finished this ask; the count check above judges it
                 return;
             }
+        }
+
+        // Reached with the own gatherer on but declining: say which link is missing, once,
+        // so the field explains itself instead of silently handing to GatherBuddy.
+        if (own is not null && own.Enabled && !own.ProbeOnly && !own.DryRun && !_ownGatherDeclineSaid)
+        {
+            _ownGatherDeclineSaid = true;
+            _world.Log($"Own gathering declined: {own.WhyNot(outstanding.ItemId)} — handing to GatherBuddy.");
         }
 
         if (!_world.GathererReady)

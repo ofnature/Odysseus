@@ -105,6 +105,7 @@ public class DeliveryRunnerTests
         public (uint Item, int Count, int Collectability) LastStart { get; private set; }
 
         public bool CanGather(uint itemId) => Knows.Contains(itemId);
+        public string WhyNot(uint itemId) => "test says no";
 
         public bool Start(uint itemId, int count, int collectability)
         {
