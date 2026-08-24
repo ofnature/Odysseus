@@ -34,6 +34,13 @@ public sealed record QuestListing(ushort QuestId, string Name, ushort ClassJobLe
     public const uint DisciplesOfLandOrHand = 35;
 
     /// <summary>
+    /// The quest can only be taken as a Disciple of War or Magic — a combat class. Row 33 is
+    /// "Disciples of War", 34 "Disciples of Magic", 108 the pair, 142 the pair excluding limited
+    /// jobs (what the Qitari unlock chain carries, checked 2026-08-23).
+    /// </summary>
+    public bool NeedsCombat => ClassCategoryId is 33 or 34 or 108 or 142;
+
+    /// <summary>
     /// The journal grouping this quest sits under — "Chronicles of a New Era", "Sidequests" and so
     /// on. Kept because it is the only thing that identifies a raid or trial unlock chain as such;
     /// the engine runs any quest, but nothing could <i>find</i> them without this.

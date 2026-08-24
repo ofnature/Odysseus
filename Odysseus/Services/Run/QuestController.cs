@@ -67,6 +67,7 @@ public sealed class QuestController
     private readonly Func<ushort, ushort?> _nextQuest;
     private readonly Func<ushort, int> _questLevel;
     private readonly Func<ushort, bool> _needsHandOrLand;
+    private readonly Func<ushort, bool> _needsCombat;
     /// <summary>What a craft consumes — lets a purchase see whether anything downstream still needs it.</summary>
     private readonly PurchasePlan.IngredientsOf _ingredientsOf;
     private readonly IStepLog _stepLog;
@@ -108,9 +109,10 @@ public sealed class QuestController
         IQuestStateReader quests, PathStore paths, StepExecutor executor,
         IStepWorld world, IConditionWorld conditions, IRunPolicy policy,
         Func<ushort, ushort?> nextQuest, Func<ushort, int> questLevel, IStepLog stepLog, Action<string> log,
-        PurchasePlan.IngredientsOf? ingredientsOf = null, Func<ushort, bool>? needsHandOrLand = null)
+        PurchasePlan.IngredientsOf? ingredientsOf = null, Func<ushort, bool>? needsHandOrLand = null, Func<ushort, bool>? needsCombat = null)
     {
         _needsHandOrLand = needsHandOrLand ?? (_ => false);
+        _needsCombat = needsCombat ?? (_ => false);
         _ingredientsOf = ingredientsOf ?? (_ => []);
         _quests = quests;
         _paths = paths;
@@ -284,6 +286,25 @@ public sealed class QuestController
             }
             _log($"{path.Name} can only be taken as a Disciple of the Hand or Land — switching to gearset {set.Id}.");
             _world.EquipGearset(set.Id);
+        }
+
+        // The mirror gate: a quest only a Disciple of War or Magic may take — the Qitari unlock
+        // chain, standing there as the culinarian the last quest needed — switches back to a
+        // combat gearset the same way.
+        if (_needsCombat(questId) && !_quests.IsAccepted(questId)
+            && _world.CurrentJobKind is JobKind.Crafter or JobKind.Gatherer)
+        {
+            var sets = _world.CombatGearsets();
+            if (sets.Count == 0)
+            {
+                Stop();
+                StatusLine = $"{path.Name} can only be taken as a Disciple of War or Magic, and there is no " +
+                             "combat gearset to switch to. Save one, then Start.";
+                _log(StatusLine);
+                return false;
+            }
+            _log($"{path.Name} can only be taken as a Disciple of War or Magic — switching to gearset {sets[0]}.");
+            _world.EquipGearset(sets[0]);
         }
 
         // The level gate: a quest the character cannot accept yet is a stop with a reason, not a

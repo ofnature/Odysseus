@@ -153,7 +153,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             // Lets a purchase step see whether the craft it feeds is already made.
             itemId => making.Ingredients(itemId, 1).Select(i => i.ItemId).ToList(),
             // Custom delivery unlocks can only be taken as a crafter or gatherer.
-            id => _catalog.ById(id)?.NeedsHandOrLand ?? false);
+            id => _catalog.ById(id)?.NeedsHandOrLand ?? false,
+            id => _catalog.ById(id)?.NeedsCombat ?? false);
 
         // Priority list: saved in config only while the persist toggle is on.
         _priority = new PriorityList(_catalog, _config.PriorityQuests, _config.PersistPriorityList, ids =>
