@@ -1553,7 +1553,7 @@ public sealed class StepExecutor
         // air is the game's own descent), and walk the rest. Pulling from the saddle does
         // nothing, and a flight that circles the mark hunting the exact yalm never fights.
         if (!arrived && detour is null && step.Kind == StepKind.Combat && _world.IsMounted
-            && !_combatLanded && distance <= CombatLandRadius)
+            && !_combatLanded && !_flyFallback && !_wedgeFly && distance <= CombatLandRadius)
         {
             _combatLanded = true;
             _world.StopMoving();
@@ -1789,8 +1789,11 @@ public sealed class StepExecutor
             // one, and it measures from its own target.
             // A Combat mark is the same kind of waypoint: the fight measures itself by the mobs
             // it targets, not by the mark. Hearts as One faulted 2.9y from a spot the mesh could
-            // not serve, with the enemies in plain reach.
-            if (step.Kind is StepKind.WalkTo or StepKind.Combat && detour is null && distance <= WalkToNearEnough)
+            // not serve, with the enemies in plain reach. But an arrival-spawn may want the exact
+            // mark, so where flight is possible the air gets its turn first — a combat walk only
+            // settles once the fly escape has been spent or was never available.
+            var combatSettles = step.Kind == StepKind.Combat && (_flyFallback || _wedgeFly || !_world.CanFlyHere);
+            if ((step.Kind == StepKind.WalkTo || combatSettles) && detour is null && distance <= WalkToNearEnough)
             {
                 _world.Log($"Ended {distance:F1}y short of the mark {Fmt(target)} and can get no closer — near enough for a waypoint. "
                     + $"(standing at {Fmt(_world.PlayerPosition)}, {(_world.IsInFlight ? "in flight" : _world.IsMounted ? "mounted" : "on foot")})");

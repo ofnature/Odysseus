@@ -853,6 +853,26 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_wedged_combat_walk_tries_the_air_before_settling_for_near_enough()
+    {
+        // Same wedge, but the zone allows flight: the spawn trigger may want the exact mark,
+        // and only a flight can cross what the ground refuses — the air goes first.
+        var mark = new Vector3(169, -20, -482);
+        var world = new FakeStepWorld { TerritoryId = 817, PathWaypointCount = 0, CanFlyHere = true };
+        world.PlayerPosition = new Vector3(169, -20, -479.1f);
+        world.NearestReachableFn = (p, _) => p;
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.AutoOnEnterArea, KillEnemyDataIds = [8900], TerritoryId = 817, Position = mark, StopDistance = 0.25f });
+
+        for (var i = 0; i < 60 && ex.Status == StepStatus.Running
+             && !world.Calls.Any(c => c.StartsWith("Log") && c.Contains("flying this leg")); i++)
+        { ex.Tick(); world.Advance(0.5); }
+
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("flying this leg"));
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Log") && c.Contains("near enough for a waypoint"));
+    }
+
+    [Fact]
     public void A_dive_step_presses_the_descent_bind_until_the_water_accepts()
     {
         // Gyorin the Namazu: swim to the mark, then under. The press is the game's own bind.
