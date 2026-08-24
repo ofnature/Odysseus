@@ -1,6 +1,33 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.4 — 2026-08-23
+
+An evening of field-hardening across three allied societies and the whole eleven-quest Namazu unlock chain. Every change below came from a live failure, and each carries a test.
+
+### Getting there — the remedy lattice
+- An interact the ground cannot serve flies to the object itself and lands on its floor; standing under an object's ledge no longer counts as arrival
+- A flight hanging over a mark lands on it; a leg that gives up in flight lands and retries on foot (only within the last stretch); a descent with no floor flies over its goal and comes down there
+- A wedged flight retries on the ground, a wedged ground leg goes back to the air, and six fruitless re-paths fault honestly with the spot named — no more sputtering until luck intervenes
+- "Moving" with the position frozen for twelve seconds is stopped and re-pathed; the stall hop no longer resets that clock, never fires mid-air, and never in close quarters to an interact target
+- An object step that gives up near its mark hands the last stretch to the interact instead of rebuilding the mesh; a dismount waits a beat before the first press
+
+### Dialogue — nothing left hanging
+- Quest offers are accepted by their own button; subtitle boxes advanced and cutscene skips confirmed by our own tick (no TextAdvance needed; its cutscene-ESC and reward picking remain external by choice)
+- Open conversations, hand-over windows and declared choices are joined from any phase — the previous hand-in's chain, the overcap warning, the Mol Guide's ascend prompt
+- The in-conversation choice window's first string is its prompt, not an option: every such answer was off by one
+- The hand-over fill actually fills now (the slot picker and its menu, the proven way), and request item names read cleanly
+
+### Combat
+- Named targets are hunted ninety yalms out whatever spawned them; a fight is entered on foot, landing fifteen yalms from the mark; an arrival-spawn that stays quiet gets the last steps onto the exact trigger
+
+### Quests
+- Dive is implemented — the game's own descent bind, pressed the way it expects (ported from Questionable, AGPL into AGPL); underwater movement is volume movement
+- Gathers whose crafts are already made are skipped, including raws no recipe connects once the block's crafting stands done — the crate-supplied quest completes itself
+- The main window is cards now, with the priority queue in it: order, ready-states, reorder and remove on the row, add-current
+
+<!-- LATEST-END -->
+
 ## v0.2.3 — 2026-08-23
 
 An afternoon of field-hardening on the Amalj'aa dailies. Every fix below came from a live failure.
@@ -23,7 +50,6 @@ An afternoon of field-hardening on the Amalj'aa dailies. Every fix below came fr
 - Path Tools shows where the character stands, with a copy button that produces the path-step JSON snippet
 - Odysseus writes its own log (odysseus.log beside the config) — Dalamud's stops at its size cap
 - The editor's current-step marker is a plain arrow every font can draw
-<!-- LATEST-END -->
 
 ## v0.2.2 — 2026-08-23
 
