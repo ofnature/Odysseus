@@ -282,6 +282,7 @@ public sealed class StepExecutor
     private bool _descentRerouted;
     private bool _groundFallback;
     private bool _lastIssuedFly;
+    private bool _wedgeFly;
     private int _frozenStops;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
@@ -413,6 +414,7 @@ public sealed class StepExecutor
         _descentRerouted = false;
         _groundFallback = false;
         _lastIssuedFly = false;
+        _wedgeFly = false;
         _frozenStops = 0;
         _inFight = false;
         _fights = 0;
@@ -1643,6 +1645,14 @@ public sealed class StepExecutor
                     _groundFallback = true;
                     _world.Log($"The flight is wedged at {Fmt(_world.PlayerPosition)} — trying this leg on the ground.");
                 }
+                else if (!_lastIssuedFly && !_wedgeFly && _world.CanFlyHere && !_groundOnly)
+                {
+                    // A wedged walk takes to the air even when the step never asked to fly: the
+                    // author's Fly is a preference, and the crystal's spawn-position lottery in
+                    // Rak'tika wedges some spawns behind geometry no ground path escapes.
+                    _wedgeFly = true;
+                    _world.Log($"The walk is wedged at {Fmt(_world.PlayerPosition)} — trying this leg in the air.");
+                }
                 else if (_groundFallback && _frozenStops >= 3)
                 {
                     // The ground wedges too: alternate back to the air for another look.
@@ -1706,7 +1716,7 @@ public sealed class StepExecutor
 
         // While diving, every move is a volume move — the ground mesh has nothing down here.
         // A flown detour (the ledge escape) flies regardless of what the step says.
-        var fly = (step.Fly && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback)
+        var fly = ((step.Fly || _wedgeFly) && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback)
                   || _world.IsDiving
                   || (_detourFly && detour is not null);
         _lastIssuedFly = fly;
@@ -1800,10 +1810,11 @@ public sealed class StepExecutor
             // allied-society runs in old zones is a preference; a leg that cannot be walked at
             // all — a fenced camp, a cave with a doorway the mesh does not span — yields to the
             // path's own answer. One leg, not the run.
-            if (!_flyFallback && _groundOnly && step.Fly && _world.CanFlyHere)
+            if (!_flyFallback && !_wedgeFly && _world.CanFlyHere)
             {
                 _flyFallback = true;
-                _world.Log($"The ground mesh has no route to {Fmt(target)} and the path says to fly — flying this leg.");
+                _wedgeFly = true;
+                _world.Log($"The ground mesh has no route to {Fmt(target)} — flying this leg.");
                 Enter(_world.IsMounted ? Phase.Move : Phase.Mount);
                 return;
             }

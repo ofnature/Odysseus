@@ -95,6 +95,18 @@ public sealed class QuestController
     private bool _awaitingResumeConfirm;
     private QuestPath? _path;
     private int _currentSequence = -1;
+    private JobKind? _awaitJobKind;
+    private int _awaitGearsetId;
+    private DateTime _awaitJobSince;
+    private DateTime _awaitJobTry;
+
+    private void AwaitJob(JobKind kind, int gearsetId)
+    {
+        _awaitJobKind = kind;
+        _awaitGearsetId = gearsetId;
+        _awaitJobSince = _world.UtcNow;
+        _awaitJobTry = _world.UtcNow;
+    }
     private QuestSequence? _block;
     private int _stepIndex;
     /// <summary>Index the executor was last given, so a replay of the same step object is a fresh Begin.</summary>
@@ -286,6 +298,7 @@ public sealed class QuestController
             }
             _log($"{path.Name} can only be taken as a Disciple of the Hand or Land — switching to gearset {set.Id}.");
             _world.EquipGearset(set.Id);
+            AwaitJob(set.Kind, set.Id);
         }
 
         // The mirror gate: a quest only a Disciple of War or Magic may take — the Qitari unlock
@@ -309,6 +322,7 @@ public sealed class QuestController
             _log($"{path.Name} can only be taken as a Disciple of War or Magic — switching to gearset {best.Id} "
                  + $"(class {best.ClassJobId}, level {best.Level}).");
             _world.EquipGearset(best.Id);
+            AwaitJob(JobKind.Combat, best.Id);
         }
 
         // The level gate: a quest the character cannot accept yet is a stop with a reason, not a
@@ -426,6 +440,32 @@ public sealed class QuestController
             QuestCompleted?.Invoke(id);
             RollOn(id);
             return;
+        }
+
+        // A gearset change fired on the same beat as the first step's mount is dropped by the
+        // game without a word — the step waits until the class has actually changed.
+        if (_awaitJobKind is { } wantedKind)
+        {
+            if (_world.CurrentJobKind == wantedKind)
+            {
+                _log("Job change took.");
+                _awaitJobKind = null;
+            }
+            else
+            {
+                if (_world.UtcNow - _awaitJobTry > TimeSpan.FromSeconds(2))
+                {
+                    _awaitJobTry = _world.UtcNow;
+                    _world.EquipGearset(_awaitGearsetId);
+                }
+                if (_world.UtcNow - _awaitJobSince > TimeSpan.FromSeconds(20))
+                {
+                    Fault($"the gearset change to {_awaitGearsetId} did not take in 20s — change class yourself, then Retry");
+                    _awaitJobKind = null;
+                }
+                StatusLine = "Waiting for the job change to take…";
+                return;
+            }
         }
 
         var snap = _quests.Read(_questId);
