@@ -17,6 +17,32 @@ public class HandoffTests
         for (var i = 0; i < n && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(s); }
     }
 
+    // ── Travel vs BossMod's movement controller ──
+
+    [Fact]
+    public void Travel_commands_the_ai_off_once_and_a_fight_turns_it_back_on()
+    {
+        // BossMod's AI refuses "off mesh" legs and fights vnavmesh for the character: travel
+        // belongs to us, the fight is its. One chat command per transition, not one per step.
+        var w = new FakeStepWorld { TerritoryId = 400, ArriveOnMove = true, BossModAiInitially = true };
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 400, Position = new Vector3(50, 0, 0) });
+        Assert.False(w.BossModAi);
+        Assert.Equal(1, w.Calls.Count(c => c.StartsWith("BmrAi")));
+
+        // A second travel step repeats nothing — the state is already commanded.
+        Ticks(ex, w, 10);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 400, Position = new Vector3(80, 0, 0) });
+        Assert.Equal(1, w.Calls.Count(c => c.StartsWith("BmrAi")));
+
+        // A fight commands it on.
+        w.PlayerPosition = new Vector3(100, 0, 0);
+        ex.Begin(new QuestStep { Kind = StepKind.Combat, KindName = "Combat", EnemySpawnType = EnemySpawnType.FinishCombatIfAny, TerritoryId = 400, Position = new Vector3(100, 0, 0) });
+        Ticks(ex, w, 10);
+        Assert.True(w.BossModAi);
+        Assert.Contains("BmrAi True", w.Calls);
+    }
+
     // ── SinglePlayerDuty → BossMod ──
 
     [Fact]

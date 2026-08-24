@@ -350,6 +350,21 @@ public sealed class StepExecutor
     private int _fights;
     private DateTime _lastCombatSeen;
     private bool _skipTeleport;
+
+    /// <summary>
+    /// The last AI state we commanded, so transitions send one chat command, not one per tick.
+    /// BossMod's AI movement controller fights vnavmesh over off-mesh legs — it refuses ground
+    /// it cannot path — so travel runs with it off and fights turn it back on.
+    /// </summary>
+    private bool? _aiCommanded;
+
+    private void CommandAi(bool on)
+    {
+        if (_aiCommanded == on)
+            return;
+        _aiCommanded = on;
+        _world.SetBossModAi(on);
+    }
     private float _bestMoveDistance;
     private DateTime _lastMoveProgress;
 
@@ -457,6 +472,9 @@ public sealed class StepExecutor
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
+        // BossMod's AI movement controller refuses legs it cannot path ("off mesh") and fights
+        // vnavmesh for the character. Travel belongs to us; the fight turns it back on below.
+        CommandAi(false);
         _sawTravelBusy = false;
         _handoffDone = false;
         FailReason = string.Empty;
@@ -719,7 +737,7 @@ public sealed class StepExecutor
                 // The interact + "commence" prompt has been answered; the instance loads.
                 if (_world.InDuty)
                 {
-                    _world.SetBossModAi(true);
+                    CommandAi(true);
                     Enter(Phase.SoloDutyRun);
                 }
                 else if (now - _phaseStart > DutyEnterMax)
@@ -729,13 +747,13 @@ public sealed class StepExecutor
             case Phase.SoloDutyRun:
                 if (!_world.InDuty && !_world.IsTravelBusy)
                 {
-                    _world.SetBossModAi(false);
+                    CommandAi(false);
                     _handoffDone = true;
                     Enter(Phase.WaitReady); // back outside; the wrap-up cutscene may still be playing
                 }
                 else if (now - _phaseStart > SoloDutyMax)
                 {
-                    _world.SetBossModAi(false);
+                    CommandAi(false);
                     Fail($"solo duty did not finish in {SoloDutyMax.TotalMinutes:F0} min");
                 }
                 break;
@@ -1164,7 +1182,7 @@ public sealed class StepExecutor
                 // Talk to the NPC; TextAdvance answers "commence"; the instance loads.
                 if (_world.InDuty)
                 {
-                    _world.SetBossModAi(true);
+                    CommandAi(true);
                     return Phase.SoloDutyRun; // already inside (resumed mid-instance)
                 }
                 return step.DataId is not null ? Phase.Interact : Phase.SoloDutyEnter;
@@ -2747,7 +2765,7 @@ public sealed class StepExecutor
             case StepKind.SinglePlayerDuty:
                 // The dialogue that "ends" here is the commence prompt; the instance is loading.
                 Enter(_world.InDuty ? Phase.SoloDutyRun : Phase.SoloDutyEnter);
-                if (_world.InDuty) _world.SetBossModAi(true);
+                if (_world.InDuty) CommandAi(true);
                 return;
             case StepKind.UseItem when step.EnemySpawnType == EnemySpawnType.AfterItemUse:
                 Enter(Phase.CombatWait);
@@ -2943,6 +2961,7 @@ public sealed class StepExecutor
 
     private void TickCombat(QuestStep step, DateTime now)
     {
+        CommandAi(true);
         var enemies = (System.Collections.Generic.IReadOnlyCollection<uint>?)step.KillEnemyDataIds ?? Array.Empty<uint>();
 
         if (_world.InCombat)
