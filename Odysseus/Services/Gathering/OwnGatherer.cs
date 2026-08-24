@@ -25,13 +25,13 @@ public interface IOwnGatherer
     bool Enabled { get; set; }
 
     /// <summary>There is a node with coordinates for this item, so it is worth trying.</summary>
-    bool CanGather(uint itemId);
+    bool CanGather(uint itemId, uint territoryHint = 0);
 
     /// <summary>Why <see cref="CanGather"/> said no, for the log: which link is missing.</summary>
-    string WhyNot(uint itemId);
+    string WhyNot(uint itemId, uint territoryHint = 0);
 
     /// <summary>Go and get <paramref name="count"/> of it at <paramref name="collectability"/> or better.</summary>
-    bool Start(uint itemId, int count, int collectability);
+    bool Start(uint itemId, int count, int collectability, uint territoryHint = 0);
 
     /// <summary>Drive it. Whatever started it is responsible for ticking it.</summary>
     void Tick();
@@ -77,28 +77,28 @@ public sealed class OwnGatherer : IOwnGatherer
 
     public bool Enabled { get; set; }
 
-    public bool CanGather(uint itemId)
-        => Enabled && GatheringPlan.For(itemId, _source, _atlas) is not null;
+    public bool CanGather(uint itemId, uint territoryHint = 0)
+        => Enabled && GatheringPlan.For(itemId, _source, _atlas, territoryHint) is not null;
 
-    public string WhyNot(uint itemId)
+    public string WhyNot(uint itemId, uint territoryHint = 0)
     {
         var points = _source.PointsFor(itemId);
         if (points.Count == 0)
             return $"the sheets name no gathering point for item {itemId}";
         var placed = points.Count(p => p.HasZone);
         var withSpawns = points.Count(p => _atlas.SpawnsOf(p.NodeId).Count > 0);
-        return $"item {itemId} has {points.Count} point(s) in the sheets, {placed} placed in a zone, " +
-               $"{withSpawns} with atlas spawns";
+        return $"item {itemId} has {points.Count} point(s) in the sheets, {placed} placed in a zone " +
+               $"(hint {territoryHint}), {withSpawns} with atlas spawns";
     }
 
-    public bool Start(uint itemId, int count, int collectability)
+    public bool Start(uint itemId, int count, int collectability, uint territoryHint = 0)
     {
         // Checked here as well as in CanGather: a caller that asks directly must not get through
         // either, or "off" is only off for the callers that thought to ask first.
         if (!Enabled)
             return false;
 
-        var targets = GatheringPlan.All(itemId, _source, _atlas);
+        var targets = GatheringPlan.All(itemId, _source, _atlas, territoryHint);
         if (targets.Count == 0)
         {
             _log($"Nothing in the node atlas yields item {itemId}.");

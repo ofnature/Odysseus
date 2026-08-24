@@ -2214,12 +2214,12 @@ public sealed class StepExecutor
         // failure it kept ending in. Bench modes (probe, dry-run) leave quest steps alone.
         var own = OwnGatherer;
         if (own is not null && own.Enabled && !own.ProbeOnly && !own.DryRun
-            && (_ownGatherAsked || own.CanGather(outstanding.ItemId)))
+            && (_ownGatherAsked || own.CanGather(outstanding.ItemId, step.TerritoryId)))
         {
             if (!_ownGatherAsked)
             {
                 var remaining = outstanding.ItemCount - _world.ItemCount(outstanding.ItemId);
-                if (own.Start(outstanding.ItemId, remaining, 0))
+                if (own.Start(outstanding.ItemId, remaining, 0, step.TerritoryId))
                 {
                     _ownGatherAsked = true;
                     _world.Log($"Gathering {remaining} × item {outstanding.ItemId} ourselves.");
@@ -2245,7 +2245,7 @@ public sealed class StepExecutor
         if (own is not null && own.Enabled && !own.ProbeOnly && !own.DryRun && !_ownGatherDeclineSaid)
         {
             _ownGatherDeclineSaid = true;
-            _world.Log($"Own gathering declined: {own.WhyNot(outstanding.ItemId)} — handing to GatherBuddy.");
+            _world.Log($"Own gathering declined: {own.WhyNot(outstanding.ItemId, step.TerritoryId)} — handing to GatherBuddy.");
         }
 
         if (!_world.GathererReady)

@@ -49,6 +49,21 @@ public class GatheringPlanTests : IDisposable
     }
 
     [Fact]
+    public void An_unplaced_point_becomes_a_target_only_with_the_callers_zone_hint()
+    {
+        // The Qitari opener's three points all read territory 0 in the sheets, while the quest
+        // step knows the zone. The hint places them; without it they are dropped as before.
+        var source = new Source();
+        source.Points.Add(new GatheringPointRef(NodeId: 34838, TerritoryId: 0, GatheringType: 0, Level: 70));
+        var atlas = Atlas("""{ "34838": [ {"X": 18.8, "Y": -161.2, "Z": 198.7} ] }""");
+
+        Assert.Empty(GatheringPlan.All(29512, source, atlas));
+        var placed = Assert.Single(GatheringPlan.All(29512, source, atlas, territoryHint: 817));
+        Assert.Equal(817u, placed.TerritoryId);
+        Assert.Equal(16u, placed.ClassJobId);
+    }
+
+    [Fact]
     public void The_atlas_reads_gatherbuddys_shape()
     {
         var atlas = Atlas("""

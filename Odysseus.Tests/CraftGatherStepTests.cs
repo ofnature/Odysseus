@@ -410,13 +410,13 @@ public class CraftGatherStepTests
     {
         public bool Enabled { get; set; } = true;
         public bool CanGatherAnswer { get; set; } = true;
-        public bool CanGather(uint itemId) => Enabled && CanGatherAnswer;
-        public string WhyNot(uint itemId) => "test says no";
+        public bool CanGather(uint itemId, uint territoryHint = 0) => Enabled && CanGatherAnswer;
+        public string WhyNot(uint itemId, uint territoryHint = 0) => "test says no";
         public List<(uint Item, int Count)> Starts { get; } = [];
         public int TicksSeen { get; private set; }
         public int TicksUntilDone { get; set; } = 3;
         public Action? OnDone { get; set; }
-        public bool Start(uint itemId, int count, int collectability) { Starts.Add((itemId, count)); Busy = true; return Enabled; }
+        public bool Start(uint itemId, int count, int collectability, uint territoryHint = 0) { Starts.Add((itemId, count)); Busy = true; return Enabled; }
         public void Tick()
         {
             TicksSeen++;

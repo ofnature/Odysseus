@@ -23,21 +23,27 @@ public sealed record GatheringTarget(
 /// </summary>
 public static class GatheringPlan
 {
-    public static GatheringTarget? For(uint itemId, IGatheringSource source, NodeAtlas atlas)
-        => All(itemId, source, atlas).FirstOrDefault();
+    public static GatheringTarget? For(uint itemId, IGatheringSource source, NodeAtlas atlas, uint territoryHint = 0)
+        => All(itemId, source, atlas, territoryHint).FirstOrDefault();
 
     /// <summary>Every workable node for the item, best first. More than one matters when the first is unreachable.</summary>
-    public static IReadOnlyList<GatheringTarget> All(uint itemId, IGatheringSource source, NodeAtlas atlas)
+    /// <param name="territoryHint">
+    /// Where the caller already knows the item is gathered — a quest step's own zone. The sheet
+    /// leaves quest-hidden points unplaced (the Qitari opener's three all read territory 0), and
+    /// with a hint those still become targets; without one they are dropped as before.
+    /// </param>
+    public static IReadOnlyList<GatheringTarget> All(uint itemId, IGatheringSource source, NodeAtlas atlas, uint territoryHint = 0)
     {
         var targets = new List<GatheringTarget>();
         foreach (var point in source.PointsFor(itemId))
         {
-            if (!point.HasZone)
+            var territory = point.HasZone ? point.TerritoryId : territoryHint;
+            if (territory <= 1)
                 continue; // the sheet leaves a placeholder behind; there is nowhere to send anyone
             var spawns = atlas.SpawnsOf(point.NodeId);
             if (spawns.Count == 0)
                 continue;
-            targets.Add(new GatheringTarget(itemId, point.NodeId, point.TerritoryId, point.ClassJobId, point.Level, spawns));
+            targets.Add(new GatheringTarget(itemId, point.NodeId, territory, point.ClassJobId, point.Level, spawns));
         }
 
         return targets

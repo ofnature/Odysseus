@@ -104,10 +104,10 @@ public class DeliveryRunnerTests
         public string Status { get; set; } = string.Empty;
         public (uint Item, int Count, int Collectability) LastStart { get; private set; }
 
-        public bool CanGather(uint itemId) => Knows.Contains(itemId);
-        public string WhyNot(uint itemId) => "test says no";
+        public bool CanGather(uint itemId, uint territoryHint = 0) => Knows.Contains(itemId);
+        public string WhyNot(uint itemId, uint territoryHint = 0) => "test says no";
 
-        public bool Start(uint itemId, int count, int collectability)
+        public bool Start(uint itemId, int count, int collectability, uint territoryHint = 0)
         {
             if (!Knows.Contains(itemId)) return false;
             Starts++;
