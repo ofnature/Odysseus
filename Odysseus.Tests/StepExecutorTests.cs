@@ -895,6 +895,24 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_passenger_ride_keeps_its_wheels_on_the_ground()
+    {
+        // Hippos Born to Run: the cart walks where it walks — no wings, no crystal. The
+        // far-fly rule and the in-zone teleport both stand down while riding as a passenger.
+        var mark = new Vector3(159, 5, 606);
+        var world = new FakeStepWorld { TerritoryId = 957, CanFlyHere = true, IsMounted = true, IsRidingVehicle = true };
+        world.PlayerPosition = new Vector3(-424, 11, 35);
+        world.AttunedAetherytesAt[131] = (957u, new Vector3(160, 5, 600));
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 957, Position = mark });
+
+        for (var i = 0; i < 10 && !world.Calls.Any(c => c.StartsWith("Move ")); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Teleport"));
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Log") && c.Contains("taking the air"));
+        Assert.Contains(world.Calls, c => c.StartsWith("Move ") && c.Contains("fly=False"));
+    }
+
+    [Fact]
     public void A_long_walk_in_a_flyable_zone_takes_the_air_instead()
     {
         // Thavnair: 340y of authored walking at 6 y/s is nearly a minute; the air does it in

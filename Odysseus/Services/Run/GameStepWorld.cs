@@ -115,6 +115,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public bool IsInFlight => _condition[ConditionFlag.InFlight];
 
+    public bool IsRidingVehicle => _condition[ConditionFlag.RidingPillion];
+
     public void Mount()
     {
         try

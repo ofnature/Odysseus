@@ -176,6 +176,10 @@ public interface IStepWorld
     /// <summary>Aetheryte id for a name as the path data spells it, or null when unknown.</summary>
     uint? ResolveAetheryte(string name);
 
+    /// <summary>Riding as a passenger — a quest cart, a shared mount. It walks where it walks:
+    /// no flying, no dismounting, and a teleport separates you from it.</summary>
+    bool IsRidingVehicle { get; }
+
     /// <summary>The attuned aetheryte nearest <paramref name="near"/>, within <paramref name="maxDistance"/> of it, or null.</summary>
     uint? NearestAttunedAetheryte(uint territoryId, Vector3 near, float maxDistance);
 

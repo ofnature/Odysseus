@@ -992,7 +992,7 @@ public sealed class StepExecutor
         // Same zone, no shortcut, and the mark a long ride away with an attuned aetheryte
         // standing near it: the crystal beats even the flight. Only when it wins by a clear
         // margin — a teleport is a cast and a loading screen.
-        if (_world.TerritoryId == step.TerritoryId && !IsPlaceless(step.Kind) && !_skipTeleport
+        if (_world.TerritoryId == step.TerritoryId && !IsPlaceless(step.Kind) && !_skipTeleport && !_world.IsRidingVehicle
             && step.Position is { } sameZoneGoal
             && Vector3.Distance(_world.PlayerPosition, sameZoneGoal) is var wayOff
             && wayOff > TeleportWorthDistance
@@ -1811,7 +1811,7 @@ public sealed class StepExecutor
                         _world.Log($"This spot yielded to the air last time — going straight there.");
                     }
                 }
-                else if (_lastIssuedFly && !_overTop && detour is null && _world.CanFlyHere)
+                else if (_lastIssuedFly && !_overTop && detour is null && _world.CanFlyHere && !_world.IsRidingVehicle)
                 {
                     // A flight to a mark a few yalms away at ground level just presses into the
                     // same wall with wings out. The obstruction is crossed from above: climb to a
@@ -1840,7 +1840,7 @@ public sealed class StepExecutor
                     }
                     _world.Log($"The flight is wedged at {Fmt(_world.PlayerPosition)} — trying this leg on the ground.");
                 }
-                else if (!_lastIssuedFly && !_wedgeFly && _world.CanFlyHere && !_groundOnly)
+                else if (!_lastIssuedFly && !_wedgeFly && _world.CanFlyHere && !_groundOnly && !_world.IsRidingVehicle)
                 {
                     // A wedged walk takes to the air even when the step never asked to fly: the
                     // author's Fly is a preference, and the crystal's spawn-position lottery in
@@ -1861,7 +1861,7 @@ public sealed class StepExecutor
                 _lastMoveIssue = default; // the not-moving flow may reissue immediately
                 // An air rung on foot flies nowhere: the fly move needs the saddle first. The
                 // Mount phase returns to Move on its own.
-                if ((_wedgeFly || _flyFallback) && !_groundFallback && !_world.IsMounted && _world.CanFlyHere)
+                if ((_wedgeFly || _flyFallback) && !_groundFallback && !_world.IsMounted && _world.CanFlyHere && !_world.IsRidingVehicle)
                     Enter(Phase.Mount);
                 return;
             }
@@ -1917,7 +1917,7 @@ public sealed class StepExecutor
         // walked distance, and the air is over three times the speed. Sticky once taken, so a
         // shrinking distance does not land the flight short of the mark.
         if (!_farFly && !step.Fly && detour is null && distance > FlyWorthDistance
-            && _world.CanFlyHere && !_groundOnly && !_groundFallback && !_combatLanded)
+            && _world.CanFlyHere && !_groundOnly && !_groundFallback && !_combatLanded && !_world.IsRidingVehicle)
         {
             _farFly = true;
             _world.Log($"The leg to {Fmt(target)} is {distance:F0}y — about {distance / WalkSpeed:F0}s walking, "
@@ -1931,7 +1931,7 @@ public sealed class StepExecutor
 
         // While diving, every move is a volume move — the ground mesh has nothing down here.
         // A flown detour (the ledge escape) flies regardless of what the step says.
-        var fly = ((step.Fly || _wedgeFly || _farFly) && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback)
+        var fly = ((step.Fly || _wedgeFly || _farFly) && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback && !_world.IsRidingVehicle)
                   || _world.IsDiving
                   || (_detourFly && detour is not null);
         _lastIssuedFly = fly;
@@ -2035,7 +2035,7 @@ public sealed class StepExecutor
             // allied-society runs in old zones is a preference; a leg that cannot be walked at
             // all — a fenced camp, a cave with a doorway the mesh does not span — yields to the
             // path's own answer. One leg, not the run.
-            if (!_flyFallback && !_wedgeFly && _world.CanFlyHere)
+            if (!_flyFallback && !_wedgeFly && _world.CanFlyHere && !_world.IsRidingVehicle)
             {
                 _flyFallback = true;
                 _wedgeFly = true;

@@ -173,6 +173,7 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Dictionary<uint, uint> AetheryteTerritories { get; } = new();
     public bool TeleportAccepted { get; set; } = true;
     public bool IsTravelBusy { get; set; }
+    public bool IsRidingVehicle { get; set; }
     /// <summary>The game says we are at a shard, whatever the distance says.</summary>
     public bool AtAethernetShard { get; set; }
     /// <summary>When set, a Teleport lands the player in the aetheryte's territory immediately.</summary>
