@@ -338,6 +338,8 @@ public sealed class StepExecutor
     private int _fights;
     private DateTime _lastCombatSeen;
     private bool _skipTeleport;
+    private float _bestMoveDistance;
+    private DateTime _lastMoveProgress;
 
     /// <summary>
     /// Gathering Odysseus does itself, when one is wired in and switched on — quest Gather
@@ -1624,9 +1626,17 @@ public sealed class StepExecutor
             return;
         }
 
-        if (now - _stepStart > MoveTotal)
+        // The budget measures progress, not wall time: Thavnair's crossing was killed at 180s
+        // with two thirds of it done and the character still closing. Every ten yalms gained
+        // buys the clock back; only a leg that stops closing for the whole budget faults.
+        if (distance < _bestMoveDistance - 10f)
         {
-            Fail($"did not reach {Fmt(target)} in {MoveTotal.TotalSeconds:F0}s ({distance:F1}y left)");
+            _bestMoveDistance = distance;
+            _lastMoveProgress = now;
+        }
+        if (now - _lastMoveProgress > MoveTotal)
+        {
+            Fail($"no progress toward {Fmt(target)} for {MoveTotal.TotalSeconds:F0}s ({distance:F1}y left)");
             return;
         }
 
@@ -2970,6 +2980,8 @@ public sealed class StepExecutor
         {
             _lastMoveIssue = default;
             _moveRetries = 0;
+            _bestMoveDistance = float.MaxValue;
+            _lastMoveProgress = _world.UtcNow;
             _offMeshSnap = null;
             _offMeshNudged = false;
             _footingTaken = false;

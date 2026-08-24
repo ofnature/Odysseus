@@ -895,6 +895,40 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void The_move_budget_measures_progress_not_wall_time()
+    {
+        // Thavnair's crossing was killed at 180s with two thirds of it done and the character
+        // still closing. Progress buys the clock back; churning in place does not.
+        var mark = new Vector3(1000, 0, 0);
+        var world = new FakeStepWorld { TerritoryId = 957 };
+        world.PlayerPosition = Vector3.Zero;
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 957, Position = mark });
+
+        // 400 seconds of honest travel, closing 2y a second — over double the old budget.
+        for (var i = 0; i < 400 && ex.Status == StepStatus.Running; i++)
+        {
+            ex.Tick();
+            world.IsMoving = true;
+            world.PlayerPosition = world.PlayerPosition with { X = world.PlayerPosition.X + 2 };
+            world.Advance(1);
+        }
+        Assert.Equal(StepStatus.Running, ex.Status);
+
+        // Now churn: still "moving", wobbling past the frozen epsilon, gaining nothing.
+        var basePos = world.PlayerPosition;
+        for (var i = 0; i < 400 && ex.Status == StepStatus.Running; i++)
+        {
+            ex.Tick();
+            world.IsMoving = true;
+            world.PlayerPosition = basePos with { Z = i % 2 == 0 ? 3f : -3f };
+            world.Advance(1);
+        }
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.Contains("no progress", ex.FailReason);
+    }
+
+    [Fact]
     public void A_dive_step_presses_the_descent_bind_until_the_water_accepts()
     {
         // Gyorin the Namazu: swim to the mark, then under. The press is the game's own bind.
