@@ -872,6 +872,9 @@ public class StepExecutorTests
 
         Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("flying this leg"));
         Assert.DoesNotContain(world.Calls, c => c.StartsWith("Log") && c.Contains("near enough for a waypoint"));
+        // On foot, the air rung goes through the saddle — a fly move without it just walks.
+        for (var i = 0; i < 6 && !world.Calls.Contains("Mount"); i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Contains("Mount", world.Calls);
 
         // The flight presses into the same wall with wings out — the escape climbs over the
         // mark instead of landing back into the wedge or giving the ground another turn.

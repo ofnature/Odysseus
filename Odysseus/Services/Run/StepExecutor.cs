@@ -1723,6 +1723,10 @@ public sealed class StepExecutor
                 _world.StopMoving();
                 _frozenSince = now;
                 _lastMoveIssue = default; // the not-moving flow may reissue immediately
+                // An air rung on foot flies nowhere: the fly move needs the saddle first. The
+                // Mount phase returns to Move on its own.
+                if ((_wedgeFly || _flyFallback) && !_groundFallback && !_world.IsMounted && _world.CanFlyHere)
+                    Enter(Phase.Mount);
                 return;
             }
             _lastMoveIssue = now;
