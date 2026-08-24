@@ -73,6 +73,10 @@ public sealed class StepExecutor
     /// </summary>
     public const float TeleportWorthDistance = 250f;
 
+    /// <summary>How often a refused teleport is asked again, and for how long before faulting.</summary>
+    private static readonly TimeSpan TeleportRetryEvery = TimeSpan.FromSeconds(2);
+    private static readonly TimeSpan TeleportGiveUp = TimeSpan.FromSeconds(12);
+
     /// <summary>How close "arrived" is when the step does not say. Interact range is ~7y; 3 keeps us clearly inside it.</summary>
     public const float DefaultStopDistance = 3f;
     /// <summary>WalkTo without a StopDistance: land on the point.</summary>
@@ -334,6 +338,7 @@ public sealed class StepExecutor
     private int _fights;
     private DateTime _lastCombatSeen;
     private bool _skipTeleport;
+    private DateTime _lastTeleportTry;
     /// <summary>The instance this step hands off has been run; arriving again means finish, not re-enter.</summary>
     private bool _handoffDone;
     private uint _teleportTarget;
@@ -540,9 +545,16 @@ public sealed class StepExecutor
                     if (now - _phaseStart > ReadyWait) Fail("never became ready to teleport");
                     break;
                 }
+                // A refusal right after a gearset change or a dismount is the game's action lock
+                // still settling, not a missing attunement — ask again for a few seconds before
+                // deciding it is real. The Qitari opener's equip refused the very next cast.
+                if (now - _lastTeleportTry < TeleportRetryEvery)
+                    break;
                 if (!_world.Teleport(_teleportTarget))
                 {
-                    Fail($"teleport to {step.AetheryteShortcut} (aetheryte {_teleportTarget}) was refused — Lifestream loaded and aetheryte attuned?");
+                    _lastTeleportTry = now;
+                    if (now - _phaseStart > TeleportGiveUp)
+                        Fail($"teleport to {step.AetheryteShortcut} (aetheryte {_teleportTarget}) kept being refused for {(now - _phaseStart).TotalSeconds:F0}s — Lifestream loaded and aetheryte attuned?");
                     break;
                 }
                 Enter(Phase.TeleportWait);

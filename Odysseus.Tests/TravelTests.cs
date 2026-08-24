@@ -447,15 +447,31 @@ public class TravelExecutorTests
     }
 
     [Fact]
-    public void Refused_teleport_fails_with_the_lifestream_hint()
+    public void Refused_teleport_asks_again_before_faulting_with_the_lifestream_hint()
     {
+        // The Qitari opener's gearset change refused the very next cast: the action lock was
+        // still settling. A refusal is retried for a few seconds before it is believed.
         var w = World();
         w.TeleportAccepted = false;
         var ex = new StepExecutor(w);
         ex.Begin(Interact(621, new Vector3(50, 0, 0), aetheryte: "Lochs - Ala Mhigan Quarter"));
-        Ticks(ex, w, 2);
-        Assert.Equal(StepStatus.Failed, ex.Status);
-        Assert.Contains("Lifestream", ex.FailReason);
+        Ticks(ex, w, 8);   // 4 seconds: refused twice, still trying
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.True(w.Calls.Count(c => c.StartsWith("Teleport")) >= 2);
+
+        // The lock lifting mid-retry lets the travel proceed.
+        w.TeleportAccepted = true;
+        Ticks(ex, w, 6);
+        Assert.NotEqual(StepStatus.Failed, ex.Status);
+
+        // A refusal that never lifts is the honest fault it always was.
+        var stubborn = World();
+        stubborn.TeleportAccepted = false;
+        var ex2 = new StepExecutor(stubborn);
+        ex2.Begin(Interact(621, new Vector3(50, 0, 0), aetheryte: "Lochs - Ala Mhigan Quarter"));
+        Ticks(ex2, stubborn, 40);
+        Assert.Equal(StepStatus.Failed, ex2.Status);
+        Assert.Contains("Lifestream", ex2.FailReason);
     }
 
     [Fact]
