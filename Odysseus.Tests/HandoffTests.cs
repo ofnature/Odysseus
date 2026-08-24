@@ -17,6 +17,28 @@ public class HandoffTests
         for (var i = 0; i < n && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(s); }
     }
 
+    // ── Cutscenes hold readiness clocks ──
+
+    [Fact]
+    public void A_cutscene_holds_the_readiness_clock_instead_of_timing_the_step_out()
+    {
+        // Steppe Child's finale was still playing when the roll-on reached the next accept:
+        // thirty seconds of ReadyWait ticked against a cutscene and faulted a healthy run.
+        var w = new FakeStepWorld { TerritoryId = 957, PlayerPosition = Vector3.Zero, IsReady = false, InCutscene = true };
+        w.Spawned.Add(1041332);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.AcceptQuest, KindName = "AcceptQuest", DataId = 1041332, TerritoryId = 957, Position = Vector3.Zero });
+
+        for (var i = 0; i < 120 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(1); }
+        Assert.Equal(StepStatus.Running, ex.Status);   // 120s of cutscene, no fault
+
+        // The finale ends: the clock runs again, and a genuinely stuck player still faults.
+        w.InCutscene = false;
+        for (var i = 0; i < 40 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(1); }
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.Contains("never became ready", ex.FailReason);
+    }
+
     // ── Travel vs BossMod's movement controller ──
 
     [Fact]

@@ -358,6 +358,16 @@ public sealed class StepExecutor
     /// </summary>
     private bool? _aiCommanded;
 
+    /// <summary>
+    /// Readiness clocks do not tick against a cutscene: rolling onto the next quest while the
+    /// last one's finale plays timed the accept out through no fault of the world's.
+    /// </summary>
+    private void HoldClockForCutscene(DateTime now)
+    {
+        if (_world.InCutscene)
+            _phaseStart = now;
+    }
+
     private void CommandAi(bool on)
     {
         if (_aiCommanded == on)
@@ -591,6 +601,7 @@ public sealed class StepExecutor
             case Phase.Teleport:
                 if (!_world.IsReady || _world.InCombat)
                 {
+                    HoldClockForCutscene(now);
                     if (now - _phaseStart > ReadyWait) Fail("never became ready to teleport");
                     break;
                 }
@@ -617,6 +628,7 @@ public sealed class StepExecutor
             case Phase.Aethernet:
                 if (!_world.IsReady || _world.IsTravelBusy)
                 {
+                    HoldClockForCutscene(now);
                     if (now - _phaseStart > ReadyWait) Fail("never became ready for the aethernet");
                     break;
                 }
@@ -718,6 +730,8 @@ public sealed class StepExecutor
                 }
                 else if (now - _phaseStart > ReadyWait)
                     Fail("player never became ready");
+                else
+                    HoldClockForCutscene(now);
                 break;
 
             case Phase.Interact:
@@ -2544,6 +2558,7 @@ public sealed class StepExecutor
                 Enter(Phase.Dialogue);
                 return;
             }
+            HoldClockForCutscene(now);
             if (now - _phaseStart > ReadyWait)
                 Fail("player never became ready to interact");
             return;
