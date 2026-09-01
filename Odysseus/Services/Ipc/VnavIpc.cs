@@ -72,6 +72,22 @@ public sealed class VnavIpc
     public bool IsPathRunning => Try(() =>
         (_pathIsRunning ??= _pluginInterface.GetIpcSubscriber<bool>("vnavmesh.Path.IsRunning")).InvokeFunc());
 
+    private ICallGateSubscriber<List<Vector3>>? _listWaypoints;
+
+    /// <summary>The waypoints of the path being followed right now; empty when idle or unavailable.</summary>
+    public List<Vector3> ListWaypoints()
+    {
+        try
+        {
+            return (_listWaypoints ??= _pluginInterface.GetIpcSubscriber<List<Vector3>>("vnavmesh.Path.ListWaypoints"))
+                .InvokeFunc() ?? [];
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
     /// <summary>A pathfind is still being computed — movement is pending, not failed.</summary>
     public bool IsPathfinding => Try(() =>
         (_pathfindInProgress ??= _pluginInterface.GetIpcSubscriber<bool>("vnavmesh.SimpleMove.PathfindInProgress"))

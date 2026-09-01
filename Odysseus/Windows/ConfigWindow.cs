@@ -293,6 +293,15 @@ public sealed class ConfigWindow : OdysseusWindow
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("The capped-reward warning (tomestones, seals, gil). On: answer Yes and keep the run moving, losing the excess. Off: the dialog waits for you.");
 
+        var questLine = _config.ShowQuestLine;
+        if (ImGui.Checkbox("Draw the route in the world", ref questLine))
+        {
+            _config.ShowQuestLine = questLine;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("While a run drives a step, its route is drawn on the ground — vnavmesh's live waypoints, or a straight line to the step's mark — with a ring and distance at the goal.");
+
         var advance = _config.AutoAdvanceDialogue;
         if (ImGui.Checkbox("Advance dialogue ourselves", ref advance))
         {

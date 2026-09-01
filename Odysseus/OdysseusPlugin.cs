@@ -72,6 +72,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly OdysseusIpc _ipc;
     private readonly ConfigWindow _configWindow;
     private readonly MainWindow _mainWindow;
+    private readonly QuestLineOverlay _questLine;
     private readonly DebugWindow _debugWindow;
 #if DEBUG
     private readonly Services.Gathering.GameGatherWorld _gatherWorld;
@@ -129,9 +130,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var ingredients = new Services.Deliveries.IngredientSource(DataManager, message => Warn(message));
         var making = new ItemMaking(artisan, gatherBuddy, recipes, ingredients,
             () => _config.DeliveryCraftJob, () => deliveryWorld.CurrentCraftType, id => deliveryWorld.ItemCount(id));
+        var vnav = new VnavIpc(PluginInterface, message => Warn(message));
         _world = new GameStepWorld(
             ClientState, ObjectTable, Condition, GameGui, TargetManager, DataManager,
-            new VnavIpc(PluginInterface, message => Warn(message)),
+            vnav,
             new DaedalusIpc(PluginInterface, message => Warn(message)),
             new TextAdvanceIpc(PluginInterface, () => _config.PickQuestRewards, message => Warn(message)),
             new LifestreamIpc(PluginInterface, message => Warn(message)),
@@ -354,6 +356,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _windowSystem.AddWindow(_pathEditorWindow);
         _windowSystem.AddWindow(_logWindow);
 
+        _questLine = new QuestLineOverlay(_controller, vnav, () => _config.ShowQuestLine);
+        PluginInterface.UiBuilder.Draw += _questLine.Draw;
         PluginInterface.UiBuilder.Draw += _windowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi += OpenConfig;
         PluginInterface.UiBuilder.OpenMainUi += OpenMain;
@@ -432,6 +436,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         CommandManager.RemoveHandler(CommandShort);
 
         Framework.Update -= OnFrameworkUpdate;
+        PluginInterface.UiBuilder.Draw -= _questLine.Draw;
         PluginInterface.UiBuilder.Draw -= _windowSystem.Draw;
         PluginInterface.UiBuilder.OpenConfigUi -= OpenConfig;
         PluginInterface.UiBuilder.OpenMainUi -= OpenMain;

@@ -64,6 +64,9 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>Advance subtitle boxes and confirm cutscene skips ourselves — works without TextAdvance.</summary>
     public bool AutoAdvanceDialogue { get; set; } = true;
 
+    /// <summary>Draw the route to the active step in the world — vnavmesh's live waypoints, or a straight line to the mark.</summary>
+    public bool ShowQuestLine { get; set; } = true;
+
     // ── Priority quests ──
 
     /// <summary>The list, in priority order. Only meaningful while <see cref="PersistPriorityList"/> is on.</summary>
