@@ -43,6 +43,10 @@
       <Link>licenses\Apache-2.0.txt</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <Content Include="..\NOTICE.md" Condition="Exists('..\NOTICE.md')">
+      <Link>NOTICE.md</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <!-- Allow the test assembly to access internal types -->
