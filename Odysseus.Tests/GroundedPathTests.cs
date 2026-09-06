@@ -33,7 +33,7 @@ public class GroundedPathTests
             Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 146,
             Position = new Vector3(50, 0, 50), Fly = true, Mount = false,
         };
-        var world = new FakeStepWorld { CanFlyHere = true, ArriveOnMove = false, TerritoryId = 146 };
+        var world = new FakeStepWorld { CanFlyHere = true, ArriveOnMove = false, TerritoryId = 146, IsMounted = true };
         var ex = new StepExecutor(world);
         ex.Begin(step, groundOnly: groundOnly);
         for (var i = 0; i < 8; i++) { ex.Tick(); world.Advance(0.5); }

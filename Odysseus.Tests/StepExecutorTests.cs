@@ -214,7 +214,7 @@ public class StepExecutorTests
         Run(ex, grounded);
         Assert.Contains(grounded.Calls, c => c.StartsWith("Move") && c.EndsWith("fly=False"));
 
-        var flying = new FakeStepWorld { ArriveOnMove = true, CanFlyHere = true };
+        var flying = new FakeStepWorld { ArriveOnMove = true, CanFlyHere = true, IsMounted = true };   // a fly move needs the saddle
         ex = new StepExecutor(flying);
         ex.Begin(step);
         Run(ex, flying);
@@ -423,7 +423,7 @@ public class StepExecutorTests
     {
         // A Yanxia roofline held a combat approach at exactly 25.1y with vnav claiming motion
         // the whole time — the not-moving ladder never got a turn while the jump hoped.
-        var world = new FakeStepWorld { TerritoryId = 614, CanFlyHere = true };
+        var world = new FakeStepWorld { TerritoryId = 614, CanFlyHere = true, IsMounted = true };
         world.PlayerPosition = new Vector3(721, 117, -85);   // 25y out, wedged
         var ex = new StepExecutor(world);
         ex.Begin(new QuestStep { Kind = StepKind.Combat, KindName = "Combat", Fly = true, EnemySpawnType = EnemySpawnType.AutoOnEnterArea, KillEnemyDataIds = [7601], TerritoryId = 614, Position = new Vector3(721, 117, -60) });
@@ -910,6 +910,22 @@ public class StepExecutorTests
         Assert.DoesNotContain(world.Calls, c => c.StartsWith("Teleport"));
         Assert.DoesNotContain(world.Calls, c => c.StartsWith("Log") && c.Contains("taking the air"));
         Assert.Contains(world.Calls, c => c.StartsWith("Move ") && c.Contains("fly=False"));
+    }
+
+    [Fact]
+    public void A_short_fly_leg_on_foot_walks_rather_than_queueing_an_air_path()
+    {
+        // Cedarwood: dismounted at the last node, the next spawn 29y off, the step says Fly.
+        // Under the mount-worth distance nothing mounts, so the move must be a walk.
+        var world = new FakeStepWorld { TerritoryId = 135, CanFlyHere = true, CanMountHere = true };
+        world.PlayerPosition = new Vector3(516, 72, -260);
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", Fly = true, TerritoryId = 135, Position = new Vector3(515, 78, -288) });
+        for (var i = 0; i < 8 && !world.Calls.Any(c => c.StartsWith("Move")); i++) { ex.Tick(); world.Advance(0.5); }
+
+        Assert.DoesNotContain("Mount", world.Calls);
+        Assert.Contains(world.Calls, c => c.StartsWith("Move") && c.Contains("fly=False"));
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Move") && c.Contains("fly=True"));
     }
 
     [Fact]

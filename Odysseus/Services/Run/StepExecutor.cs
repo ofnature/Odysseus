@@ -718,6 +718,11 @@ public sealed class StepExecutor
                         _farFly = false;
                         _wedgeFly = false;
                         _flyFallback = false;
+                        if (_overTop && _detourFly)
+                        {
+                            _detourTo = null;
+                            _detourFly = false;
+                        }
                         _world.Log("The mount would not come — this leg stays on foot.");
                     }
                     Enter(Phase.Move); // mounted, or long enough — walking is always an option
@@ -1850,7 +1855,7 @@ public sealed class StepExecutor
                     _detourNeedsShard = false;
                     _detourFly = true;
                     _frozenSince = now;
-                    Enter(Phase.Move);
+                    Enter(_world.IsMounted ? Phase.Move : Phase.Mount);
                     return;
                 }
                 if (_lastIssuedFly && !_groundFallback)
@@ -1968,9 +1973,13 @@ public sealed class StepExecutor
 
         // While diving, every move is a volume move — the ground mesh has nothing down here.
         // A flown detour (the ledge escape) flies regardless of what the step says.
-        var fly = ((step.Fly || _wedgeFly || _farFly) && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback && !_world.IsRidingVehicle)
-                  || _world.IsDiving
-                  || (_detourFly && detour is not null);
+        // A fly move needs the saddle: issued on foot it is an air path the follower cannot
+        // walk, and the character stands still until the frozen ladder gives it the ground. A
+        // 29-yalm hop between Cedarwood spawns did exactly that, dismounted from the last node.
+        var fly = (((step.Fly || _wedgeFly || _farFly) && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback && !_world.IsRidingVehicle)
+                   || (_detourFly && detour is not null))
+                  && _world.IsMounted
+                  || _world.IsDiving;
         _lastIssuedFly = fly;
 
         // The mesh answered nothing and we are standing still. Before asking again: a destination
