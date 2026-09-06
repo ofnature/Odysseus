@@ -1,6 +1,18 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.6 — 2026-09-06
+
+The tail of the Arkasodara chain, and the thread on the ground.
+
+### Getting there
+- A passenger ride keeps its wheels on the ground: riding a quest cart or a shared mount stands down every air rung and the in-zone teleport — no wings, no dismount, no crystal that would separate you from it
+- A mount that never comes (a quest section that forbids it) kills the fly intents instead of pressing fly-on-foot into a hillside; three stall-hops without ten yalms of progress stop the leg and hand it to the re-path ladder rather than hopping a fourth time
+- The route to the active step is drawn in the world — vnavmesh's live waypoints while a path is followed, else a straight line to the mark — with a ring and the distance at the goal; a config toggle turns it off
+
+### Packaging
+- NOTICE.md ships beside the Apache licence it explains, so the GatherBuddy node atlas travels with its attribution and modification statement, not just the licence text
+
 ## v0.2.5 — 2026-08-23
 
 The Qitari and Arkasodara unlock chains, run live end to end. Every change came from a field failure and carries a test.
