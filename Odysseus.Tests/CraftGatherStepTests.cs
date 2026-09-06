@@ -412,6 +412,8 @@ public class CraftGatherStepTests
         public bool CanGatherAnswer { get; set; } = true;
         public bool CanGather(uint itemId, uint territoryHint = 0) => Enabled && CanGatherAnswer;
         public string WhyNot(uint itemId, uint territoryHint = 0) => "test says no";
+        public uint? ZoneOf(uint itemId) => null;
+        public string Where(uint itemId) => "";
         public List<(uint Item, int Count)> Starts { get; } = [];
         public int TicksSeen { get; private set; }
         public int TicksUntilDone { get; set; } = 3;

@@ -67,6 +67,15 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>Draw the route to the active step in the world — vnavmesh's live waypoints, or a straight line to the mark.</summary>
     public bool ShowQuestLine { get; set; } = true;
 
+    /// <summary>
+    /// Gather with our own gatherer — quest gathers, deliveries and the gather lists — rather than
+    /// handing to GatherBuddy's auto-gather lists. Off, everything falls back to the handoff.
+    /// </summary>
+    public bool OwnGathering { get; set; } = true;
+
+    /// <summary>The gather lists, in the order they are shown.</summary>
+    public List<Services.Gathering.GatherList> GatherLists { get; set; } = [];
+
     // ── Priority quests ──
 
     /// <summary>The list, in priority order. Only meaningful while <see cref="PersistPriorityList"/> is on.</summary>

@@ -74,10 +74,12 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly MainWindow _mainWindow;
     private readonly QuestLineOverlay _questLine;
     private readonly DebugWindow _debugWindow;
-#if DEBUG
     private readonly Services.Gathering.GameGatherWorld _gatherWorld;
     private readonly Services.Gathering.IOwnGatherer _ownGatherer;
-
+    private readonly Services.Gathering.GatherableIndex _gatherables;
+    private readonly Services.Gathering.GatherListRunner _gatherLists;
+    private bool _gatherListsWereRunning;
+#if DEBUG
     // The work-list bench: debug builds only, so a release carries no half-finished feature.
     private readonly Services.Work.WorkList _workList = new();
     private readonly Services.Work.WorkRunner _workRunner;
@@ -237,15 +239,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var deliveryRequests = new Services.Deliveries.DeliveryRequests(DataManager, message => Warn(message), deliveryBonus);
         var gatheringSource = new Services.Deliveries.GatheringSource(DataManager, message => Warn(message));
 
-#if DEBUG
-        // Our own gathering, offered to the delivery runner in place of the GatherBuddy handoff.
-        // Debug only until it has worked once: without it the gather route behaves exactly as it
-        // does today, which is to stop and say what it needs.
+        // Our own gathering: quest gathers, deliveries and the gather lists. On by default now
+        // that it has worked every node of a tribe chain and the delivery runs; the config
+        // toggle turns it off, and everything falls back to the GatherBuddy handoff.
         _gatherWorld = new Services.Gathering.GameGatherWorld(
             ClientState, ObjectTable, Condition, GameGui, _world, message => Say(message));
-        // Probe by default. Opening a node has locked this client up more than once and the cause
-        // is not yet understood, so the interaction is something you turn on deliberately in the
-        // Workbench, not something a delivery does to you.
         _ownGatherer = new Services.Gathering.OwnGatherer(
             new Services.Gathering.GatherRunner(_gatherWorld, new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap)),
             gatheringSource,
@@ -253,8 +251,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 Services.Gathering.NodeAtlas.PathBeside(PluginInterface.AssemblyLocation.DirectoryName),
                 message => Warn(message)),
             message => Say(message));
+        _ownGatherer.Enabled = _config.OwnGathering;
         questExecutor.OwnGatherer = _ownGatherer;
-#endif
+        _gatherables = new Services.Gathering.GatherableIndex(DataManager, message => Warn(message));
+        _gatherLists = new Services.Gathering.GatherListRunner(
+            _ownGatherer, id => _world.ItemCount(id), id => _gatherables.NameOf(id), message => Say(message));
 
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(
             _world,
@@ -272,9 +273,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             new StepExecutor(_world, dialogue, () => false),
             () => _config.DeliveryCraftJob,
             message => Say(message)
-#if DEBUG
             , _ownGatherer
-#endif
             );
 #if DEBUG
         // After the catalogues and both runners exist — it takes all four, and a debug-only window
@@ -282,7 +281,6 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _workRunner = new Services.Work.WorkRunner(
             new WorkEngines(_tribes, _deliveries, _tribeRunner, _deliveryRunner),
             message => Say(message));
-        _ownGatherer.ProbeOnly = true;
         _workbenchWindow = new WorkbenchWindow(_tribes, _deliveries, _workList, _workRunner, _ownGatherer, _gatherWorld);
 #endif
 
@@ -340,7 +338,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => TargetManager.Target?.Position,
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
             () => ClientState.TerritoryType,
-            () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—"));
+            () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—",
+            _gatherLists, _gatherables, _ownGatherer, id => _world.ItemCount(id)));
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
@@ -527,6 +526,30 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // Spending owns the frame while it runs; it is short and never touches the controller.
         if (!_spender.IsFinished) { NameFrameOwner($"scrip spending ({_spender.State}: {_spender.StatusLine})"); _spender.Tick(); return; }
 
+        // The gather lists own the frame while they run; the runner drives its own executor.
+        _ownGatherer.Enabled = _config.OwnGathering;
+        if (_gatherLists.State == Services.Gathering.GatherListRunState.Running)
+        {
+            _gatherListsWereRunning = true;
+            NameFrameOwner($"the gather lists ({_gatherLists.Status})");
+            _gatherLists.Tick();
+            return;
+        }
+        if (_gatherListsWereRunning)
+        {
+            _gatherListsWereRunning = false;
+            // Remove-completed is per list, applied once the run has ended however it ended.
+            var pruned = 0;
+            foreach (var list in _config.GatherLists)
+                if (list.RemoveCompleted)
+                    pruned += list.Items.RemoveAll(i => _world.ItemCount(i.ItemId) >= i.TargetCount);
+            if (pruned > 0)
+            {
+                SaveConfig();
+                Say($"Gather lists: removed {pruned} completed item(s).");
+            }
+        }
+
         // A delivery run owns the frame outright — it never uses the quest controller.
         if (_deliveryRunner.State is not (Services.Deliveries.DeliveryRunState.Idle or Services.Deliveries.DeliveryRunState.Done
             or Services.Deliveries.DeliveryRunState.Faulted or Services.Deliveries.DeliveryRunState.Blocked))
@@ -615,6 +638,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var world = player.HomeWorld.ValueNullable?.Name.ExtractText() ?? string.Empty;
         var questId = _controller.QuestId;
         var running = _controller.State != RunState.Idle;
+        var gathering = _gatherLists.State == Services.Gathering.GatherListRunState.Running;
         return new FleetStatus
         {
             SenderId = $"{name}@{world}",
@@ -624,8 +648,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             QuestId = running ? questId : (ushort)0,
             QuestName = running ? _catalog.NameOf(questId) : string.Empty,
             Sequence = running ? _controller.Sequence : 0,
-            State = _controller.State.ToString(),
-            StatusLine = _controller.StatusLine,
+            State = gathering ? "Gathering" : _controller.State.ToString(),
+            StatusLine = gathering ? _gatherLists.Status : _controller.StatusLine,
             SentUnixMs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
         };
     }

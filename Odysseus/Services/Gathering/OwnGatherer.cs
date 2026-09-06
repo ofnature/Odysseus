@@ -30,6 +30,12 @@ public interface IOwnGatherer
     /// <summary>Why <see cref="CanGather"/> said no, for the log: which link is missing.</summary>
     string WhyNot(uint itemId, uint territoryHint = 0);
 
+    /// <summary>The zone the gatherer would go to for this item, or null when it cannot place it.</summary>
+    uint? ZoneOf(uint itemId);
+
+    /// <summary>Where the item is found, for people: "Yak T'el — Miner Lv 90". Empty when the sheets do not say.</summary>
+    string Where(uint itemId);
+
     /// <summary>Go and get <paramref name="count"/> of it at <paramref name="collectability"/> or better.</summary>
     bool Start(uint itemId, int count, int collectability, uint territoryHint = 0);
 
@@ -79,6 +85,10 @@ public sealed class OwnGatherer : IOwnGatherer
 
     public bool CanGather(uint itemId, uint territoryHint = 0)
         => Enabled && GatheringPlan.For(itemId, _source, _atlas, territoryHint) is not null;
+
+    public uint? ZoneOf(uint itemId) => GatheringPlan.For(itemId, _source, _atlas)?.TerritoryId;
+
+    public string Where(uint itemId) => _source.For(itemId)?.Describe() ?? string.Empty;
 
     public string WhyNot(uint itemId, uint territoryHint = 0)
     {

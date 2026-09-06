@@ -293,6 +293,15 @@ public sealed class ConfigWindow : OdysseusWindow
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("The capped-reward warning (tomestones, seals, gil). On: answer Yes and keep the run moving, losing the excess. Off: the dialog waits for you.");
 
+        var ownGathering = _config.OwnGathering;
+        if (ImGui.Checkbox("Gather with Odysseus", ref ownGathering))
+        {
+            _config.OwnGathering = ownGathering;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Quest gathers, gathered deliveries and the gather lists are done by our own gatherer. Off, they hand to GatherBuddy's auto-gather lists as before.");
+
         var questLine = _config.ShowQuestLine;
         if (ImGui.Checkbox("Draw the route in the world", ref questLine))
         {

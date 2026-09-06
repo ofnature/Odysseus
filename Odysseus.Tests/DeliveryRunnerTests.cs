@@ -106,6 +106,8 @@ public class DeliveryRunnerTests
 
         public bool CanGather(uint itemId, uint territoryHint = 0) => Knows.Contains(itemId);
         public string WhyNot(uint itemId, uint territoryHint = 0) => "test says no";
+        public uint? ZoneOf(uint itemId) => null;
+        public string Where(uint itemId) => "";
 
         public bool Start(uint itemId, int count, int collectability, uint territoryHint = 0)
         {

@@ -119,14 +119,8 @@ public sealed class WorkbenchWindow : Window
 
         OdysseusTheme.SectionHeader("GATHERING (debug)");
 
-        var on = _gatherer.Enabled;
-        if (ImGui.Checkbox("Let deliveries gather with ours", ref on))
-            _gatherer.Enabled = on;
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip(string.Join('\u000A',
-                "Off, a gather delivery hands to GatherBuddy exactly as it always did.",
-                "On, it uses ours — which has wedged the client. Leave it off until the",
-                "buttons below say why."));
+        ImGui.TextColored(OdysseusTheme.TextDisabled,
+            _gatherer.Enabled ? "On — see Settings: Gather with Odysseus." : "Off — see Settings: Gather with Odysseus.");
 
         var mode = _gatherer.DryRun ? 0 : _gatherer.ProbeOnly ? 1 : 2;
         ImGui.SetNextItemWidth(330f);
