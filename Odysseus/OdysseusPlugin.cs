@@ -74,6 +74,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly MainWindow _mainWindow;
     private readonly QuestLineOverlay _questLine;
     private readonly VnavIpc _vnav;
+    private readonly GatherListsWindow _gatherWindow;
     private readonly DebugWindow _debugWindow;
     private readonly Services.Gathering.GameGatherWorld _gatherWorld;
     private readonly Services.Gathering.IOwnGatherer _ownGatherer;
@@ -327,6 +328,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         // Built after the windows it can open: the deps record captures them, and the
         // nullable analysis is right that a field assigned later is null at this point.
+        _gatherWindow = new GatherListsWindow(_config, SaveConfig, _gatherLists, _gatherables, _ownGatherer,
+            id => _world.ItemCount(id), () => _controller.State is not (RunState.Idle or RunState.Faulted));
         _mainWindow = new MainWindow(new MainWindowDeps(
             _config, SaveConfig, _presence, _quests, _catalog, _pathStore, _controller, _frontier, _fleet, _priority, _priorityWorld,
             OpenConfig,
@@ -342,7 +345,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
             () => ClientState.TerritoryType,
             () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—",
-            _gatherLists, _gatherables, _ownGatherer, id => _world.ItemCount(id)));
+            () => _gatherWindow.IsOpen = !_gatherWindow.IsOpen));
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
@@ -355,6 +358,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _windowSystem.AddWindow(_workbenchWindow);
 #endif
         _windowSystem.AddWindow(_fleetWindow);
+        _windowSystem.AddWindow(_gatherWindow);
         _windowSystem.AddWindow(_pathEditorWindow);
         _windowSystem.AddWindow(_logWindow);
 
