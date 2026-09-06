@@ -1,6 +1,25 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.7 — 2026-09-06
+
+Gather lists, and the gatherer that runs them, field-proven on a crystals list end to end.
+
+### Gather lists
+- Several named lists, each item with a target bag count (GatherBuddy's shape), in a window of their own toggled from the main window: pick, rename, enable, remove-completed, live held/target per row, an item search over every gatherable, Gather / Stop, and an Afterwards choice — Return, the inn, or an estate through Lifestream — sent once a finished run can act
+- A run takes every enabled list's short items zone by zone through the own gatherer, with an outcome per item; an item that cannot be placed or that faults is recorded and the next is tried
+- The own gatherer leaves debug builds for good: on by default behind Settings → "Gather with Odysseus", the Workbench's probe and dry-run modes kept as diagnostics; quest gathers, deliveries and the lists all fall back to the GatherBuddy handoff when it is off
+
+### The gatherer
+- Plain nodes: the row is pressed again once its gathering action has played, the window wait counts from the last press, and nothing is closed while an action runs — the walk-away that locks the client
+- The crystal container is counted, so a shard list stops at its target instead of gathering forever
+- A node reached in the air is landed by the executor's own dismount, with its stalled-descent reroute (five seconds now, onto the nearest floor the mesh knows), and the runner waits for the ground before it opens
+
+### Getting there
+- A fly move needs the saddle: on foot the leg walks, long legs mount first; the climb detour goes through the mount too
+- A teleport Lifestream accepts but never starts is asked again after four seconds, and the game's aetheryte list is refreshed before every request — the first teleport of a run was being silently dropped
+- Pathing can go through Ariadne instead of vnavmesh (Settings → Pathing): the same gates under its own name, switched live; it needs Mnemosyne running
+
 ## v0.2.6 — 2026-09-06
 
 The tail of the Arkasodara chain, and the thread on the ground.
