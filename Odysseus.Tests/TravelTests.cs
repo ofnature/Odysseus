@@ -161,7 +161,7 @@ public class TravelExecutorTests
         var ex = new StepExecutor(w);
         ex.Begin(Interact(131, new Vector3(50, 0, 0)));
 
-        ex.Tick();                       // teleport issued
+        Ticks(ex, w, 2);                 // the list is warmed, then the teleport issued
         Assert.Contains("Teleport 9", w.Calls);
         w.TerritoryId = 130;             // landed in Steps of Nald
         for (var i = 0; i < 40 && ex.Status == StepStatus.Running; i++)
@@ -428,7 +428,7 @@ public class TravelExecutorTests
         w.AttunedByTerritory[621] = 99;
         var ex = new StepExecutor(w);
         ex.Begin(Interact(621, new Vector3(50, 0, 0), aetheryte: "Made Up - Place"));
-        ex.Tick();   // the teleport is issued by the phase, not by Begin
+        Ticks(ex, w, 2);   // the teleport is issued by the phase, not by Begin — after the list is warmed
 
         Assert.NotEqual(StepStatus.Failed, ex.Status);
         Assert.Contains(w.Calls, c => c.Contains("Made Up - Place"));

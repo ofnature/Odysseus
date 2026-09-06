@@ -409,6 +409,9 @@ public sealed class StepExecutor
     private DateTime _lastTeleportTry;
     private int _teleportAsks;
     private const int MaxTeleportAsks = 2;
+    private bool _aetheryteListWarmed;
+    private DateTime _aetheryteWarmedAt;
+    private static readonly TimeSpan AetheryteWarmup = TimeSpan.FromMilliseconds(500);
 
     /// <summary>A teleport that took goes travel-busy within a second or two; past this, it did not.</summary>
     private static readonly TimeSpan TeleportStartGrace = TimeSpan.FromSeconds(4);
@@ -508,6 +511,7 @@ public sealed class StepExecutor
         _fights = 0;
         _skipTeleport = skipTeleport;
         _teleportAsks = 0;
+        _aetheryteListWarmed = false;
         // BossMod's AI movement controller refuses legs it cannot path ("off mesh") and fights
         // vnavmesh for the character. Travel belongs to us; the fight turns it back on below.
         CommandAi(false);
@@ -632,6 +636,17 @@ public sealed class StepExecutor
                     if (now - _phaseStart > ReadyWait) Fail("never became ready to teleport");
                     break;
                 }
+                // The game's aetheryte list fills a frame or two after it is asked to: a request
+                // made in the same breath is accepted and casts nothing. Warm it, then ask.
+                if (!_aetheryteListWarmed)
+                {
+                    _aetheryteListWarmed = true;
+                    _aetheryteWarmedAt = now;
+                    _world.RefreshAetheryteList();
+                    break;
+                }
+                if (now - _aetheryteWarmedAt < AetheryteWarmup)
+                    break;
                 // A refusal right after a gearset change or a dismount is the game's action lock
                 // still settling, not a missing attunement — ask again for a few seconds before
                 // deciding it is real. The Qitari opener's equip refused the very next cast.

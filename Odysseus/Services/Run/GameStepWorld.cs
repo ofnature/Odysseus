@@ -372,10 +372,10 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
-    public bool Teleport(uint aetheryteId)
+    public bool Teleport(uint aetheryteId) => _lifestream.Teleport(aetheryteId);
+
+    public void RefreshAetheryteList()
     {
-        // The game's own aetheryte list is lazy: until something refreshes it, a teleport request
-        // is accepted and does nothing — the first teleport of every gather run, twice today.
         try
         {
             var telepo = Telepo.Instance();
@@ -386,7 +386,6 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         {
             _log($"Refreshing the aetheryte list failed: {ex.Message}");
         }
-        return _lifestream.Teleport(aetheryteId);
     }
 
     /// <summary>

@@ -182,6 +182,12 @@ public interface IStepWorld
     /// <summary>Empty slots across the four main bags.</summary>
     int FreeBagSlots { get; }
 
+    /// <summary>
+    /// Ask the game to rebuild its own aetheryte list. It fills on a later frame, and a teleport
+    /// requested before it has is accepted and silently dropped — the first teleport of every run.
+    /// </summary>
+    void RefreshAetheryteList();
+
     /// <summary>Open the game's repair window — the Repair general action.</summary>
     void OpenRepairWindow();
 
