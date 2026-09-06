@@ -42,8 +42,12 @@ public class GatherRunnerTests
         /// <summary>The list takes a moment to appear after gathering begins, as it does in game.</summary>
         public TimeSpan WindowDelay { get; set; } = TimeSpan.Zero;
         private DateTime _openedAt;
-        public bool ItemListOpen => NodeOpen && UtcNow - _openedAt >= WindowDelay;
-        public bool ExecutingAction { get; set; }
+        // A plain node's list hides while each gather plays, as the real one does.
+        public bool ItemListOpen => NodeOpen && UtcNow - _openedAt >= WindowDelay && !(PlainNode && ExecutingAction);
+        // A plain gather's action outlasts the press by a tick, as the real one outlasts it by frames.
+        private int _actionLeft;
+        private bool _actionForced;
+        public bool ExecutingAction { get => _actionForced || _actionLeft > 0; set => _actionForced = value; }
         public CollectableState? Collectable { get; private set; }
         public List<uint> Actions { get; } = [];
 
@@ -116,7 +120,7 @@ public class GatherRunnerTests
             {
                 Held++;
                 Integrity--;
-                ExecutingAction = true;   // the gathering action plays until the next advance
+                _actionLeft = 2;   // the gathering action plays through the next tick
                 if (Integrity <= 0) { NodeOpen = false; Spawned.Clear(); }
                 return true;
             }
@@ -163,7 +167,7 @@ public class GatherRunnerTests
         public void Advance(double seconds)
         {
             UtcNow = UtcNow.AddSeconds(seconds);
-            if (PlainNode) ExecutingAction = false;
+            if (_actionLeft > 0) _actionLeft--;
         }
     }
 
@@ -229,6 +233,24 @@ public class GatherRunnerTests
         Assert.Empty(world.Actions);   // no rotation on a plain node
         Assert.DoesNotContain(world.Log, m => m.Contains("collectable window did not open"));
         Assert.DoesNotContain(world.Log, m => m.Contains("has no item"));   // the Cedarwood loop: refused press read as an empty node
+    }
+
+    [Fact]
+    public void A_long_plain_node_is_worked_past_the_window_wait_without_being_abandoned()
+    {
+        // Cedarwood: five presses in, the list hid for a gather and the eight-second
+        // "no window appeared" clock — counted from the node opening — walked off mid-action.
+        var target = Target(new Vector3(10, 0, 10));
+        var (runner, world) = Ready(target);
+        world.PlainNode = true;
+        world.Integrity = 12;
+        runner.Begin(target, count: 10, minimumCollectability: 0);
+        Run(runner, world);
+
+        Assert.True(runner.State == GatherRunState.Done, runner.FailReason + " || " + string.Join(" ; ", world.Log));
+        Assert.Equal(10, world.Held);
+        Assert.DoesNotContain(world.Log, m => m.Contains("no window appeared"));
+        Assert.DoesNotContain(world.Log, m => m.Contains("trying the next"));
     }
 
     [Fact]
