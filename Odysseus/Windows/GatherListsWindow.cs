@@ -154,6 +154,20 @@ public sealed class GatherListsWindow : OdysseusWindow
         }
         OdysseusTheme.EndCard();
 
+        ImGui.SetNextItemWidth(190f);
+        if (ImGui.BeginCombo("Afterwards", GatherHomeCommands.Label(_config.GatherHome)))
+        {
+            foreach (var home in Enum.GetValues<GatherHome>())
+                if (ImGui.Selectable(GatherHomeCommands.Label(home), home == _config.GatherHome))
+                {
+                    _config.GatherHome = home;
+                    _save();
+                }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Where a finished run takes you. Lifestream handles the inn and the estates; Return is the action, on its own cooldown.");
+
         var runner = _runner;
         if (runner.State == GatherListRunState.Running)
         {
