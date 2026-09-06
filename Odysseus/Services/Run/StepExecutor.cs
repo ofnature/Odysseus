@@ -224,7 +224,8 @@ public sealed class StepExecutor
     private static readonly TimeSpan FrozenStallLimit = TimeSpan.FromSeconds(12);
 
     /// <summary>A mid-air dismount still airborne after this long is a descent with no floor.</summary>
-    private static readonly TimeSpan BlockedDescentAfter = TimeSpan.FromSeconds(10);
+    // A three-yalm descent touches down in a second or two; five is a descent that will not.
+    private static readonly TimeSpan BlockedDescentAfter = TimeSpan.FromSeconds(5);
 
     /// <summary>Wedge re-paths before the leg is declared unservable and the fault says where.</summary>
     private const int MaxFrozenStops = 6;
@@ -1473,9 +1474,13 @@ public sealed class StepExecutor
             var goal = step.DataId is { } id && _world.PositionOfDataId(id) is { } objectAt ? objectAt : step.Position;
             if (goal is { } g && Vector3.Distance(g, _world.PlayerPosition) > 0.5f)
             {
+                // Come down on a floor the mesh knows, beside the mark, rather than back onto the
+                // same rock: a shard node's spawn sat on one, and the reroute over the mark itself
+                // spent twenty seconds finding that out again.
+                var floor = _world.NearestReachablePoint(g, 8f) ?? g;
                 _descentRerouted = true;
-                _world.Log($"The descent is not landing (at {Fmt(_world.PlayerPosition)}) — flying over {Fmt(g)} to come down on its floor.");
-                _detourTo = g;
+                _world.Log($"The descent is not landing (at {Fmt(_world.PlayerPosition)}) — flying over {Fmt(floor)} to come down on its floor.");
+                _detourTo = floor;
                 _detourThen = Phase.Dismount;
                 _detourTolerance = InteractReach - ArrivalSlack;
                 _detourNudged = false;
