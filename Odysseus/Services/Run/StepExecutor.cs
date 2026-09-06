@@ -406,6 +406,8 @@ public sealed class StepExecutor
     private bool _ownGatherAsked;
     private bool _ownGatherDeclineSaid;
     private DateTime _lastTeleportTry;
+    private int _teleportAsks;
+    private const int MaxTeleportAsks = 2;
     /// <summary>The instance this step hands off has been run; arriving again means finish, not re-enter.</summary>
     private bool _handoffDone;
     private uint _teleportTarget;
@@ -501,6 +503,7 @@ public sealed class StepExecutor
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
+        _teleportAsks = 0;
         // BossMod's AI movement controller refuses legs it cannot path ("off mesh") and fights
         // vnavmesh for the character. Travel belongs to us; the fight turns it back on below.
         CommandAi(false);
@@ -641,6 +644,17 @@ public sealed class StepExecutor
                 break;
 
             case Phase.TeleportWait:
+                // Lifestream said yes and nothing happened: the cast fell into the action lock a
+                // gearset change leaves behind (the gather runner switches job, then teleports).
+                // Ask again before believing it — the gather lists faulted every item this way.
+                if (!_sawTravelBusy && !_world.IsTravelBusy && _world.TerritoryId != _teleportTerritory
+                    && now - _phaseStart > TravelStart && _teleportAsks < MaxTeleportAsks)
+                {
+                    _teleportAsks++;
+                    _world.Log($"Teleport to {step.AetheryteShortcut ?? $"aetheryte {_teleportTarget}"} never started — asking again ({_teleportAsks}/{MaxTeleportAsks}).");
+                    Enter(Phase.Teleport);
+                    break;
+                }
                 TickTravelWait(now, arrived: _world.TerritoryId == _teleportTerritory && !_world.IsTravelBusy && _world.IsReady,
                     what: $"teleport to {step.AetheryteShortcut}", next: NextAfterTeleport);
                 break;

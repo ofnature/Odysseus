@@ -475,6 +475,39 @@ public class TravelExecutorTests
     }
 
     [Fact]
+    public void A_teleport_that_never_starts_is_asked_again_before_it_is_believed()
+    {
+        // The gather runner switches job and teleports on the next beat: Lifestream says yes,
+        // the cast falls into the gearset action lock, and nothing ever goes travel-busy.
+        var w = World();
+        w.ArriveOnTeleport = false;   // accepted, but the world never moves
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(621, new Vector3(50, 0, 0), aetheryte: "Lochs - Ala Mhigan Quarter"));
+        Ticks(ex, w, 2);
+        Assert.Equal(1, w.Calls.Count(c => c.StartsWith("Teleport")));
+
+        Ticks(ex, w, 24);   // past the ten-second travel-start budget
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.True(w.Calls.Count(c => c.StartsWith("Teleport")) >= 2, "never asked again");
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("never started — asking again"));
+
+        // The second ask takes: the world moves, the step goes on.
+        w.ArriveOnTeleport = true;
+        Ticks(ex, w, 30);
+        Assert.NotEqual(StepStatus.Failed, ex.Status);
+
+        // Nothing ever happening is still the honest fault, after the asks are spent.
+        var stuck = World();
+        stuck.ArriveOnTeleport = false;
+        var ex2 = new StepExecutor(stuck);
+        ex2.Begin(Interact(621, new Vector3(50, 0, 0), aetheryte: "Lochs - Ala Mhigan Quarter"));
+        Ticks(ex2, stuck, 120);
+        Assert.Equal(StepStatus.Failed, ex2.Status);
+        Assert.Contains("never started", ex2.FailReason);
+        Assert.Equal(3, stuck.Calls.Count(c => c.StartsWith("Teleport")));
+    }
+
+    [Fact]
     public void Refused_teleport_asks_again_before_faulting_with_the_lifestream_hint()
     {
         // The Qitari opener's gearset change refused the very next cast: the action lock was

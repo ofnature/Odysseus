@@ -209,6 +209,8 @@ public sealed class GatheringSource : IGatheringSource
             // Any point on this base will do — they are the same node in different instances.
             var point = _data.GetExcelSheet<GatheringPoint>()
                 .FirstOrDefault(p => p.GatheringPointBase.RowId == b.RowId);
+            if (point.RowId == 0)
+                continue; // no point row for this base: nothing to place, try the next base
             var place = point.PlaceName.ValueNullable?.Name.ExtractText() ?? string.Empty;
             var zone = point.TerritoryType.ValueNullable?.PlaceName.ValueNullable?.Name.ExtractText() ?? string.Empty;
 
