@@ -276,6 +276,9 @@ public sealed unsafe class GameGatherWorld : IGatherWorld
     private static readonly InventoryType[] Inventories =
     [
         InventoryType.Inventory1, InventoryType.Inventory2, InventoryType.Inventory3, InventoryType.Inventory4,
+        // Shards, crystals and clusters have a container of their own: without it a shard list
+        // gathered past its target forever, its own count never moving off the starting number.
+        InventoryType.Crystals,
     ];
 
     /// <summary>
