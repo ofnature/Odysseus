@@ -148,6 +148,11 @@ public sealed class GatherRunner
     private static readonly TimeSpan MoveWait = TimeSpan.FromMinutes(3);
     private static readonly TimeSpan ActionGap = TimeSpan.FromSeconds(1);
 
+    /// <summary>How long a plain-row press gets to become a gathering action before the row is judged dead.</summary>
+    private static readonly TimeSpan PlainPressGrace = TimeSpan.FromSeconds(3);
+    private bool _plainPressed;
+    private bool _plainPressTook;
+
     /// <summary>Leave this much GP so the next node is not started empty.</summary>
     public int GpReserve { get; set; }
 
@@ -375,6 +380,8 @@ public sealed class GatherRunner
                 _opens = 0;
                 _stoppedAt = default;
                 _slotChosenAt = default;
+                _plainPressed = false;
+                _plainPressTook = false;
                 _world.ForgetSlotAttempts();
                 Enter(GatherRunState.Opening);
                 return;
@@ -582,11 +589,33 @@ public sealed class GatherRunner
         // bag holds enough.
         if (_collectability <= 0)
         {
-            if (_world.ExecutingAction || _world.UtcNow - _lastAction < ActionGap)
+            // The gathering action playing is the proof a press took — a successful or a
+            // failed roll both play it. The world's once-per-item guard on the row exists for
+            // collectables, where one press opens a window; here it is lifted between presses.
+            if (_world.ExecutingAction)
+            {
+                _plainPressTook = true;
                 return;
+            }
+            if (_world.UtcNow - _lastAction < ActionGap)
+                return;
+            if (_plainPressed && !_plainPressTook)
+            {
+                if (_world.UtcNow - _lastAction < PlainPressGrace)
+                    return;
+                _world.CloseNode();
+                NextSpot($"the row for item {_itemId} did not respond");
+                return;
+            }
+            if (_plainPressed)
+                _world.ForgetSlotAttempts();
             _lastAction = _world.UtcNow;
+            _plainPressTook = false;
             if (_world.SelectSlotFor(_itemId))
+            {
+                _plainPressed = true;
                 Status = $"Node {_currentNode}: {Gathered} of {_wanted} gathered.";
+            }
             else
             {
                 _world.CloseNode();

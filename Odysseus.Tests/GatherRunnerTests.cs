@@ -103,14 +103,20 @@ public class GatherRunnerTests
 
         public int SlotPicks { get; private set; }
 
+        private readonly HashSet<uint> _fired = [];
+        public int Forgets { get; private set; }
+
         public bool SelectSlotFor(uint itemId)
         {
             if (!ItemListOpen) return false;
+            // The real window's guard: one press per item until the runner forgets it.
+            if (!_fired.Add(itemId)) return false;
             SlotPicks++;
             if (PlainNode)
             {
                 Held++;
                 Integrity--;
+                ExecutingAction = true;   // the gathering action plays until the next advance
                 if (Integrity <= 0) { NodeOpen = false; Spawned.Clear(); }
                 return true;
             }
@@ -146,7 +152,7 @@ public class GatherRunnerTests
         public string Conditions => IsMounted ? "Mounted" : "NormalConditions";
         public int Described { get; private set; }
         public void DescribeOpenWindow() => Described++;
-        public void ForgetSlotAttempts() { }
+        public void ForgetSlotAttempts() { _fired.Clear(); Forgets++; }
         public void CloseNode()
         {
             if (HoldWindowOpen) return; // the game refuses while an action is mid-play
@@ -154,7 +160,11 @@ public class GatherRunnerTests
             Collectable = null;
         }
         void IGatherWorld.Log(string message) => Log.Add(message);
-        public void Advance(double seconds) => UtcNow = UtcNow.AddSeconds(seconds);
+        public void Advance(double seconds)
+        {
+            UtcNow = UtcNow.AddSeconds(seconds);
+            if (PlainNode) ExecutingAction = false;
+        }
     }
 
     private static GatheringTarget Target(params Vector3[] spawns)
@@ -215,8 +225,10 @@ public class GatherRunnerTests
         Assert.Equal(GatherRunState.Done, runner.State);
         Assert.Equal(3, world.Held);
         Assert.Equal(3, world.SlotPicks);
+        Assert.True(world.Forgets >= 2, "the once-per-item guard was never lifted between presses");
         Assert.Empty(world.Actions);   // no rotation on a plain node
         Assert.DoesNotContain(world.Log, m => m.Contains("collectable window did not open"));
+        Assert.DoesNotContain(world.Log, m => m.Contains("has no item"));   // the Cedarwood loop: refused press read as an empty node
     }
 
     [Fact]
