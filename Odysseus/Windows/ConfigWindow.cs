@@ -293,6 +293,17 @@ public sealed class ConfigWindow : OdysseusWindow
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("The capped-reward warning (tomestones, seals, gil). On: answer Yes and keep the run moving, losing the excess. Off: the dialog waits for you.");
 
+        var ariadne = string.Equals(_config.PathingProvider, VnavIpc.AriadneProvider, StringComparison.OrdinalIgnoreCase);
+        ImGui.SetNextItemWidth(160f);
+        if (ImGui.BeginCombo("Pathing", ariadne ? "Ariadne" : "vnavmesh"))
+        {
+            if (ImGui.Selectable("vnavmesh", !ariadne)) { _config.PathingProvider = VnavIpc.VnavmeshProvider; _save(); }
+            if (ImGui.Selectable("Ariadne", ariadne)) { _config.PathingProvider = VnavIpc.AriadneProvider; _save(); }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Which plugin paths and moves the character. Ariadne serves the same gates under its own name and needs Mnemosyne running; vnavmesh can stay installed as the fallback. Switching takes effect immediately.");
+
         var ownGathering = _config.OwnGathering;
         if (ImGui.Checkbox("Gather with Odysseus", ref ownGathering))
         {

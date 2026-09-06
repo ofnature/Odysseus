@@ -73,6 +73,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly ConfigWindow _configWindow;
     private readonly MainWindow _mainWindow;
     private readonly QuestLineOverlay _questLine;
+    private readonly VnavIpc _vnav;
     private readonly DebugWindow _debugWindow;
     private readonly Services.Gathering.GameGatherWorld _gatherWorld;
     private readonly Services.Gathering.IOwnGatherer _ownGatherer;
@@ -133,7 +134,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var ingredients = new Services.Deliveries.IngredientSource(DataManager, message => Warn(message));
         var making = new ItemMaking(artisan, gatherBuddy, recipes, ingredients,
             () => _config.DeliveryCraftJob, () => deliveryWorld.CurrentCraftType, id => deliveryWorld.ItemCount(id));
-        var vnav = new VnavIpc(PluginInterface, message => Warn(message));
+        var vnav = new VnavIpc(PluginInterface, message => Warn(message)) { Provider = _config.PathingProvider };
+        _vnav = vnav;
         _world = new GameStepWorld(
             ClientState, ObjectTable, Condition, GameGui, TargetManager, DataManager,
             vnav,
@@ -529,6 +531,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         // The gather lists own the frame while they run; the runner drives its own executor.
         _ownGatherer.Enabled = _config.OwnGathering;
+        _vnav.Provider = _config.PathingProvider;
+        _presence.PathingProvider = _config.PathingProvider;
         if (_gatherLists.State == Services.Gathering.GatherListRunState.Running)
         {
             _gatherListsWereRunning = true;

@@ -52,6 +52,14 @@ public sealed class PluginPresence
 
     public bool Vnavmesh => IsLoaded(VnavmeshInternalName);
 
+    public const string AriadneInternalName = "Ariadne";
+    public bool Ariadne => IsLoaded(AriadneInternalName);
+
+    /// <summary>Mirrors the config: which pathing plugin a run needs present.</summary>
+    public string PathingProvider { get; set; } = VnavIpc.VnavmeshProvider;
+    private bool UsesAriadne => string.Equals(PathingProvider, VnavIpc.AriadneProvider, StringComparison.OrdinalIgnoreCase);
+    public bool Pathing => UsesAriadne ? Ariadne : Vnavmesh;
+
     public bool Lifestream => IsLoaded(LifestreamInternalName);
 
     public bool TextAdvance => IsLoaded(TextAdvanceInternalName);
@@ -63,7 +71,7 @@ public sealed class PluginPresence
     public bool Theseus => IsLoaded(TheseusInternalName);
 
     /// <summary>Everything required to walk a quest is present.</summary>
-    public bool CoreReady => Vnavmesh && Lifestream && TextAdvance;
+    public bool CoreReady => Pathing && Lifestream && TextAdvance;
 
     /// <summary>
     /// Human-readable reason a run cannot start, or empty when it can. Named so the UI and the run
@@ -72,7 +80,7 @@ public sealed class PluginPresence
     public string MissingSummary()
     {
         var missing = new List<string>();
-        if (!Vnavmesh) missing.Add("vnavmesh");
+        if (!Pathing) missing.Add(UsesAriadne ? "Ariadne" : "vnavmesh");
         if (!Lifestream) missing.Add("Lifestream");
         if (!TextAdvance) missing.Add("TextAdvance");
         return missing.Count == 0 ? string.Empty : "Missing: " + string.Join(", ", missing);

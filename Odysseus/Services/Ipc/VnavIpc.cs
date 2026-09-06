@@ -15,6 +15,34 @@ public sealed class VnavIpc
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly Action<string>? _log;
 
+    /// <summary>The vnavmesh gate prefix, the default; Ariadne serves the same shapes under its own.</summary>
+    public const string VnavmeshProvider = "vnavmesh";
+    public const string AriadneProvider = "Ariadne";
+    private string _provider = VnavmeshProvider;
+
+    /// <summary>
+    /// Which plugin answers: vnavmesh, or Ariadne — whose native gates mirror vnavmesh's shapes
+    /// one for one (its Path.ListWaypoints and Nav.Rebuild are absent, and each degrades: no route
+    /// overlay, no mesh-rebuild rung). Changing it drops every cached subscriber.
+    /// </summary>
+    public string Provider
+    {
+        get => _provider;
+        set
+        {
+            var next = string.Equals(value, AriadneProvider, StringComparison.OrdinalIgnoreCase) ? AriadneProvider : VnavmeshProvider;
+            if (next == _provider)
+                return;
+            _provider = next;
+            _isReady = null; _buildProgress = null; _pathIsRunning = null; _pathfindInProgress = null;
+            _moveTo = null; _moveCloseTo = null; _pathMoveTo = null; _numWaypoints = null; _stop = null;
+            _setTolerance = null; _nearestPointReachable = null; _listWaypoints = null; _rebuild = null;
+            _log?.Invoke($"Pathing now goes through {_provider}.");
+        }
+    }
+
+    private string Gate(string name) => _provider + "." + name;
+
     private ICallGateSubscriber<bool>? _isReady;
     private ICallGateSubscriber<float>? _buildProgress;
     private ICallGateSubscriber<bool>? _pathIsRunning;
@@ -37,7 +65,7 @@ public sealed class VnavIpc
 
     /// <summary>The navmesh for this zone is built and usable.</summary>
     public bool IsReady => Try(() =>
-        (_isReady ??= _pluginInterface.GetIpcSubscriber<bool>("vnavmesh.Nav.IsReady")).InvokeFunc());
+        (_isReady ??= _pluginInterface.GetIpcSubscriber<bool>(Gate("Nav.IsReady"))).InvokeFunc());
 
     /// <summary>
     /// How far through building the zone's mesh it is, 0..1 — or a negative number when it is not
@@ -50,7 +78,7 @@ public sealed class VnavIpc
         {
             try
             {
-                return (_buildProgress ??= _pluginInterface.GetIpcSubscriber<float>("vnavmesh.Nav.BuildProgress"))
+                return (_buildProgress ??= _pluginInterface.GetIpcSubscriber<float>(Gate("Nav.BuildProgress")))
                     .InvokeFunc();
             }
             catch
@@ -70,7 +98,7 @@ public sealed class VnavIpc
     /// </para>
     /// </summary>
     public bool IsPathRunning => Try(() =>
-        (_pathIsRunning ??= _pluginInterface.GetIpcSubscriber<bool>("vnavmesh.Path.IsRunning")).InvokeFunc());
+        (_pathIsRunning ??= _pluginInterface.GetIpcSubscriber<bool>(Gate("Path.IsRunning"))).InvokeFunc());
 
     private ICallGateSubscriber<List<Vector3>>? _listWaypoints;
 
@@ -79,7 +107,7 @@ public sealed class VnavIpc
     {
         try
         {
-            return (_listWaypoints ??= _pluginInterface.GetIpcSubscriber<List<Vector3>>("vnavmesh.Path.ListWaypoints"))
+            return (_listWaypoints ??= _pluginInterface.GetIpcSubscriber<List<Vector3>>(Gate("Path.ListWaypoints")))
                 .InvokeFunc() ?? [];
         }
         catch
@@ -90,7 +118,7 @@ public sealed class VnavIpc
 
     /// <summary>A pathfind is still being computed — movement is pending, not failed.</summary>
     public bool IsPathfinding => Try(() =>
-        (_pathfindInProgress ??= _pluginInterface.GetIpcSubscriber<bool>("vnavmesh.SimpleMove.PathfindInProgress"))
+        (_pathfindInProgress ??= _pluginInterface.GetIpcSubscriber<bool>(Gate("SimpleMove.PathfindInProgress")))
         .InvokeFunc());
 
     /// <summary>Whether movement of any kind is in flight.</summary>
@@ -107,7 +135,7 @@ public sealed class VnavIpc
         {
             try
             {
-                return (_numWaypoints ??= _pluginInterface.GetIpcSubscriber<int>("vnavmesh.Path.NumWaypoints"))
+                return (_numWaypoints ??= _pluginInterface.GetIpcSubscriber<int>(Gate("Path.NumWaypoints")))
                     .InvokeFunc();
             }
             catch
@@ -121,7 +149,7 @@ public sealed class VnavIpc
 
     /// <summary>Paths to a point and starts following it.</summary>
     public bool MoveTo(Vector3 destination, bool fly = false) => Try(() =>
-        (_moveTo ??= _pluginInterface.GetIpcSubscriber<Vector3, bool, bool>("vnavmesh.SimpleMove.PathfindAndMoveTo"))
+        (_moveTo ??= _pluginInterface.GetIpcSubscriber<Vector3, bool, bool>(Gate("SimpleMove.PathfindAndMoveTo")))
         .InvokeFunc(destination, fly));
 
     /// <summary>
@@ -136,7 +164,7 @@ public sealed class VnavIpc
     /// </summary>
     public bool MoveDirect(Vector3 destination, bool fly = false) => Try(() =>
     {
-        (_pathMoveTo ??= _pluginInterface.GetIpcSubscriber<List<Vector3>, bool, object>("vnavmesh.Path.MoveTo"))
+        (_pathMoveTo ??= _pluginInterface.GetIpcSubscriber<List<Vector3>, bool, object>(Gate("Path.MoveTo")))
             .InvokeAction([destination], fly);
         return true;
     });
@@ -144,7 +172,7 @@ public sealed class VnavIpc
     /// <summary>Paths to within <paramref name="tolerance"/> of a point — for standing next to things.</summary>
     public bool MoveCloseTo(Vector3 destination, float tolerance, bool fly = false) => Try(() =>
         (_moveCloseTo ??= _pluginInterface.GetIpcSubscriber<Vector3, bool, float, bool>(
-            "vnavmesh.SimpleMove.PathfindAndMoveCloseTo")).InvokeFunc(destination, fly, tolerance));
+            Gate("SimpleMove.PathfindAndMoveCloseTo"))).InvokeFunc(destination, fly, tolerance));
 
     /// <summary>
     /// Snaps a point onto the walkable mesh, or null when nothing reachable is near it.
@@ -161,7 +189,7 @@ public sealed class VnavIpc
         try
         {
             return (_nearestPointReachable ??= _pluginInterface
-                    .GetIpcSubscriber<Vector3, float, float, Vector3?>("vnavmesh.Query.Mesh.NearestPointReachable"))
+                    .GetIpcSubscriber<Vector3, float, float, Vector3?>(Gate("Query.Mesh.NearestPointReachable")))
                 .InvokeFunc(near, halfExtentXZ, halfExtentY);
         }
         catch
@@ -177,7 +205,7 @@ public sealed class VnavIpc
     /// </summary>
     public bool Rebuild() => Try(() =>
     {
-        (_rebuild ??= _pluginInterface.GetIpcSubscriber<bool>("vnavmesh.Nav.Rebuild")).InvokeFunc();
+        (_rebuild ??= _pluginInterface.GetIpcSubscriber<bool>(Gate("Nav.Rebuild"))).InvokeFunc();
         return true;
     });
 
@@ -185,13 +213,13 @@ public sealed class VnavIpc
 
     public void Stop() => Try(() =>
     {
-        (_stop ??= _pluginInterface.GetIpcSubscriber<object>("vnavmesh.Path.Stop")).InvokeAction();
+        (_stop ??= _pluginInterface.GetIpcSubscriber<object>(Gate("Path.Stop"))).InvokeAction();
         return true;
     });
 
     public void SetTolerance(float tolerance) => Try(() =>
     {
-        (_setTolerance ??= _pluginInterface.GetIpcSubscriber<float, object>("vnavmesh.Path.SetTolerance"))
+        (_setTolerance ??= _pluginInterface.GetIpcSubscriber<float, object>(Gate("Path.SetTolerance")))
             .InvokeAction(tolerance);
         return true;
     });
