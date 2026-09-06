@@ -292,6 +292,33 @@ public class GatherRunnerTests
     }
 
     [Fact]
+    public void A_node_that_comes_back_after_depleting_is_worked_again_where_it_stands()
+    {
+        // Revisit: the window shuts, the same node refreshes in place a beat later. Two stops
+        // at the same spot, so a hop would be invisible; the log line says which happened.
+        var here = new Vector3(10, 0, 10);
+        var target = Target(here, here);
+        var (runner, world) = Ready(target);
+        world.PlainNode = true;
+        world.Integrity = 2;
+        runner.Begin(target, count: 4, minimumCollectability: 0);
+
+        // Two presses deplete it; the fake clears the node.
+        for (var i = 0; i < 40 && world.Held < 2; i++) { runner.Tick(); world.Advance(0.5); }
+        Assert.False(world.NodeOpen);
+
+        // It comes back within the grace: same node, live, in reach.
+        runner.Tick(); world.Advance(0.5);
+        world.Spawned.Add(target.NodeId); world.Up.Add(target.NodeId); world.Integrity = 2;
+        for (var i = 0; i < 40 && runner.State != GatherRunState.Done; i++) { runner.Tick(); world.Advance(0.5); }
+
+        Assert.Equal(GatherRunState.Done, runner.State);
+        Assert.Equal(4, world.Held);
+        Assert.Contains(world.Log, m => m.Contains("came back (Revisit)"));
+        Assert.DoesNotContain(world.Log, m => m.Contains("spent; trying the next"));
+    }
+
+    [Fact]
     public void A_spent_node_sends_the_run_to_the_next_spot_rather_than_failing()
     {
         // Both spots at the same place, so the walk is not what is under test: the node running
@@ -302,12 +329,14 @@ public class GatherRunnerTests
         world.Integrity = 1; // one swing and it is worked out
 
         runner.Begin(target, count: 3, minimumCollectability: 600);
+        var gone = 0;
         for (var i = 0; i < 40 && runner.State != GatherRunState.Faulted; i++)
         {
             runner.Tick();
             world.Advance(1.5);
-            // It re-appears at the next spot, which is where we are already standing.
-            if (world is { NodeOpen: false, Spawned.Count: 0 }) { world.Spawned.Add(target.NodeId); world.Integrity = 1; }
+            // It re-appears at the next spot, which is where we are already standing — after the
+            // Revisit grace has passed, so this is a hop and not a node coming back in place.
+            if (world is { NodeOpen: false, Spawned.Count: 0 } && ++gone >= 4) { world.Spawned.Add(target.NodeId); world.Integrity = 1; gone = 0; }
         }
 
         Assert.NotEqual(GatherRunState.Faulted, runner.State);

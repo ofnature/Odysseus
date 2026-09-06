@@ -153,6 +153,14 @@ public sealed class GatherRunner
 
     /// <summary>How long a plain-row press gets to become a gathering action before the row is judged dead.</summary>
     private static readonly TimeSpan PlainPressGrace = TimeSpan.FromSeconds(3);
+
+    /// <summary>How long a shut window waits for the node to come back (Revisit) before the next spot.</summary>
+    private static readonly TimeSpan RevisitGrace = TimeSpan.FromSeconds(2.5);
+
+    /// <summary>A Revisit reopen that does not take is judged quickly; the node may only have looked live.</summary>
+    private static readonly TimeSpan RevisitOpenWait = TimeSpan.FromSeconds(4);
+    private DateTime _spentAt;
+    private bool _revisit;
     private bool _plainPressed;
     private bool _plainPressTook;
 
@@ -394,6 +402,8 @@ public sealed class GatherRunner
                 _slotChosenAt = default;
                 _plainPressed = false;
                 _plainPressTook = false;
+                _revisit = false;
+                _spentAt = default;
                 _world.ForgetSlotAttempts();
                 Enter(GatherRunState.Opening);
                 return;
@@ -447,8 +457,9 @@ public sealed class GatherRunner
             return;
         }
 
-        if (_world.UtcNow - _phaseStart > OpenWait)
+        if (_world.UtcNow - _phaseStart > (_revisit ? RevisitOpenWait : OpenWait))
         {
+            _revisit = false;
             var reach = _world.DistanceToDataId(_currentNode);
             NextSpot($"would not open after {_opens} attempt(s) — " +
                      $"{(reach is { } d ? $"{d:F1}y away" : "not in the object table")}, " +
@@ -554,7 +565,32 @@ public sealed class GatherRunner
 
         if (!_world.NodeOpen)
         {
-            // Worked out, or closed under us. Either way this node has moved on.
+            // Revisit — the trait that refreshes a depleted node in place. The window shuts
+            // either way, so the node gets a moment to come back before the walk to the next
+            // spot: live and within reach again means work it again.
+            var now = _world.UtcNow;
+            if (_spentAt == default)
+            {
+                _spentAt = now;
+                return;
+            }
+            if (_world.NearestLiveNode(new[] { _currentNode }) is { } back && back.Distance <= StepExecutor.InteractReach)
+            {
+                _world.Log($"Node {_currentNode} came back (Revisit) — working it again.");
+                _spentAt = default;
+                _revisit = true;
+                _opens = 0;
+                _stoppedAt = default;
+                _slotChosenAt = default;
+                _plainPressed = false;
+                _plainPressTook = false;
+                _world.ForgetSlotAttempts();
+                Enter(GatherRunState.Opening);
+                return;
+            }
+            if (now - _spentAt < RevisitGrace)
+                return;
+            _spentAt = default;
             NextSpot("spent");
             return;
         }
