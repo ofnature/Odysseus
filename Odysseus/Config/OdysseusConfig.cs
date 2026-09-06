@@ -79,6 +79,9 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>Which plugin paths and moves the character: "vnavmesh" (default) or "Ariadne".</summary>
     public string PathingProvider { get; set; } = Services.Ipc.VnavIpc.VnavmeshProvider;
 
+    /// <summary>Repair gear during a gather run once the worst piece is at or under this percent; 0 never repairs.</summary>
+    public int RepairAtPercent { get; set; } = 30;
+
     /// <summary>Where a finished gather run takes you.</summary>
     public Services.Gathering.GatherHome GatherHome { get; set; } = Services.Gathering.GatherHome.Stay;
 

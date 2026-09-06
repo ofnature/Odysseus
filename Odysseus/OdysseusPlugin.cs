@@ -259,7 +259,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         questExecutor.OwnGatherer = _ownGatherer;
         _gatherables = new Services.Gathering.GatherableIndex(DataManager, message => Warn(message));
         _gatherLists = new Services.Gathering.GatherListRunner(
-            _ownGatherer, id => _world.ItemCount(id), id => _gatherables.NameOf(id), message => Say(message));
+            _ownGatherer, id => _world.ItemCount(id), id => _gatherables.NameOf(id), message => Say(message),
+            new GearRepair(_world, message => Say(message)), () => _config.RepairAtPercent, () => _world.FreeBagSlots);
 
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(
             _world,

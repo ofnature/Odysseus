@@ -233,6 +233,80 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public uint? ResolveAetheryte(string name) => _aetherytes.Resolve(name);
 
+    public int LowestGearConditionPercent
+    {
+        get
+        {
+            try
+            {
+                var manager = InventoryManager.Instance();
+                var container = manager == null ? null : manager->GetInventoryContainer(InventoryType.EquippedItems);
+                if (container == null || !container->IsLoaded)
+                    return 100;
+                var lowest = 100;
+                for (var i = 0; i < container->Size; i++)
+                {
+                    var slot = container->GetInventorySlot(i);
+                    if (slot == null || slot->ItemId == 0)
+                        continue;
+                    var percent = (int)Math.Round(slot->Condition / 300.0);   // 30000 is pristine
+                    if (percent < lowest)
+                        lowest = percent;
+                }
+                return lowest;
+            }
+            catch (Exception ex)
+            {
+                _log($"Reading gear condition failed: {ex.Message}");
+                return 100;
+            }
+        }
+    }
+
+    public int FreeBagSlots
+    {
+        get
+        {
+            try
+            {
+                var manager = InventoryManager.Instance();
+                return manager == null ? 0 : (int)manager->GetEmptySlotsInBag();
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+    }
+
+    public void OpenRepairWindow() => SendChatCommand("/generalaction Repair");
+
+    public bool PressRepairAll()
+    {
+        // This ClientStructs build lays out no button field for the repair window; the window's
+        // own callback is the press — value 0 is Repair All, the way every self-repairing
+        // plugin fires it.
+        if (!IsAddonVisible("Repair"))
+            return false;
+        FireAddonCallback("Repair", 0);
+        return true;
+    }
+
+    public void CloseRepairWindow()
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName("Repair");
+            var unit = (AtkUnitBase*)addon.Address;
+            if (unit != null && unit->IsVisible)
+                unit->Close(true);
+        }
+        catch (Exception ex)
+        {
+            _log($"Closing the repair window failed: {ex.Message}");
+        }
+    }
+
     public uint? AetheryteTerritory(uint aetheryteId) => _aetherytes.TerritoryOf(aetheryteId);
 
     public Vector3? AetherytePosition(uint aetheryteId) => _aetherytes.PositionOf(aetheryteId);

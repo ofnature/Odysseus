@@ -137,6 +137,47 @@ public class GatherListRunnerTests
     }
 
     [Fact]
+    public void A_full_bag_ends_the_run_with_the_reason()
+    {
+        var own = new Own();
+        var slots = 3;
+        var runner = new GatherListRunner(own, id => own.Bag.GetValueOrDefault(id), id => $"item {id}", _ => { },
+            freeSlots: () => slots);
+        Assert.True(runner.Begin([List("l", (10, 50))]));
+        runner.Tick(); runner.Tick();
+        Assert.Equal(10u, runner.CurrentItem);
+
+        slots = 0;
+        runner.Tick();
+        Assert.Equal(GatherListRunState.Done, runner.State);
+        Assert.Contains("bag is full", runner.Status);
+        Assert.Equal(1, own.Stops);
+        Assert.Contains("bag is full", Assert.Single(runner.Outcomes).Note);
+    }
+
+    [Fact]
+    public void Worn_gear_is_repaired_between_items_before_the_next_starts()
+    {
+        var own = new Own();
+        var world = new FakeStepWorld { LowestGearConditionPercent = 20 };
+        var repair = new Odysseus.Services.Run.GearRepair(world, _ => { });
+        var runner = new GatherListRunner(own, id => own.Bag.GetValueOrDefault(id), id => $"item {id}", _ => { },
+            repair, repairAt: () => 30);
+        Assert.True(runner.Begin([List("l", (10, 2))]));
+
+        // The repair runs first; the item does not start until it is done.
+        for (var i = 0; i < 12 && own.Starts.Count == 0; i++) { runner.Tick(); world.Advance(0.5); }
+        Assert.Contains("RepairAll", world.Calls);
+        Assert.Equal(100, world.LowestGearConditionPercent);
+        Assert.Single(own.Starts);
+        Assert.True(world.Calls.IndexOf("CloseRepair") < world.Calls.Count, "repair window left open");
+
+        Run(runner);
+        Assert.Equal(GatherListRunState.Done, runner.State);
+        Assert.True(Assert.Single(runner.Outcomes).Reached);
+    }
+
+    [Fact]
     public void Stop_stops_the_gatherer_mid_item()
     {
         var (runner, own, _) = Make();

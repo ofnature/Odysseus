@@ -176,6 +176,20 @@ public interface IStepWorld
     /// <summary>Aetheryte id for a name as the path data spells it, or null when unknown.</summary>
     uint? ResolveAetheryte(string name);
 
+    /// <summary>The worst-worn equipped piece, as a percentage; 100 when nothing can be read.</summary>
+    int LowestGearConditionPercent { get; }
+
+    /// <summary>Empty slots across the four main bags.</summary>
+    int FreeBagSlots { get; }
+
+    /// <summary>Open the game's repair window — the Repair general action.</summary>
+    void OpenRepairWindow();
+
+    /// <summary>Press "Repair All" in the open repair window; false when it is not up or the button is disabled.</summary>
+    bool PressRepairAll();
+
+    void CloseRepairWindow();
+
     /// <summary>Riding as a passenger — a quest cart, a shared mount. It walks where it walks:
     /// no flying, no dismounting, and a teleport separates you from it.</summary>
     bool IsRidingVehicle { get; }

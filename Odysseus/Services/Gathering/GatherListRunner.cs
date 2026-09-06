@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Odysseus.Services.Run;
 
 namespace Odysseus.Services.Gathering;
 
@@ -27,13 +28,21 @@ public sealed class GatherListRunner
     private readonly Queue<(uint ItemId, int Target)> _queue = new();
     private readonly List<GatherOutcome> _outcomes = new();
     private (uint ItemId, int Target)? _current;
+    private readonly GearRepair? _repair;
+    private readonly Func<int> _repairAt;
+    private readonly Func<int> _freeSlots;
+    private bool _repairing;
 
-    public GatherListRunner(IOwnGatherer gatherer, Func<uint, int> held, Func<uint, string> nameOf, Action<string> log)
+    public GatherListRunner(IOwnGatherer gatherer, Func<uint, int> held, Func<uint, string> nameOf, Action<string> log,
+        GearRepair? repair = null, Func<int>? repairAt = null, Func<int>? freeSlots = null)
     {
         _gatherer = gatherer;
         _held = held;
         _nameOf = nameOf;
         _log = log;
+        _repair = repair;
+        _repairAt = repairAt ?? (() => 0);
+        _freeSlots = freeSlots ?? (() => int.MaxValue);
     }
 
     public GatherListRunState State { get; private set; } = GatherListRunState.Idle;
@@ -77,6 +86,11 @@ public sealed class GatherListRunner
 
     public void Stop()
     {
+        if (_repairing)
+        {
+            _repair?.Cancel();
+            _repairing = false;
+        }
         if (_current is not null)
             _gatherer.Stop();
         _queue.Clear();
@@ -89,6 +103,35 @@ public sealed class GatherListRunner
     {
         if (State != GatherListRunState.Running)
             return;
+
+        // A full bag ends the run honestly instead of forty stops of failed gathers.
+        if (_freeSlots() <= 0)
+        {
+            if (_current is { } stuck)
+            {
+                _gatherer.Stop();
+                Record(stuck.ItemId, stuck.Target, _held(stuck.ItemId), "stopped: the bag is full");
+                _current = null;
+            }
+            _queue.Clear();
+            State = GatherListRunState.Done;
+            Status = "Stopped — the bag is full.";
+            _log($"Gather lists: {Status}");
+            return;
+        }
+
+        if (_repairing)
+        {
+            _repair!.Tick();
+            if (!_repair.Busy)
+            {
+                _repairing = false;
+                if (_repair.State == RepairState.Faulted)
+                    Status = $"Repair gave up: {_repair.FailReason} — carrying on.";
+            }
+            return;
+        }
+
         if (_current is null)
         {
             StartNext();
@@ -112,6 +155,15 @@ public sealed class GatherListRunner
 
     private void StartNext()
     {
+        // Between items is where a repair fits: no node open, nothing mid-flight.
+        if (_queue.Count > 0 && _repair is not null && _repair.Needed(_repairAt()))
+        {
+            _repairing = true;
+            Status = "Repairing gear.";
+            _repair.Begin();
+            return;
+        }
+
         while (_queue.Count > 0)
         {
             var (item, target) = _queue.Dequeue();

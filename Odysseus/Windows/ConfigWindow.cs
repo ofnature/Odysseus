@@ -313,6 +313,16 @@ public sealed class ConfigWindow : OdysseusWindow
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Quest gathers, gathered deliveries and the gather lists are done by our own gatherer. Off, they hand to GatherBuddy's auto-gather lists as before.");
 
+        var repairAt = _config.RepairAtPercent;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.SliderInt("Repair gear at %", ref repairAt, 0, 90))
+        {
+            _config.RepairAtPercent = Math.Clamp(repairAt, 0, 90);
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("During a gather run, once the worst-worn piece is at or under this, gear is self-repaired between items (dark matter and crafter levels permitting). 0 never repairs.");
+
         var questLine = _config.ShowQuestLine;
         if (ImGui.Checkbox("Draw the route in the world", ref questLine))
         {

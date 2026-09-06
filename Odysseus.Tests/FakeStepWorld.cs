@@ -174,6 +174,20 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool TeleportAccepted { get; set; } = true;
     public bool IsTravelBusy { get; set; }
     public bool IsRidingVehicle { get; set; }
+    public int LowestGearConditionPercent { get; set; } = 100;
+    public int FreeBagSlots { get; set; } = 50;
+    public bool RepairWindowOpens { get; set; } = true;
+    public bool RepairAllMends { get; set; } = true;
+    public void OpenRepairWindow() { Calls.Add("OpenRepair"); if (RepairWindowOpens) VisibleAddons.Add("Repair"); }
+    public bool PressRepairAll()
+    {
+        if (!VisibleAddons.Contains("Repair")) return false;
+        Calls.Add("RepairAll");
+        VisibleAddons.Add("SelectYesno");   // the game asks before spending dark matter
+        if (RepairAllMends) LowestGearConditionPercent = 100;
+        return true;
+    }
+    public void CloseRepairWindow() { Calls.Add("CloseRepair"); VisibleAddons.Remove("Repair"); }
     /// <summary>The game says we are at a shard, whatever the distance says.</summary>
     public bool AtAethernetShard { get; set; }
     /// <summary>When set, a Teleport lands the player in the aetheryte's territory immediately.</summary>
