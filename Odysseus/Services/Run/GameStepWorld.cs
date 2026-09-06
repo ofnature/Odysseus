@@ -298,7 +298,22 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
-    public bool Teleport(uint aetheryteId) => _lifestream.Teleport(aetheryteId);
+    public bool Teleport(uint aetheryteId)
+    {
+        // The game's own aetheryte list is lazy: until something refreshes it, a teleport request
+        // is accepted and does nothing — the first teleport of every gather run, twice today.
+        try
+        {
+            var telepo = Telepo.Instance();
+            if (telepo != null)
+                telepo->UpdateAetheryteList();
+        }
+        catch (Exception ex)
+        {
+            _log($"Refreshing the aetheryte list failed: {ex.Message}");
+        }
+        return _lifestream.Teleport(aetheryteId);
+    }
 
     /// <summary>
     /// The path data spells destinations <c>"[Ul'dah] Goldsmiths' Guild"</c> — its own convention

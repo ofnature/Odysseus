@@ -486,12 +486,12 @@ public class TravelExecutorTests
         Ticks(ex, w, 2);
         Assert.Equal(1, w.Calls.Count(c => c.StartsWith("Teleport")));
 
-        Ticks(ex, w, 24);   // past the ten-second travel-start budget
+        Ticks(ex, w, 12);   // six seconds: past the four-second start grace, one re-ask in
         Assert.Equal(StepStatus.Running, ex.Status);
         Assert.True(w.Calls.Count(c => c.StartsWith("Teleport")) >= 2, "never asked again");
         Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("never started — asking again"));
 
-        // The second ask takes: the world moves, the step goes on.
+        // The next ask takes: the world moves, the step goes on.
         w.ArriveOnTeleport = true;
         Ticks(ex, w, 30);
         Assert.NotEqual(StepStatus.Failed, ex.Status);

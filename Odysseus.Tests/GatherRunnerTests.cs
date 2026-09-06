@@ -34,6 +34,7 @@ public class GatherRunnerTests
         }
 
         public void Dismount() { Dismounts++; IsMounted = false; }
+        public bool IsInFlight { get; set; }
 
         public HashSet<uint> Spawned { get; } = [];
         public int Held { get; set; }
@@ -251,6 +252,43 @@ public class GatherRunnerTests
         Assert.Equal(10, world.Held);
         Assert.DoesNotContain(world.Log, m => m.Contains("no window appeared"));
         Assert.DoesNotContain(world.Log, m => m.Contains("trying the next"));
+    }
+
+    [Fact]
+    public void A_node_reached_in_the_air_waits_for_the_executor_to_land_before_opening()
+    {
+        // Southern Thanalan: the fly leg arrived three yalms above the shard node, the runner
+        // cancelled the landing and pressed dismount at a descent that never finished.
+        var target = Target(new Vector3(10, 0, 10));
+        var world = new World();
+        var fake = new FakeStepWorld { TerritoryId = 1187, ArriveOnMove = false, IsMounted = true, IsInFlight = true, CanFlyHere = true };
+        var runner = new GatherRunner(world, new StepExecutor(fake));
+        world.PlayerPosition = new Vector3(40, 0, 10);   // out of reach: the leg begins
+        fake.PlayerPosition = world.PlayerPosition;
+        world.Spawned.Add(target.NodeId);
+        world.Up.Add(target.NodeId);
+        world.NodeAt[target.NodeId] = target.Spawns[0];   // where the node really stands, not under the player
+        world.IsMounted = true;
+        world.IsInFlight = true;
+        runner.Begin(target, count: 1, minimumCollectability: 0);
+        for (var i = 0; i < 6 && runner.State != GatherRunState.Walking; i++) { runner.Tick(); world.Advance(0.5); fake.Advance(0.5); }
+        Assert.Equal(GatherRunState.Walking, runner.State);
+        // Two walk ticks at distance: the leg is begun and running before the mark is reached.
+        for (var i = 0; i < 2; i++) { runner.Tick(); world.Advance(0.5); fake.Advance(0.5); }
+
+        // Within reach but still airborne, the leg running (the executor is mid-descent — its
+        // own fake stays short of the mark): no opening, no bare dismount press.
+        world.PlayerPosition = new Vector3(11, 0, 10);
+        for (var i = 0; i < 6; i++) { runner.Tick(); world.Advance(0.5); fake.Advance(0.5); }
+        Assert.True(runner.State == GatherRunState.Walking, $"state={runner.State} status='{runner.Status}' fail='{runner.FailReason}'");
+        Assert.Equal(0, world.Dismounts);
+        Assert.Contains("landing", runner.Status);
+
+        // On the ground, it opens.
+        world.IsInFlight = false; world.IsMounted = false;
+        fake.IsInFlight = false; fake.IsMounted = false;
+        for (var i = 0; i < 6 && runner.State == GatherRunState.Walking; i++) { runner.Tick(); world.Advance(0.5); fake.Advance(0.5); }
+        Assert.NotEqual(GatherRunState.Walking, runner.State);
     }
 
     [Fact]

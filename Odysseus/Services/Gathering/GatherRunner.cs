@@ -25,6 +25,9 @@ public interface IGatherWorld
     /// <summary>Get off. A node cannot be worked from the saddle.</summary>
     void Dismount();
 
+    /// <summary>Mounted and airborne — a descent in progress still counts.</summary>
+    bool IsInFlight { get; }
+
     /// <summary>How many of the item are held at or above a collectability.</summary>
     int CollectableCount(uint itemId, int minimumCollectability);
 
@@ -376,6 +379,15 @@ public sealed class GatherRunner
 
             if (live.Distance <= StepExecutor.InteractReach)
             {
+                // Reached in the air: the executor is landing — with its blocked-descent reroute —
+                // and cancelling it here left a bare dismount press against a descent that never
+                // finished, twelve seconds a node, five nodes running.
+                if (_world.IsInFlight && _travel.Status == StepStatus.Running)
+                {
+                    Status = $"Node {live.NodeId}: landing";
+                    _travel.Tick();
+                    return;
+                }
                 _travel.Cancel();
                 _opens = 0;
                 _stoppedAt = default;
@@ -727,6 +739,9 @@ public sealed class GatherRunner
         Position = to,
         TerritoryId = territory,
         Fly = true,
+        // Land as part of the leg: the executor's dismount owns the descent, including the
+        // reroute for a descent that never touches down, and the node is worked from the ground.
+        Land = true,
     };
 
     private void Enter(GatherRunState state)

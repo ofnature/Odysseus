@@ -408,6 +408,9 @@ public sealed class StepExecutor
     private DateTime _lastTeleportTry;
     private int _teleportAsks;
     private const int MaxTeleportAsks = 2;
+
+    /// <summary>A teleport that took goes travel-busy within a second or two; past this, it did not.</summary>
+    private static readonly TimeSpan TeleportStartGrace = TimeSpan.FromSeconds(4);
     /// <summary>The instance this step hands off has been run; arriving again means finish, not re-enter.</summary>
     private bool _handoffDone;
     private uint _teleportTarget;
@@ -648,7 +651,7 @@ public sealed class StepExecutor
                 // gearset change leaves behind (the gather runner switches job, then teleports).
                 // Ask again before believing it — the gather lists faulted every item this way.
                 if (!_sawTravelBusy && !_world.IsTravelBusy && _world.TerritoryId != _teleportTerritory
-                    && now - _phaseStart > TravelStart && _teleportAsks < MaxTeleportAsks)
+                    && now - _phaseStart > TeleportStartGrace && _teleportAsks < MaxTeleportAsks)
                 {
                     _teleportAsks++;
                     _world.Log($"Teleport to {step.AetheryteShortcut ?? $"aetheryte {_teleportTarget}"} never started — asking again ({_teleportAsks}/{MaxTeleportAsks}).");

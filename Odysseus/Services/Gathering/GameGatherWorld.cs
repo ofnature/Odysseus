@@ -83,6 +83,8 @@ public sealed unsafe class GameGatherWorld : IGatherWorld
 
     public void Dismount() => _steps.Dismount();
 
+    public bool IsInFlight => _steps.IsInFlight;
+
     /// <summary>
     /// Equip a gearset for the class. Matched on the gearset's own class or its parent, so a job
     /// saved over its base class still counts; the highest-level one wins where there are several.
