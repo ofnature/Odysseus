@@ -79,6 +79,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly Services.Gathering.GatherableIndex _gatherables;
     private readonly Services.Gathering.GatherListRunner _gatherLists;
     private bool _gatherListsWereRunning;
+    private string? _gatherHomeCommand;
 #if DEBUG
     // The work-list bench: debug builds only, so a release carries no half-finished feature.
     private readonly Services.Work.WorkList _workList = new();
@@ -548,6 +549,16 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 SaveConfig();
                 Say($"Gather lists: removed {pruned} completed item(s).");
             }
+            // Going home is for a run that finished, not one you stopped; sent once the
+            // character can act, since the last node's window has only just shut.
+            if (_gatherLists.State == Services.Gathering.GatherListRunState.Done)
+                _gatherHomeCommand = Services.Gathering.GatherHomeCommands.For(_config.GatherHome);
+        }
+        if (_gatherHomeCommand is { } goHome && _world.IsReady && !_world.IsOccupied)
+        {
+            _gatherHomeCommand = null;
+            Say($"Gather lists: heading home ({goHome}).");
+            _world.SendChatCommand(goHome);
         }
 
         // A delivery run owns the frame outright — it never uses the quest controller.

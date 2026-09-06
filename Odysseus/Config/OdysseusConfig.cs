@@ -76,6 +76,9 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>The gather lists, in the order they are shown.</summary>
     public List<Services.Gathering.GatherList> GatherLists { get; set; } = [];
 
+    /// <summary>Where a finished gather run takes you.</summary>
+    public Services.Gathering.GatherHome GatherHome { get; set; } = Services.Gathering.GatherHome.Stay;
+
     // ── Priority quests ──
 
     /// <summary>The list, in priority order. Only meaningful while <see cref="PersistPriorityList"/> is on.</summary>

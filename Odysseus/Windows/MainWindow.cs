@@ -568,6 +568,20 @@ public sealed class MainWindow : OdysseusWindow
         }
         OdysseusTheme.EndCard();
 
+        ImGui.SetNextItemWidth(190f);
+        if (ImGui.BeginCombo("Afterwards", GatherHomeCommands.Label(Cfg.GatherHome)))
+        {
+            foreach (var home in Enum.GetValues<GatherHome>())
+                if (ImGui.Selectable(GatherHomeCommands.Label(home), home == Cfg.GatherHome))
+                {
+                    Cfg.GatherHome = home;
+                    _d.SaveConfig();
+                }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Where a finished run takes you. Lifestream handles the inn and the estates; Return is the action, on its own cooldown.");
+
         var runner = _d.GatherLists;
         if (runner.State == GatherListRunState.Running)
         {
