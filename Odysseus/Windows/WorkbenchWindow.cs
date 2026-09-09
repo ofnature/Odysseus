@@ -51,6 +51,7 @@ public sealed class WorkbenchWindow : Window
     private int _addonNode = 27;
     private int _addonEvent = 3;
     private int _addonParam = 4;
+    private IReadOnlyList<string> _eventTypes = [];
 
     public WorkbenchWindow(TribeCatalog tribes, DeliveryCatalog clients, WorkList list, WorkRunner runner,
         IOwnGatherer? gatherer = null, IGatherWorld? gatherWorld = null, Odysseus.Services.Run.GameStepWorld? addons = null)
@@ -289,6 +290,19 @@ public sealed class WorkbenchWindow : Window
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Sweep event types against the node that listens: the one that raises a context menu is the one to keep.");
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Event types"))
+        {
+            _eventTypes = _addons.EventTypeNames();
+            _addonStatus = $"{_eventTypes.Count} event types — see the list below.";
+        }
+
+        if (_eventTypes.Count > 0)
+        {
+            ImGui.TextColored(OdysseusTheme.TextDisabled, string.Join("   ", _eventTypes));
+            ImGui.SameLine();
+            if (ImGui.SmallButton("hide")) _eventTypes = [];
+        }
 
         var menu = _addons.ContextMenuEntries();
         if (menu.Count > 0)

@@ -484,6 +484,19 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
+    /// <summary>
+    /// Every event type the client knows, by name and number. Sweeping event numbers blind is how
+    /// an afternoon goes; the enum says which one is worth sending.
+    /// </summary>
+    public IReadOnlyList<string> EventTypeNames()
+    {
+        var names = new List<string>();
+        foreach (AtkEventType value in Enum.GetValues<AtkEventType>())
+            names.Add($"{(int)value} {value}");
+        names.Sort((a, b) => int.Parse(a.Split(' ')[0]).CompareTo(int.Parse(b.Split(' ')[0])));
+        return names;
+    }
+
     /// <summary>Pick an entry of the open context menu. ECommons' own move: values 0, index, 0.</summary>
     public bool SelectContextMenuIndex(int index) => FireAddonValues("ContextMenu", 0, index, 0);
 
