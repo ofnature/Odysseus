@@ -294,13 +294,16 @@ public sealed class WorkbenchWindow : Window
         if (ImGui.SmallButton("Event types"))
         {
             _eventTypes = _addons.EventTypeNames();
-            _addonStatus = $"{_eventTypes.Count} event types — see the list below.";
+            // Also to the log: a list this long reads better there, and it can be quoted.
+            _addons.Log("Event types: " + string.Join(", ", _eventTypes));
+            _addonStatus = $"{_eventTypes.Count} event types — listed below and written to the log.";
         }
 
         if (_eventTypes.Count > 0)
         {
+            ImGui.PushTextWrapPos(0f);
             ImGui.TextColored(OdysseusTheme.TextDisabled, string.Join("   ", _eventTypes));
-            ImGui.SameLine();
+            ImGui.PopTextWrapPos();
             if (ImGui.SmallButton("hide")) _eventTypes = [];
         }
 
