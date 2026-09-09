@@ -393,6 +393,22 @@ public sealed class PathEditorWindow : OdysseusWindow
         ImGui.SetNextItemWidth(160f);
         if (ImGui.InputText("Emote", ref emote, 40)) { step.Emote = emote.Length > 0 ? emote : null; _dirty = true; }
 
+        // What a SwitchClass step switches to. The quest's own class requirement is read from the
+        // game and handled before the run starts; this is for a class the quest does not declare,
+        // or a particular one where the gate would only pick the best of a kind.
+        var targetClass = step.TargetClass ?? string.Empty;
+        ImGui.SetNextItemWidth(180f);
+        if (ImGui.InputText("Class", ref targetClass, 40))
+        {
+            step.TargetClass = targetClass.Length > 0 ? targetClass : null;
+            _dirty = true;
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(string.Join((char)10,
+                "For a SwitchClass step: the class as the game names it — Botanist, Fisher, Warrior.",
+                "Or one of ConfiguredCombatJob, ConfiguredCraftingJob, QuestStartJob.",
+                "It equips your gearset for that class; there is no gearset, there is no switch."));
+
         var comment = step.Comment ?? string.Empty;
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.InputText("Note", ref comment, 200)) { step.Comment = comment.Length > 0 ? comment : null; _dirty = true; }
