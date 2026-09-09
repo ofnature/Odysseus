@@ -48,6 +48,7 @@ public sealed class WorkbenchWindow : Window
     private List<string> _opened = [];
     private HashSet<string> _seenBefore = [];
     private DateTime _fired;
+    private int _addonNode = 27;
 
     public WorkbenchWindow(TribeCatalog tribes, DeliveryCatalog clients, WorkList list, WorkRunner runner,
         IOwnGatherer? gatherer = null, IGatherWorld? gatherWorld = null, Odysseus.Services.Run.GameStepWorld? addons = null)
@@ -252,6 +253,21 @@ public sealed class WorkbenchWindow : Window
         }
         if (_opened.Count > 0)
             ImGui.TextColored(OdysseusTheme.StatusGreen, "Opened: " + string.Join(", ", _opened));
+
+        ImGui.SetNextItemWidth(90f);
+        ImGui.InputInt("Node", ref _addonNode, 1, 1);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("What is it"))
+            _addonStatus = _addons.DescribeAddonNode(_addonName, (uint)Math.Max(0, _addonNode));
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Click it"))
+        {
+            _seenBefore = _addons.VisibleAddonNames().ToHashSet();
+            var hit = _addons.ClickAddonNode(_addonName, (uint)Math.Max(0, _addonNode));
+            _fired = _addons.UtcNow;
+            _opened = hit ? _addons.VisibleAddonNames().Where(n => !_seenBefore.Contains(n)).ToList() : [];
+            _addonStatus = hit ? $"Clicked node {_addonNode}." : $"Node {_addonNode} took no click.";
+        }
 
         var menu = _addons.ContextMenuEntries();
         if (menu.Count > 0)

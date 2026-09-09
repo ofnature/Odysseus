@@ -362,6 +362,52 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         return names;
     }
 
+    /// <summary>
+    /// What an addon's node is and whether anything is listening to it — the question behind
+    /// "why does clicking this tile do nothing".
+    /// </summary>
+    public string DescribeAddonNode(string addonName, uint nodeId)
+    {
+        try
+        {
+            var unit = (AtkUnitBase*)_gameGui.GetAddonByName(addonName).Address;
+            if (unit == null || !unit->IsVisible)
+                return $"{addonName} is not on screen.";
+            var node = unit->GetNodeById(nodeId);
+            if (node == null)
+                return $"{addonName} has no node {nodeId}.";
+            var registered = node->AtkEventManager.Event;
+            var kind = (int)node->Type >= 1000 ? $"component {(int)node->Type}" : node->Type.ToString();
+            return registered == null
+                ? $"node {nodeId}: {kind}, no registered event — nothing to replay."
+                : $"node {nodeId}: {kind}, event {registered->State.EventType} param {registered->Param}.";
+        }
+        catch (Exception ex)
+        {
+            return $"reading node {nodeId} failed: {ex.Message}";
+        }
+    }
+
+    /// <summary>Click an addon's node by id, the way a button is clicked.</summary>
+    public bool ClickAddonNode(string addonName, uint nodeId)
+    {
+        try
+        {
+            var unit = (AtkUnitBase*)_gameGui.GetAddonByName(addonName).Address;
+            if (unit == null || !unit->IsVisible)
+                return false;
+            var node = unit->GetNodeById(nodeId);
+            if (node == null || (int)node->Type < 1000)
+                return false;
+            return AtkClick.Node(unit, node->GetAsAtkComponentNode());
+        }
+        catch (Exception ex)
+        {
+            _log($"Clicking node {nodeId} of {addonName} failed: {ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>Pick an entry of the open context menu. ECommons' own move: values 0, index, 0.</summary>
     public bool SelectContextMenuIndex(int index) => FireAddonValues("ContextMenu", 0, index, 0);
 

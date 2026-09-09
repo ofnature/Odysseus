@@ -48,6 +48,9 @@ public static unsafe class AtkClick
         *flags ^= 1 << 5;
     }
 
+    /// <summary>Click any component node of an addon — the grid tiles a bespoke window is made of.</summary>
+    public static bool Node(AtkUnitBase* addon, AtkComponentNode* node) => Click(addon, node);
+
     private static bool Click(AtkUnitBase* addon, AtkComponentNode* node)
     {
         if (node == null)
