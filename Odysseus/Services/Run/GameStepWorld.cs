@@ -281,6 +281,59 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public void OpenRepairWindow() => SendChatCommand("/generalaction Repair");
 
+    /// <summary>
+    /// Fire an addon's own callback with these values — the way every window here is driven, and
+    /// the probe behind the Workbench's addon tools. False when the addon is not on screen.
+    /// </summary>
+    public bool FireAddonValues(string addonName, params int[] values)
+    {
+        try
+        {
+            var unit = (AtkUnitBase*)_gameGui.GetAddonByName(addonName).Address;
+            if (unit == null || !unit->IsVisible)
+                return false;
+            FireCallback(unit, true, values);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log($"Callback to {addonName} failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// The open context menu's entries, in order. Shape read from ECommons' AddonMaster.ContextMenu
+    /// (MIT, see NOTICE.md): the count is AtkValues[0], and entry i's text is AtkValues[i + 8].
+    /// </summary>
+    public IReadOnlyList<string> ContextMenuEntries()
+    {
+        try
+        {
+            var unit = (AtkUnitBase*)_gameGui.GetAddonByName("ContextMenu").Address;
+            if (unit == null || !unit->IsVisible || unit->AtkValuesCount == 0)
+                return [];
+            var count = (int)unit->AtkValues[0].UInt;
+            var entries = new List<string>(count);
+            for (var i = 0; i < count && 8 + i < unit->AtkValuesCount; i++)
+            {
+                var value = unit->AtkValues[8 + i];
+                entries.Add(value.String.Value == null
+                    ? string.Empty
+                    : Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue);
+            }
+            return entries;
+        }
+        catch (Exception ex)
+        {
+            _log($"Reading the context menu failed: {ex.Message}");
+            return [];
+        }
+    }
+
+    /// <summary>Pick an entry of the open context menu. ECommons' own move: values 0, index, 0.</summary>
+    public bool SelectContextMenuIndex(int index) => FireAddonValues("ContextMenu", 0, index, 0);
+
     public bool PressRepairAll()
     {
         // This ClientStructs build lays out no button field for the repair window; the window's

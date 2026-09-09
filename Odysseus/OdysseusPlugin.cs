@@ -286,7 +286,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _workRunner = new Services.Work.WorkRunner(
             new WorkEngines(_tribes, _deliveries, _tribeRunner, _deliveryRunner),
             message => Say(message));
-        _workbenchWindow = new WorkbenchWindow(_tribes, _deliveries, _workList, _workRunner, _ownGatherer, _gatherWorld);
+        _workbenchWindow = new WorkbenchWindow(_tribes, _deliveries, _workList, _workRunner, _ownGatherer, _gatherWorld, _world);
 #endif
 
         var scripShop = new Services.Deliveries.ScripShop(DataManager, scrips.Kinds, message => Warn(message));

@@ -1,5 +1,6 @@
 #if DEBUG
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -40,9 +41,13 @@ public sealed class WorkbenchWindow : Window
 
     private readonly IOwnGatherer? _gatherer;
     private readonly IGatherWorld? _gatherWorld;
+    private readonly Odysseus.Services.Run.GameStepWorld? _addons;
+    private string _addonName = "XBMMonsterNotebook";
+    private string _addonValues = "0";
+    private string _addonStatus = string.Empty;
 
     public WorkbenchWindow(TribeCatalog tribes, DeliveryCatalog clients, WorkList list, WorkRunner runner,
-        IOwnGatherer? gatherer = null, IGatherWorld? gatherWorld = null)
+        IOwnGatherer? gatherer = null, IGatherWorld? gatherWorld = null, Odysseus.Services.Run.GameStepWorld? addons = null)
         : base("Odysseus Workbench (debug)###OdysseusWorkbench")
     {
         // Thrown here rather than in Draw: this window is built in the middle of a long constructor
@@ -59,6 +64,7 @@ public sealed class WorkbenchWindow : Window
         _runner = runner;
         _gatherer = gatherer;
         _gatherWorld = gatherWorld;
+        _addons = addons;
         Size = new Vector2(560, 620);
         SizeCondition = ImGuiCond.FirstUseEver;
     }
@@ -72,6 +78,7 @@ public sealed class WorkbenchWindow : Window
         DrawRunControls();
 
         DrawGathering();
+        DrawAddons();
 
         ImGui.Spacing();
         DrawList();
@@ -195,6 +202,62 @@ public sealed class WorkbenchWindow : Window
 
     /// <summary>Every node id in the atlas is too many to pass; nearby ids come from the object table.</summary>
     private readonly uint[] _nearbyIds = [];
+
+    /// <summary>
+    /// Firing an addon's own callback with values you choose, and reading the context menu that
+    /// may result. This is how a new window's callbacks are found: there is no sheet that says
+    /// what they are, and the Bestiary's "assign to battlehorn" is the case it was built for.
+    /// </summary>
+    private void DrawAddons()
+    {
+        if (_addons is null)
+            return;
+
+        OdysseusTheme.SectionHeader("ADDONS (debug)");
+        ImGui.SetNextItemWidth(220f);
+        ImGui.InputText("Addon", ref _addonName, 64);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(140f);
+        ImGui.InputTextWithHint("##vals", "0 3 1", ref _addonValues, 64);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Whole numbers, separated by spaces — the values the callback carries.");
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Fire"))
+        {
+            var parts = _addonValues.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var values = new List<int>();
+            foreach (var part in parts)
+                if (int.TryParse(part, out var v)) values.Add(v);
+            var before = _addons.ContextMenuEntries().Count;
+            var sent = _addons.FireAddonValues(_addonName, values.ToArray());
+            var after = _addons.ContextMenuEntries();
+            _addonStatus = !sent
+                ? $"{_addonName} is not on screen."
+                : after.Count > before
+                    ? $"Sent [{string.Join(' ', values)}] — a context menu opened with {after.Count} entries."
+                    : $"Sent [{string.Join(' ', values)}] — nothing new on screen.";
+        }
+
+        var menu = _addons.ContextMenuEntries();
+        if (menu.Count > 0)
+        {
+            ImGui.TextColored(OdysseusTheme.WakeFoam, $"Context menu — {menu.Count} entries:");
+            for (var i = 0; i < menu.Count; i++)
+            {
+                using var id = Dalamud.Interface.Utility.Raii.ImRaii.PushId(i);
+                if (ImGui.SmallButton($"{i}"))
+                {
+                    _addons.SelectContextMenuIndex(i);
+                    _addonStatus = $"Picked entry {i}.";
+                }
+                ImGui.SameLine();
+                ImGui.TextUnformatted(menu[i]);
+            }
+        }
+        if (_addonStatus.Length > 0)
+            ImGui.TextColored(OdysseusTheme.TextDisabled, _addonStatus);
+    }
 
     private void DrawList()
     {
