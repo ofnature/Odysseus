@@ -991,6 +991,29 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void An_emote_written_with_its_slash_is_still_one_slash_when_it_is_sent()
+    {
+        // "/pet" typed into the editor became "//pet": the game answers an unknown command and
+        // says nothing about why. The name is stored bare; the command adds the slash.
+        foreach (var written in new[] { "pet", "/pet", " /pet " })
+        {
+            var world = new FakeStepWorld { TerritoryId = 400 };
+            world.Spawned.Add(1059320);
+            world.PlayerPosition = Vector3.Zero;
+            world.Positions[1059320] = Vector3.Zero;
+            var ex = new StepExecutor(world);
+            ex.Begin(new QuestStep
+            {
+                Kind = StepKind.Emote, KindName = "Emote", DataId = 1059320, Emote = written,
+                TerritoryId = 400, Position = Vector3.Zero,
+            });
+            Run(ex, world);
+            Assert.Contains("Chat /pet", world.Calls);
+            Assert.DoesNotContain(world.Calls, c => c.Contains("//pet"));
+        }
+    }
+
+    [Fact]
     public void The_move_budget_measures_progress_not_wall_time()
     {
         // Thavnair's crossing was killed at 180s with two thirds of it done and the character

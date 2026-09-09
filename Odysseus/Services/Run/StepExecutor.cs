@@ -1324,7 +1324,7 @@ public sealed class StepExecutor
             case StepKind.Emote:
                 if (step.DataId is { } emoteTarget)
                     _world.TryTargetDataId(emoteTarget);
-                _world.SendChatCommand($"/{step.Emote}");
+                _world.SendChatCommand(EmoteCommand(step.Emote));
                 return Phase.ActionSettle;
 
             case StepKind.Jump:
@@ -1620,6 +1620,13 @@ public sealed class StepExecutor
     /// The step's emote at its target — the doze that baits a spawn. The target gets the same
     /// patience an action target does; it can pop in on approach.
     /// </summary>
+    /// <summary>
+    /// The command for an emote name. The name is stored bare — every one of the shipped
+    /// library's emote steps is — but a slash typed into the editor made "//pet", which the game
+    /// answers with "the command does not exist" and no other clue.
+    /// </summary>
+    private static string EmoteCommand(string? emote) => "/" + (emote ?? string.Empty).Trim().TrimStart('/');
+
     private void TickEmoteUse(QuestStep step, DateTime now)
     {
         if (_world.IsOccupied)
@@ -1632,7 +1639,7 @@ public sealed class StepExecutor
             return;
         }
 
-        _world.SendChatCommand($"/{step.Emote}");
+        _world.SendChatCommand(EmoteCommand(step.Emote));
         Enter(Phase.ActionSettle);
     }
 
