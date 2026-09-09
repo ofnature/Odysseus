@@ -53,6 +53,21 @@ public class PathRecorderTests
     }
 
     [Fact]
+    public void A_teleport_is_never_a_zone_line_walk_even_when_its_aetheryte_cannot_be_named()
+    {
+        // Patch-day zone: the catalogue could not name what we arrived beside, and the recorder
+        // wrote a WalkTo out of the zone we had just left — the wrong end of the journey.
+        var (rec, play) = Start();
+        play.Territory = 1185;
+        play.Teleported = true;
+        play.Arrival = null;
+        rec.Observe(play.Obs());
+
+        var path = rec.Finish()!;
+        Assert.DoesNotContain(path.Sequences.SelectMany(b => b.Steps), st => st.Kind == StepKind.WalkTo);
+    }
+
+    [Fact]
     public void Accept_talk_and_hand_in_land_in_the_right_blocks_with_the_right_kinds()
     {
         var (rec, play) = Start();

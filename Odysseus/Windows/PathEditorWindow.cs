@@ -182,6 +182,35 @@ public sealed class PathEditorWindow : OdysseusWindow
             "Stop & keep saves it as this quest's path.");
     }
 
+    /// <summary>Move the selected step into another sequence block, making it if it does not exist.</summary>
+    private void MoveStepToSequence(byte sequence)
+    {
+        if (_path is null || Selected is not { } step)
+            return;
+        var from = _path.Sequences[_selectedSeq];
+        if (from.Sequence == sequence)
+            return;
+
+        from.Steps.RemoveAt(_selectedStep);
+        var to = _path.Sequences.FirstOrDefault(b => b.Sequence == sequence);
+        if (to is null)
+        {
+            to = new QuestSequence { Sequence = sequence };
+            _path.Sequences.Add(to);
+        }
+        to.Steps.Add(step);
+        if (from.Steps.Count == 0)
+            _path.Sequences.Remove(from);
+
+        // Blocks read in order; the engine looks a sequence up by number, but a sorted list is
+        // what every stored path holds and what the list above is read down.
+        _path.Sequences.Sort((a, b) => a.Sequence.CompareTo(b.Sequence));
+        _selectedSeq = _path.Sequences.IndexOf(to);
+        _selectedStep = to.Steps.Count - 1;
+        _dirty = true;
+        _status = $"Moved the step into sequence {sequence}.";
+    }
+
     private void StopRecording(bool keep)
     {
         var path = _recorder.Finish();
@@ -269,6 +298,17 @@ public sealed class PathEditorWindow : OdysseusWindow
         var running = _controller.State is not (RunState.Idle or RunState.Faulted);
 
         OdysseusTheme.SectionHeader($"SEQ {_path!.Sequences[_selectedSeq].Sequence} · STEP {_selectedStep + 1}");
+
+        // Which block a step belongs to is the one thing recording can get wrong and the editor
+        // could not put right: a quest accepted before the recorder started writes its accept
+        // into the live sequence, while an unaccepted quest is read from sequence 0.
+        var sequence = (int)_path.Sequences[_selectedSeq].Sequence;
+        ImGui.SetNextItemWidth(120f);
+        if (ImGui.InputInt("In sequence", ref sequence, 1, 1) && sequence is >= 0 and <= 255)
+            MoveStepToSequence((byte)sequence);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Moves this step into that sequence block, making it if there is none. "
+                + "0 is where a quest you have not accepted is read from — an AcceptQuest step belongs there; 255 is the turn-in.");
 
         var kindIndex = Array.IndexOf(KindNames, step.Kind.ToString());
         ImGui.SetNextItemWidth(180f);

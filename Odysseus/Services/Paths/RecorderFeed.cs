@@ -68,8 +68,15 @@ public sealed class RecorderFeed
         if (territory != _lastTerritory && !between)
         {
             arrivedByTeleport = _castBeforeLoad;
-            if (arrivedByTeleport && _aetherytes.NearestIn(territory, _world.PlayerPosition, ArrivalRadius) is { } id)
-                arrival = _aetherytes.DataName(id);
+            if (arrivedByTeleport)
+            {
+                // Normally we land on top of it. A zone whose aetheryte the sheets do not place
+                // — new content, most often — still has exactly one to arrive at.
+                if (_aetherytes.NearestIn(territory, _world.PlayerPosition, ArrivalRadius) is { } id)
+                    arrival = _aetherytes.DataName(id);
+                else if (_aetherytes.InTerritory(territory, _world.PlayerPosition) is { Count: > 0 } here)
+                    arrival = _aetherytes.DataName(here[0]);
+            }
             _lastTerritory = territory;
             _castBeforeLoad = false;
         }

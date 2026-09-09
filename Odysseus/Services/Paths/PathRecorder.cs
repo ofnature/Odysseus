@@ -130,10 +130,18 @@ public sealed class PathRecorder
             // Travel: teleport arrival tags the next step; a zone line on foot is a WalkTo out of the old zone.
             if (obs.TerritoryId != prev.TerritoryId)
             {
-                if (obs.ArrivedByTeleport && obs.ArrivalAetheryte is { } aetheryte)
+                if (obs.ArrivedByTeleport)
                 {
-                    _pendingAetheryte = aetheryte;
-                    Note?.Invoke($"Teleported: {aetheryte}");
+                    // Travel, not a walk. An arrival we cannot name is still a teleport: writing
+                    // a zone-line WalkTo out of the zone we just left points the step at the
+                    // wrong end of the journey, which is what a new zone's aetheryte did.
+                    if (obs.ArrivalAetheryte is { } aetheryte)
+                    {
+                        _pendingAetheryte = aetheryte;
+                        Note?.Invoke($"Teleported: {aetheryte}");
+                    }
+                    else
+                        Note?.Invoke($"Teleported into territory {obs.TerritoryId} — the aetheryte could not be named; set it on the next step by hand.");
                 }
                 else if (!obs.InDuty && !prev.InDuty)
                 {
