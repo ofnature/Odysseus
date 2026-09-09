@@ -409,6 +409,19 @@ public sealed class PathEditorWindow : OdysseusWindow
                 "Or one of ConfiguredCombatJob, ConfiguredCraftingJob, QuestStartJob.",
                 "It equips your gearset for that class; there is no gearset, there is no switch."));
 
+        // What an Action step casts, by the name the Action sheet gives it.
+        var action = step.ActionName ?? string.Empty;
+        ImGui.SetNextItemWidth(180f);
+        if (ImGui.InputText("Action", ref action, 60))
+        {
+            step.ActionName = action.Length > 0 ? action : null;
+            _dirty = true;
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip(string.Join((char)10,
+                "For an Action step: the ability as the game names it — Battlehorn, Fire III.",
+                "A DataId above makes it a cast on that target; without one it is cast where you stand."));
+
         var comment = step.Comment ?? string.Empty;
         ImGui.SetNextItemWidth(-1f);
         if (ImGui.InputText("Note", ref comment, 200)) { step.Comment = comment.Length > 0 ? comment : null; _dirty = true; }
