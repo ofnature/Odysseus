@@ -329,9 +329,13 @@ public sealed class MainWindow : OdysseusWindow
             if (OdysseusTheme.IconTextButton(FontAwesomeIcon.FastForward, "Skip", neutral, "Skip the current step and move on.")) Ctl.SkipStep();
         }
         ImGui.SameLine();
-        using (ImRaii.Disabled(_selectedQuest == 0 || !_d.Paths.Has(_selectedQuest)))
+        // A quest with no path yet is exactly the one the editor's recorder is for.
+        using (ImRaii.Disabled(_selectedQuest == 0))
         {
-            if (OdysseusTheme.IconButton("edit", FontAwesomeIcon.Edit, "Edit this quest's path.", sq)) _d.OpenEditor(_selectedQuest);
+            var hasPath = _d.Paths.Has(_selectedQuest);
+            if (OdysseusTheme.IconButton("edit", FontAwesomeIcon.Edit,
+                    hasPath ? "Edit this quest's path." : "No path yet — open the editor and record one from play.", sq))
+                _d.OpenEditor(_selectedQuest);
         }
         ImGui.SameLine();
         using (ImRaii.Disabled(!Running || Ctl.CurrentStep?.Position is null))

@@ -71,7 +71,7 @@ public sealed class PathEditorWindow : OdysseusWindow
         _selectedSeq = _path?.Sequences.Count > 0 ? 0 : -1;
         _selectedStep = _path?.Sequences.FirstOrDefault()?.Steps.Count > 0 ? 0 : -1;
         _dirty = false;
-        _status = _path is null ? $"No stored path for quest {questId}." : string.Empty;
+        _status = _path is null ? $"No stored path for quest {questId} — press ● Record and play it; the steps are written as you go." : string.Empty;
     }
 
     /// <summary>The recorder's quest, so the plugin knows what to observe.</summary>
