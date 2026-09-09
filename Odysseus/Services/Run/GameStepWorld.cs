@@ -447,6 +447,43 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
+    /// <summary>
+    /// Send a chosen event to an addon's node — or, when the node is a silent tile, to the first
+    /// node inside it that listens. The sweep behind "which event opens the context menu".
+    /// </summary>
+    public bool SendAddonNodeEvent(string addonName, uint nodeId, int eventType, int param)
+    {
+        try
+        {
+            var unit = (AtkUnitBase*)_gameGui.GetAddonByName(addonName).Address;
+            if (unit == null || !unit->IsVisible)
+                return false;
+            var node = unit->GetNodeById(nodeId);
+            if (node == null)
+                return false;
+            if (node->AtkEventManager.Event == null)
+            {
+                var component = node->GetAsAtkComponentNode();
+                if (component != null && component->Component != null)
+                {
+                    ref var uld = ref component->Component->UldManager;
+                    for (var i = 0; i < uld.NodeListCount; i++)
+                    {
+                        var child = uld.NodeList[i];
+                        if (child != null && child->AtkEventManager.Event != null)
+                            return AtkClick.Send(unit, child, eventType, param);
+                    }
+                }
+            }
+            return AtkClick.Send(unit, node, eventType, param);
+        }
+        catch (Exception ex)
+        {
+            _log($"Sending event {eventType} to node {nodeId} of {addonName} failed: {ex.Message}");
+            return false;
+        }
+    }
+
     /// <summary>Pick an entry of the open context menu. ECommons' own move: values 0, index, 0.</summary>
     public bool SelectContextMenuIndex(int index) => FireAddonValues("ContextMenu", 0, index, 0);
 

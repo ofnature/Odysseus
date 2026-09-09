@@ -49,6 +49,8 @@ public sealed class WorkbenchWindow : Window
     private HashSet<string> _seenBefore = [];
     private DateTime _fired;
     private int _addonNode = 27;
+    private int _addonEvent = 3;
+    private int _addonParam = 4;
 
     public WorkbenchWindow(TribeCatalog tribes, DeliveryCatalog clients, WorkList list, WorkRunner runner,
         IOwnGatherer? gatherer = null, IGatherWorld? gatherWorld = null, Odysseus.Services.Run.GameStepWorld? addons = null)
@@ -268,6 +270,25 @@ public sealed class WorkbenchWindow : Window
             _opened = hit ? _addons.VisibleAddonNames().Where(n => !_seenBefore.Contains(n)).ToList() : [];
             _addonStatus = hit ? $"Clicked node {_addonNode}." : $"Node {_addonNode} took no click.";
         }
+
+        ImGui.SetNextItemWidth(70f);
+        ImGui.InputInt("Event", ref _addonEvent, 1, 1);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(70f);
+        ImGui.InputInt("Param", ref _addonParam, 1, 1);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Send event"))
+        {
+            _seenBefore = _addons.VisibleAddonNames().ToHashSet();
+            var sent = _addons.SendAddonNodeEvent(_addonName, (uint)Math.Max(0, _addonNode), _addonEvent, _addonParam);
+            _fired = _addons.UtcNow;
+            _opened = sent ? _addons.VisibleAddonNames().Where(n => !_seenBefore.Contains(n)).ToList() : [];
+            _addonStatus = sent
+                ? $"Sent event {_addonEvent} param {_addonParam} to node {_addonNode}."
+                : $"Node {_addonNode} of {_addonName} could not be reached.";
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Sweep event types against the node that listens: the one that raises a context menu is the one to keep.");
 
         var menu = _addons.ContextMenuEntries();
         if (menu.Count > 0)

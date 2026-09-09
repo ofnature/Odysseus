@@ -67,6 +67,22 @@ public static unsafe class AtkClick
         return true;
     }
 
+    /// <summary>
+    /// Send a chosen event type and param to a node, rather than the one it registered. Finding
+    /// which type raises a context menu is a sweep, and nothing documents it.
+    /// </summary>
+    public static bool Send(AtkUnitBase* addon, AtkResNode* node, int eventType, int param)
+    {
+        if (addon == null || node == null)
+            return false;
+        var evt = default(AtkEvent);
+        evt.Target = (AtkEventTarget*)node;
+        evt.Listener = (AtkEventListener*)addon;
+        var eventData = default(AtkEventData);
+        addon->ReceiveEvent((AtkEventType)eventType, param, &evt, &eventData);
+        return true;
+    }
+
     /// <summary>Click any component node of an addon — the grid tiles a bespoke window is made of.</summary>
     public static bool Node(AtkUnitBase* addon, AtkComponentNode* node) => Click(addon, node);
 
