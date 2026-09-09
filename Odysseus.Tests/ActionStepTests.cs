@@ -93,14 +93,22 @@ public class ActionStepTests
     }
 
     [Fact]
-    public void Instruction_and_status_off_are_no_ops()
+    public void A_note_holds_the_run_while_a_status_off_is_a_no_op()
     {
         var w = new FakeStepWorld();
         var ex = new StepExecutor(w);
+
+        // A note names something the run cannot do, so it waits for the person who can.
         ex.Begin(new QuestStep { Kind = StepKind.Instruction, KindName = "Instruction", TerritoryId = 400, Comment = "read me" });
         Ticks(ex, w, 3);
-        Assert.Equal(StepStatus.Done, ex.Status);
+        Assert.Equal(StepStatus.Running, ex.Status);
         Assert.Contains(w.Calls, c => c.Contains("read me"));
+
+        // A note with nothing written on it has nobody to wait for.
+        ex.Begin(new QuestStep { Kind = StepKind.Instruction, KindName = "Instruction", TerritoryId = 400 });
+        Ticks(ex, w, 3);
+        Assert.Equal(StepStatus.Done, ex.Status);
+
         ex.Begin(new QuestStep { Kind = StepKind.StatusOff, KindName = "StatusOff", TerritoryId = 400 });
         Ticks(ex, w, 3);
         Assert.Equal(StepStatus.Done, ex.Status);

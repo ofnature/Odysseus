@@ -1053,10 +1053,17 @@ public class StepExecutorTests
             Kind = StepKind.Instruction, KindName = "Instruction",
             Comment = "Equip Cu Sith from Master's Bestiary", TerritoryId = 148,
         });
-        Run(ex, world);
+        for (var i = 0; i < 20; i++) { ex.Tick(); world.Advance(1); }
 
-        Assert.Equal(StepStatus.Done, ex.Status);
+        // It holds rather than sailing past: the player has something to do first.
+        Assert.Equal(StepStatus.Running, ex.Status);
         Assert.Contains(world.Calls, c => c.StartsWith("Notify") && c.Contains("Master's Bestiary"));
+        Assert.Contains("press Skip", ex.PhaseName);
+
+        // Nobody answering is a fault in the end, not a run held for ever.
+        for (var i = 0; i < 200 && ex.Status == StepStatus.Running; i++) { ex.Tick(); world.Advance(10); }
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.Contains("nobody answered", ex.FailReason);
     }
 
     [Fact]

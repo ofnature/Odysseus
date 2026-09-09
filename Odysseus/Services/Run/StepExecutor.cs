@@ -55,6 +55,8 @@ public sealed class StepExecutor
         Dive,
         /// <summary>Holding until the step's NPC stands at the position it is walking to.</summary>
         NpcWait,
+        /// <summary>Holding on a path note: the player has something to do that we cannot.</summary>
+        Instruction,
         /// <summary>Vendor interacted with, waiting for the shop window.</summary>
         Shop,
         /// <summary>Shop open: buy the shortfall and watch the bag until it is covered.</summary>
@@ -87,6 +89,9 @@ public sealed class StepExecutor
 
     /// <summary>How often a refused teleport is asked again, and for how long before faulting.</summary>
     private static readonly TimeSpan TeleportRetryEvery = TimeSpan.FromSeconds(2);
+
+    /// <summary>How long a path note waits for the player before it gives up on them.</summary>
+    private static readonly TimeSpan InstructionMax = TimeSpan.FromMinutes(15);
 
     /// <summary>How long a waited-for NPC gets to walk to their spot.</summary>
     private static readonly TimeSpan NpcWaitMax = TimeSpan.FromMinutes(5);
@@ -444,7 +449,9 @@ public sealed class StepExecutor
     /// </summary>
     public bool TargetMissing { get; private set; }
     public QuestStep? Current => _step;
-    public string PhaseName => _phase.ToString();
+    public string PhaseName => _phase == Phase.Instruction && _step?.Comment is { Length: > 0 } note
+        ? $"Instruction — {note} (press Skip when done)"
+        : _phase.ToString();
 
     /// <param name="skipTeleport">The step's <c>AetheryteShortcutIf</c> holds — walk instead of teleporting.</param>
     /// <param name="questId">The quest this step belongs to — needed to resolve dialogue text keys. 0 for a bare step.</param>
@@ -783,6 +790,11 @@ public sealed class StepExecutor
 
             case Phase.Dive:
                 TickDive(now);
+                break;
+
+            case Phase.Instruction:
+                if (now - _phaseStart > InstructionMax)
+                    Fail($"nobody answered the note \"{step.Comment}\" in {InstructionMax.TotalMinutes:F0} min");
                 break;
 
             case Phase.NpcWait:
@@ -1246,9 +1258,14 @@ public sealed class StepExecutor
 
             // A note in the path, and "drop status X" (used for a disguise/transparency the quest
             // gave you — the game clears it on the next relevant interaction). Nothing to do.
+            case StepKind.Instruction when step.Comment is { Length: > 0 } note:
+                // A note is something the run cannot do — a levequest, a beast assigned by hand.
+                // Walking past it and carrying on is doing the wrong thing quietly, so it holds
+                // until the player has done it and pressed Skip.
+                _world.Notify($"Odysseus: {note} — do it, then press Skip.");
+                return Phase.Instruction;
+
             case StepKind.Instruction or StepKind.StatusOff:
-                if (step.Comment is { } note && step.Kind == StepKind.Instruction)
-                    _world.Notify($"Odysseus: {note}");
                 return Phase.Finish;
 
             case StepKind.Dive:
