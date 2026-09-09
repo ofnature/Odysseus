@@ -147,7 +147,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             new TheseusIpc(PluginInterface, message => Warn(message)),
             new ChatCommandSender(message => Warn(message)),
             duties,
-            _quests, deliveryWorld, making, message => Say(message));
+            _quests, deliveryWorld, making, message => Say(message),
+            // A path note is for the player: chat is where they are looking, and it stays put.
+            message => { try { Service.ChatGui.Print(message); } catch { /* chat is never worth a fault */ } });
         _recorderFeed = new RecorderFeed(_world, _quests, aetherytes, duties);
         var dialogue = new DialogueCatalog(DataManager, message => Warn(message));
         _runLog = new RunLog(

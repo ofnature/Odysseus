@@ -573,4 +573,10 @@ public interface IStepWorld
     void ReleaseDialogue();
 
     void Log(string message);
+
+    /// <summary>
+    /// Tell the player something, where they will actually see it. A path note is written for a
+    /// person to act on; the log is not where a person is looking.
+    /// </summary>
+    void Notify(string message);
 }

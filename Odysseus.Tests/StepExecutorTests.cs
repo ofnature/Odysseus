@@ -1042,6 +1042,24 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void A_path_note_is_told_to_the_player_not_just_the_log()
+    {
+        // "Equip Cu Sith from Master's Bestiary" is a note the player has to act on, and it only
+        // ever reached a log file nobody had open.
+        var world = new FakeStepWorld { TerritoryId = 148 };
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.Instruction, KindName = "Instruction",
+            Comment = "Equip Cu Sith from Master's Bestiary", TerritoryId = 148,
+        });
+        Run(ex, world);
+
+        Assert.Equal(StepStatus.Done, ex.Status);
+        Assert.Contains(world.Calls, c => c.StartsWith("Notify") && c.Contains("Master's Bestiary"));
+    }
+
+    [Fact]
     public void The_move_budget_measures_progress_not_wall_time()
     {
         // Thavnair's crossing was killed at 180s with two thirds of it done and the character

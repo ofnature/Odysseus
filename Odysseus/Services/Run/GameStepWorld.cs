@@ -45,13 +45,14 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     private readonly Deliveries.IShopWorld _shops;
     private readonly ItemMaking _making;
     private readonly Action<string> _log;
+    private readonly Action<string>? _notify;
 
     public GameStepWorld(
         IClientState clientState, IObjectTable objectTable, ICondition condition, IGameGui gameGui,
         ITargetManager targets, IDataManager data, VnavIpc vnav, DaedalusIpc daedalus,
         TextAdvanceIpc textAdvance, LifestreamIpc lifestream, Travel.AetheryteCatalog aetherytes,
         TheseusIpc theseus, ChatCommandSender chat, DutyCatalog duties, IQuestStateReader quests,
-        Deliveries.IShopWorld shops, ItemMaking making, Action<string> log)
+        Deliveries.IShopWorld shops, ItemMaking making, Action<string> log, Action<string>? notify = null)
     {
         _shops = shops;
         _making = making;
@@ -71,6 +72,7 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         _textAdvance = textAdvance;
         _quests = quests;
         _log = log;
+        _notify = notify;
     }
 
     public DateTime UtcNow => DateTime.UtcNow;
@@ -2067,6 +2069,12 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     public void ReleaseDialogue() => _textAdvance.Release();
 
     public void Log(string message) => _log(message);
+
+    public void Notify(string message)
+    {
+        _log(message);
+        _notify?.Invoke(message);
+    }
 
     // ── Helpers ──
 

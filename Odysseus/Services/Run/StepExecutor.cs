@@ -1248,7 +1248,7 @@ public sealed class StepExecutor
             // gave you — the game clears it on the next relevant interaction). Nothing to do.
             case StepKind.Instruction or StepKind.StatusOff:
                 if (step.Comment is { } note && step.Kind == StepKind.Instruction)
-                    _world.Log($"Path note: {note}");
+                    _world.Notify($"Odysseus: {note}");
                 return Phase.Finish;
 
             case StepKind.Dive:
