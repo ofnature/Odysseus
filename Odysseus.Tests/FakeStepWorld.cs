@@ -175,6 +175,9 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool IsTravelBusy { get; set; }
     public bool IsRidingVehicle { get; set; }
     public void RefreshAetheryteList() => Calls.Add("RefreshAetherytes");
+    /// <summary>Seconds left on an action's recast, by action id.</summary>
+    public Dictionary<uint, float> Recasts { get; } = new();
+    public float ActionRecastSeconds(uint actionId) => Recasts.GetValueOrDefault(actionId);
     public int LowestGearConditionPercent { get; set; } = 100;
     public int FreeBagSlots { get; set; } = 50;
     public bool RepairWindowOpens { get; set; } = true;

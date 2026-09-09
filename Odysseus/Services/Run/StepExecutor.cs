@@ -191,6 +191,11 @@ public sealed class StepExecutor
     /// <summary>How many refusals before believing the game means it.</summary>
     private const int MaxItemUseTries = 4;
 
+    /// <summary>How long an action gets to come off cooldown before the step asks for a person.</summary>
+    private static readonly TimeSpan ActionRecastMax = TimeSpan.FromMinutes(3);
+    private static readonly TimeSpan RecastNoteEvery = TimeSpan.FromSeconds(15);
+    private DateTime _lastRecastNote;
+
     /// <summary>How often to ask again while a dismount is still coming down.</summary>
     private static readonly TimeSpan DismountRetry = TimeSpan.FromSeconds(2);
 
@@ -1573,6 +1578,26 @@ public sealed class StepExecutor
         if (_world.UseAction(actionId.Value, step.GroundTarget ? step.Position : null))
         {
             Enter(Phase.ActionSettle);
+            return;
+        }
+
+        // An ability still cooling is not a refusal: First Battlehorn is ninety seconds, and four
+        // tries at a second and a half called that "refused" six seconds in.
+        var cooling = _world.ActionRecastSeconds(actionId.Value);
+        if (cooling > 0f)
+        {
+            _itemUseTries = 0;
+            if (now - _phaseStart > ActionRecastMax)
+            {
+                Fail($"action \"{step.ActionName}\" is still {cooling:F0}s from ready after "
+                    + $"{ActionRecastMax.TotalMinutes:F0} min — cast it yourself, then Retry");
+                return;
+            }
+            if (now - _lastRecastNote > RecastNoteEvery)
+            {
+                _lastRecastNote = now;
+                _world.Log($"Waiting {cooling:F0}s for \"{step.ActionName}\" to come off cooldown.");
+            }
             return;
         }
 

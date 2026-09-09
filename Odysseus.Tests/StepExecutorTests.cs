@@ -1014,6 +1014,34 @@ public class StepExecutorTests
     }
 
     [Fact]
+    public void An_ability_still_cooling_is_waited_for_rather_than_called_refused()
+    {
+        // First Battlehorn is a ninety-second recast: four tries at a second and a half called
+        // that "refused" six seconds in, on a quest whose whole point is casting it.
+        var world = new FakeStepWorld { TerritoryId = 148, PlayerPosition = Vector3.Zero };
+        world.Actions["First Battlehorn"] = 4001;
+        world.UseActionAccepted = false;              // the game refuses it while it cools
+        world.Recasts[4001] = 74f;
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.Action, KindName = "Action", ActionName = "First Battlehorn",
+            TerritoryId = 148, Position = Vector3.Zero,
+        });
+
+        for (var i = 0; i < 40 && ex.Status == StepStatus.Running; i++) { ex.Tick(); world.Advance(1); }
+        Assert.Equal(StepStatus.Running, ex.Status);   // still waiting, not failed
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("come off cooldown"));
+
+        // Ready: it fires.
+        world.Recasts[4001] = 0f;
+        world.UseActionAccepted = true;
+        for (var i = 0; i < 20 && ex.Status == StepStatus.Running; i++) { ex.Tick(); world.Advance(1); }
+        Assert.NotEqual(StepStatus.Failed, ex.Status);
+        Assert.Contains(world.Calls, c => c.StartsWith("UseAction 4001"));
+    }
+
+    [Fact]
     public void The_move_budget_measures_progress_not_wall_time()
     {
         // Thavnair's crossing was killed at 180s with two thirds of it done and the character

@@ -176,6 +176,9 @@ public interface IStepWorld
     /// <summary>Aetheryte id for a name as the path data spells it, or null when unknown.</summary>
     uint? ResolveAetheryte(string name);
 
+    /// <summary>Seconds left on an action's recast, or zero when it is ready.</summary>
+    float ActionRecastSeconds(uint actionId);
+
     /// <summary>The worst-worn equipped piece, as a percentage; 100 when nothing can be read.</summary>
     int LowestGearConditionPercent { get; }
 

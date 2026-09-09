@@ -233,6 +233,24 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public uint? ResolveAetheryte(string name) => _aetherytes.Resolve(name);
 
+    public float ActionRecastSeconds(uint actionId)
+    {
+        try
+        {
+            var manager = ActionManager.Instance();
+            if (manager == null)
+                return 0f;
+            var left = manager->GetRecastTime(ActionType.Action, actionId)
+                       - manager->GetRecastTimeElapsed(ActionType.Action, actionId);
+            return left > 0.05f ? left : 0f;
+        }
+        catch (Exception ex)
+        {
+            _log($"Reading the recast of action {actionId} failed: {ex.Message}");
+            return 0f;
+        }
+    }
+
     public int LowestGearConditionPercent
     {
         get
