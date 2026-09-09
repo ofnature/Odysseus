@@ -378,14 +378,39 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
                 return $"{addonName} has no node {nodeId}.";
             var registered = node->AtkEventManager.Event;
             var kind = (int)node->Type >= 1000 ? $"component {(int)node->Type}" : node->Type.ToString();
-            return registered == null
-                ? $"node {nodeId}: {kind}, no registered event — nothing to replay."
-                : $"node {nodeId}: {kind}, event {registered->State.EventType} param {registered->Param}.";
+            if (registered != null)
+                return $"node {nodeId}: {kind}, event {registered->State.EventType} param {registered->Param}.";
+
+            // A tile that listens on nothing itself may still hold a node that does.
+            var inside = InsideListeners(node);
+            return inside.Count == 0
+                ? $"node {nodeId}: {kind}, no registered event, and nothing inside listens either."
+                : $"node {nodeId}: {kind}, silent itself — inside: {string.Join(", ", inside)}";
         }
         catch (Exception ex)
         {
             return $"reading node {nodeId} failed: {ex.Message}";
         }
+    }
+
+    /// <summary>The nodes inside a component that carry a registered event, described.</summary>
+    private static List<string> InsideListeners(AtkResNode* node)
+    {
+        var found = new List<string>();
+        var component = node->GetAsAtkComponentNode();
+        if (component == null || component->Component == null)
+            return found;
+        ref var uld = ref component->Component->UldManager;
+        for (var i = 0; i < uld.NodeListCount; i++)
+        {
+            var child = uld.NodeList[i];
+            if (child == null)
+                continue;
+            var evt = child->AtkEventManager.Event;
+            if (evt != null)
+                found.Add($"#{child->NodeId} {child->Type} event {evt->State.EventType} param {evt->Param}");
+        }
+        return found;
     }
 
     /// <summary>Click an addon's node by id, the way a button is clicked.</summary>
@@ -397,9 +422,23 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
             if (unit == null || !unit->IsVisible)
                 return false;
             var node = unit->GetNodeById(nodeId);
-            if (node == null || (int)node->Type < 1000)
+            if (node == null)
                 return false;
-            return AtkClick.Node(unit, node->GetAsAtkComponentNode());
+            if (node->AtkEventManager.Event != null)
+                return AtkClick.Raw(unit, node);
+
+            // Silent tile: hand the click to the first node inside it that is listening.
+            var component = node->GetAsAtkComponentNode();
+            if (component == null || component->Component == null)
+                return false;
+            ref var uld = ref component->Component->UldManager;
+            for (var i = 0; i < uld.NodeListCount; i++)
+            {
+                var child = uld.NodeList[i];
+                if (child != null && child->AtkEventManager.Event != null)
+                    return AtkClick.Raw(unit, child);
+            }
+            return false;
         }
         catch (Exception ex)
         {

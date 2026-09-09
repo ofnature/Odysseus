@@ -48,6 +48,25 @@ public static unsafe class AtkClick
         *flags ^= 1 << 5;
     }
 
+    /// <summary>
+    /// Send a node's own registered event to its addon, whatever kind of node it is. A component
+    /// tile often listens on a node inside itself rather than on the tile.
+    /// </summary>
+    public static bool Raw(AtkUnitBase* addon, AtkResNode* node)
+    {
+        if (addon == null || node == null)
+            return false;
+        var registered = node->AtkEventManager.Event;
+        if (registered == null)
+            return false;
+        var evt = default(AtkEvent);
+        evt.Target = (AtkEventTarget*)node;
+        evt.Listener = (AtkEventListener*)addon;
+        var eventData = default(AtkEventData);
+        addon->ReceiveEvent(registered->State.EventType, (int)registered->Param, &evt, &eventData);
+        return true;
+    }
+
     /// <summary>Click any component node of an addon — the grid tiles a bespoke window is made of.</summary>
     public static bool Node(AtkUnitBase* addon, AtkComponentNode* node) => Click(addon, node);
 
