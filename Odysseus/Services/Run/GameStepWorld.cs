@@ -331,6 +331,37 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
+    /// <summary>
+    /// Every addon on screen right now, by name. What a callback opened is the question the
+    /// bench asks after firing one, and the answer is rarely the window you fired at.
+    /// </summary>
+    public IReadOnlyList<string> VisibleAddonNames()
+    {
+        var names = new List<string>();
+        try
+        {
+            var stage = AtkStage.Instance();
+            if (stage == null || stage->RaptureAtkUnitManager == null)
+                return names;
+            ref var units = ref stage->RaptureAtkUnitManager->AtkUnitManager.AllLoadedUnitsList;
+            for (var i = 0; i < units.Count; i++)
+            {
+                var unit = units.Entries[i].Value;
+                if (unit == null || !unit->IsVisible)
+                    continue;
+                var name = unit->NameString;
+                if (!string.IsNullOrEmpty(name))
+                    names.Add(name);
+            }
+            names.Sort(StringComparer.Ordinal);
+        }
+        catch (Exception ex)
+        {
+            _log($"Listing addons failed: {ex.Message}");
+        }
+        return names;
+    }
+
     /// <summary>Pick an entry of the open context menu. ECommons' own move: values 0, index, 0.</summary>
     public bool SelectContextMenuIndex(int index) => FireAddonValues("ContextMenu", 0, index, 0);
 

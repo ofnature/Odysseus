@@ -45,6 +45,9 @@ public sealed class WorkbenchWindow : Window
     private string _addonName = "XBMMonsterNotebook";
     private string _addonValues = "0";
     private string _addonStatus = string.Empty;
+    private List<string> _opened = [];
+    private HashSet<string> _seenBefore = [];
+    private DateTime _fired;
 
     public WorkbenchWindow(TribeCatalog tribes, DeliveryCatalog clients, WorkList list, WorkRunner runner,
         IOwnGatherer? gatherer = null, IGatherWorld? gatherWorld = null, Odysseus.Services.Run.GameStepWorld? addons = null)
@@ -229,15 +232,26 @@ public sealed class WorkbenchWindow : Window
             var values = new List<int>();
             foreach (var part in parts)
                 if (int.TryParse(part, out var v)) values.Add(v);
-            var before = _addons.ContextMenuEntries().Count;
+            _seenBefore = _addons.VisibleAddonNames().ToHashSet();
+            var before = _seenBefore;
             var sent = _addons.FireAddonValues(_addonName, values.ToArray());
-            var after = _addons.ContextMenuEntries();
+            _fired = _addons.UtcNow;
+            _opened = sent ? _addons.VisibleAddonNames().Where(n => !before.Contains(n)).ToList() : [];
             _addonStatus = !sent
                 ? $"{_addonName} is not on screen."
-                : after.Count > before
-                    ? $"Sent [{string.Join(' ', values)}] — a context menu opened with {after.Count} entries."
-                    : $"Sent [{string.Join(' ', values)}] — nothing new on screen.";
+                : $"Sent [{string.Join(' ', values)}].";
         }
+
+        // What a callback opens can lag a frame or two behind the firing.
+        if (_fired != default && _addons.UtcNow - _fired < TimeSpan.FromSeconds(3))
+        {
+            var late = _addons.VisibleAddonNames().Where(n => !_opened.Contains(n)).ToList();
+            foreach (var name in late)
+                if (!_seenBefore.Contains(name))
+                    _opened.Add(name);
+        }
+        if (_opened.Count > 0)
+            ImGui.TextColored(OdysseusTheme.StatusGreen, "Opened: " + string.Join(", ", _opened));
 
         var menu = _addons.ContextMenuEntries();
         if (menu.Count > 0)
