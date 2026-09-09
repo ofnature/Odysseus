@@ -154,9 +154,14 @@ public sealed class PathEditorWindow : OdysseusWindow
             ImGui.SameLine();
             if (OdysseusTheme.SolidButton("Stop & discard", OdysseusTheme.RedDark, new Vector2(110, 22)))
                 StopRecording(keep: false);
+            // Stopping happens inside this frame, and takes the recorder's path with it: the
+            // tail of the bar belongs to a recording that is still running.
+            if (_recorder.Path is not { } recording)
+                return;
+
             // While recording the list mirrors the recorder's path.
-            _path = _recorder.Path;
-            _questId = _recorder.Path.QuestId;
+            _path = recording;
+            _questId = recording.QuestId;
             return;
         }
 
