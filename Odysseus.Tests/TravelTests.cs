@@ -447,6 +447,29 @@ public class TravelExecutorTests
     }
 
     [Fact]
+    public void A_duty_queued_by_the_duty_finder_does_not_travel_to_where_it_was_recorded()
+    {
+        // A City Fallen: the alliance raid was recorded on the Prima Vista's bridge (736), an
+        // instanced area with no aetheryte. From Kugane, travel faulted "no aetheryte there"
+        // before the duty rule ever said the raid is not something Odysseus runs.
+        var w = World();
+        w.TerritoryId = 628;
+        w.Duties[281] = new Odysseus.Services.Quest.DutyDescription(281, "The Royal City of Rabanastre", false, 24);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.Duty, KindName = "Duty", TerritoryId = 736,
+            ContentFinderConditionId = 281, DutyEnabled = false,
+        });
+        Ticks(ex, w, 6);
+
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.DoesNotContain("aetheryte", ex.FailReason);
+        Assert.Contains("Rabanastre", ex.FailReason);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Teleport"));
+    }
+
+    [Fact]
     public void A_far_mark_with_an_attuned_aetheryte_beside_it_teleports_in_zone()
     {
         // Thavnair: the accept NPC stood 340y off with a crystal right beside them — the

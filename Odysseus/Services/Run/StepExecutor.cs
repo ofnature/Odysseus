@@ -591,6 +591,16 @@ public sealed class StepExecutor
     /// its nodes are in, and guessing wrong there means sending the gatherer somewhere useless.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// The step has nowhere to go. Placeless kinds never do; a duty with no NPC to talk to is
+    /// queued through the Duty Finder by its ContentFinderCondition, which works from anywhere —
+    /// the territory on it is where the author stood, not where the character has to be. A City
+    /// Fallen's alliance raid was recorded on the Prima Vista's bridge, an instanced area with no
+    /// aetheryte, and travel faulted there before the duty rule could say what the step was.
+    /// </summary>
+    private static bool TravelsNowhere(QuestStep step)
+        => IsPlaceless(step.Kind) || (step.Kind == StepKind.Duty && step.DataId is null);
+
     public static bool IsPlaceless(StepKind kind) => kind is
         StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset or StepKind.SwitchClass
         or StepKind.Craft or StepKind.EquipRecommended or StepKind.Instruction or StepKind.StatusOff;
@@ -1057,7 +1067,7 @@ public sealed class StepExecutor
         // Same zone, no shortcut, and the mark a long ride away with an attuned aetheryte
         // standing near it: the crystal beats even the flight. Only when it wins by a clear
         // margin — a teleport is a cast and a loading screen.
-        if (_world.TerritoryId == step.TerritoryId && !IsPlaceless(step.Kind) && !_skipTeleport && !_world.IsRidingVehicle
+        if (_world.TerritoryId == step.TerritoryId && !TravelsNowhere(step) && !_skipTeleport && !_world.IsRidingVehicle
             && step.Position is { } sameZoneGoal
             && Vector3.Distance(_world.PlayerPosition, sameZoneGoal) is var wayOff
             && wayOff > TeleportWorthDistance
@@ -1072,7 +1082,7 @@ public sealed class StepExecutor
             return Phase.Teleport;
         }
 
-        if (step.TerritoryId == 0 || _world.TerritoryId == step.TerritoryId || IsPlaceless(step.Kind))
+        if (step.TerritoryId == 0 || _world.TerritoryId == step.TerritoryId || TravelsNowhere(step))
             return NextAfterTeleport();
 
         // The path already says which shard to hop to, and it chose the one beside the NPC. This
@@ -1172,7 +1182,7 @@ public sealed class StepExecutor
         var step = _step!;
 
         // Nothing to reach and nowhere to be — do it where you stand.
-        if (IsPlaceless(step.Kind))
+        if (TravelsNowhere(step))
             return Phase.WaitReady;
 
         // A step that crosses a zone line names both ends: TerritoryId is where it starts and
