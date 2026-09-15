@@ -463,9 +463,9 @@ public class TravelExecutorTests
         });
         Ticks(ex, w, 6);
 
-        Assert.Equal(StepStatus.Failed, ex.Status);
-        Assert.DoesNotContain("aetheryte", ex.FailReason);
-        Assert.Contains("Rabanastre", ex.FailReason);
+        Assert.Equal(StepStatus.Running, ex.Status);           // waiting on the player, not faulted on travel
+        Assert.Contains("Rabanastre", ex.PhaseName);
+        Assert.DoesNotContain("aetheryte", ex.PhaseName);
         Assert.DoesNotContain(w.Calls, c => c.StartsWith("Teleport"));
     }
 

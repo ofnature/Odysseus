@@ -617,16 +617,12 @@ public sealed class QuestController
                 Fault("solo duty ahead and the BossMod handoff is off — run it yourself, then Retry");
                 return;
             }
-            if (step.Kind == StepKind.Duty && !_policy.HandOffDuties)
-            {
-                Fault("dungeon or trial ahead and the Theseus handoff is off — run it yourself, then Retry");
-                return;
-            }
             var skipTeleport = StepConditions.ShouldSkipAetheryte(step, Conditions, snap);
             _stepStarted = _world.UtcNow;
             if (step.Kind == StepKind.CompleteQuest)
                 QuestCompleting?.Invoke(_questId);
-            _executor.Begin(step, skipTeleport, _questId, GroundOnly);
+            _executor.Begin(step, skipTeleport, _questId, GroundOnly,
+                dutyByHand: step.Kind == StepKind.Duty && !_policy.HandOffDuties);
             _log($"Step {_stepIndex + 1}/{_block.Steps.Count} in seq {sequence}: {step}" +
                  (step.AetheryteShortcut is { } a ? $" via {a}{(skipTeleport ? " (skipped)" : "")}" : ""));
         }

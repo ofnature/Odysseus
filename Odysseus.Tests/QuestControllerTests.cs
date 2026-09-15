@@ -442,18 +442,28 @@ public class QuestControllerTests : IDisposable
     }
 
     [Fact]
-    public void Handoff_steps_are_refused_when_the_policy_turns_them_off()
+    public void A_duty_the_policy_keeps_back_waits_for_the_player_and_the_quest_moving_releases_it()
     {
         _policy.HandOffDuties = false;
         _world.TheseusCanEnterDuty = true;
         var duty = new QuestStep { Kind = StepKind.Duty, KindName = "Duty", TerritoryId = 400, ContentFinderConditionId = 247 };
-        StorePath(new QuestSequence { Sequence = 1, Steps = [duty] });
+        StorePath(
+            new QuestSequence { Sequence = 1, Steps = [duty] },
+            new QuestSequence { Sequence = 2, Steps = [Interact(2)] });
         _quests.Set(1622, 1);
         _controller.Start(1622);
         Ticks(3);
-        Assert.Equal(RunState.Faulted, _controller.State);
-        Assert.Contains("Theseus handoff is off", _controller.StatusLine);
+
+        // Held, not faulted, and nothing asked of Theseus.
+        Assert.NotEqual(RunState.Faulted, _controller.State);
+        Assert.Contains("Theseus handoff is off", _controller.Phase);
         Assert.DoesNotContain(_world.Calls, c => c.StartsWith("TheseusEnter"));
+
+        // The player clears it; the quest moves; the run follows without a Retry.
+        _quests.Set(1622, 2);
+        Ticks(6);
+        Assert.NotEqual(RunState.Faulted, _controller.State);
+        Assert.Equal(2, _controller.Sequence);
     }
 
     [Fact]

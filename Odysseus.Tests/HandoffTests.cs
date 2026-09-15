@@ -143,17 +143,39 @@ public class HandoffTests
     }
 
     [Fact]
-    public void An_eight_player_trial_stops_by_name_before_theseus_is_asked()
+    public void An_eight_player_trial_waits_for_the_player_by_name_before_theseus_is_asked()
     {
         var w = new FakeStepWorld { TheseusCanEnterDuty = true };
         w.Duties[239] = new Odysseus.Services.Quest.DutyDescription(239, "the Royal Menagerie", IsDungeon: false, PartySize: 8);
         var ex = new StepExecutor(w);
         ex.Begin(Step(StepKind.Duty, cfc: 239));
         Ticks(ex, w, 2);
-        Assert.Equal(StepStatus.Failed, ex.Status);
-        Assert.Contains("the Royal Menagerie", ex.FailReason);
-        Assert.Contains("8-player trial", ex.FailReason);
+
+        // Not ours to run: the step holds with the trial named, and says so where it is seen.
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.Contains("the Royal Menagerie", ex.PhaseName);
+        Assert.Contains("8-player trial", ex.PhaseName);
+        Assert.Contains(w.Calls, c => c.StartsWith("Notify") && c.Contains("the Royal Menagerie"));
         Assert.DoesNotContain(w.Calls, c => c.StartsWith("TheseusEnter"));
+
+        // Clearing it takes a while; the time inside the duty never counts toward giving up.
+        w.InDuty = true;
+        for (var i = 0; i < 400; i++) { ex.Tick(); w.Advance(30); }   // over three hours inside
+        Assert.Equal(StepStatus.Running, ex.Status);
+    }
+
+    [Fact]
+    public void A_duty_left_to_the_player_is_given_up_on_only_after_hours_outside_it()
+    {
+        var w = new FakeStepWorld { TheseusCanEnterDuty = true };
+        w.Duties[281] = new Odysseus.Services.Quest.DutyDescription(281, "The Royal City of Rabanastre", IsDungeon: false, PartySize: 24);
+        var ex = new StepExecutor(w);
+        ex.Begin(Step(StepKind.Duty, cfc: 281));
+        for (var i = 0; i < 100 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(60); }   // an hour and a half
+        Assert.Equal(StepStatus.Running, ex.Status);
+        for (var i = 0; i < 100 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(60); }
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.Contains("by hand", ex.FailReason);
     }
 
     [Fact]
@@ -168,14 +190,14 @@ public class HandoffTests
     }
 
     [Fact]
-    public void Duty_without_theseus_stops_and_says_so()
+    public void Duty_without_theseus_waits_for_the_player_and_says_why()
     {
         var w = new FakeStepWorld { TheseusCanEnterDuty = false };
         var ex = new StepExecutor(w);
         ex.Begin(Step(StepKind.Duty, cfc: 247));
         Ticks(ex, w, 2);
-        Assert.Equal(StepStatus.Failed, ex.Status);
-        Assert.Contains("Theseus", ex.FailReason);
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.Contains("Theseus", ex.PhaseName);
         Assert.DoesNotContain(w.Calls, c => c.StartsWith("TheseusEnter"));
     }
 

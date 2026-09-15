@@ -57,6 +57,8 @@ public sealed class StepExecutor
         NpcWait,
         /// <summary>Holding on a path note: the player has something to do that we cannot.</summary>
         Instruction,
+        /// <summary>Holding while the player runs a duty we do not: the quest moving on releases it.</summary>
+        DutyByHand,
         /// <summary>Vendor interacted with, waiting for the shop window.</summary>
         Shop,
         /// <summary>Shop open: buy the shortfall and watch the bag until it is covered.</summary>
@@ -89,6 +91,9 @@ public sealed class StepExecutor
 
     /// <summary>How often a refused teleport is asked again, and for how long before faulting.</summary>
     private static readonly TimeSpan TeleportRetryEvery = TimeSpan.FromSeconds(2);
+
+    /// <summary>How long a duty left to the player waits outside the duty before it gives up.</summary>
+    private static readonly TimeSpan DutyByHandMax = TimeSpan.FromHours(2);
 
     /// <summary>How long a path note waits for the player before it gives up on them.</summary>
     private static readonly TimeSpan InstructionMax = TimeSpan.FromMinutes(15);
@@ -417,6 +422,8 @@ public sealed class StepExecutor
     private bool _ownGatherAsked;
     private bool _ownGatherDeclineSaid;
     private DateTime _lastTeleportTry;
+    private bool _dutyByHand;
+    private string _byHandNote = string.Empty;
     private int _teleportAsks;
     private const int MaxTeleportAsks = 2;
     private bool _aetheryteListWarmed;
@@ -449,9 +456,12 @@ public sealed class StepExecutor
     /// </summary>
     public bool TargetMissing { get; private set; }
     public QuestStep? Current => _step;
-    public string PhaseName => _phase == Phase.Instruction && _step?.Comment is { Length: > 0 } note
-        ? $"Instruction — {note} (press Skip when done)"
-        : _phase.ToString();
+    public string PhaseName => _phase switch
+    {
+        Phase.Instruction when _step?.Comment is { Length: > 0 } note => $"Instruction — {note} (press Skip when done)",
+        Phase.DutyByHand when _byHandNote.Length > 0 => $"Waiting for you — {_byHandNote}",
+        _ => _phase.ToString(),
+    };
 
     /// <param name="skipTeleport">The step's <c>AetheryteShortcutIf</c> holds — walk instead of teleporting.</param>
     /// <param name="questId">The quest this step belongs to — needed to resolve dialogue text keys. 0 for a bare step.</param>
@@ -459,7 +469,7 @@ public sealed class StepExecutor
     /// Ignore the step's <c>Fly</c> flag and walk. Set for an allied society path in a base-game
     /// zone, where the flight the data asks for catches on scenery.
     /// </param>
-    public void Begin(QuestStep step, bool skipTeleport = false, ushort questId = 0, bool groundOnly = false)
+    public void Begin(QuestStep step, bool skipTeleport = false, ushort questId = 0, bool groundOnly = false, bool dutyByHand = false)
     {
         _groundOnly = groundOnly;
         _step = step;
@@ -522,6 +532,8 @@ public sealed class StepExecutor
         _inFight = false;
         _fights = 0;
         _skipTeleport = skipTeleport;
+        _dutyByHand = dutyByHand;
+        _byHandNote = string.Empty;
         _teleportAsks = 0;
         _aetheryteListWarmed = false;
         // BossMod's AI movement controller refuses legs it cannot path ("off mesh") and fights
@@ -800,6 +812,15 @@ public sealed class StepExecutor
 
             case Phase.Dive:
                 TickDive(now);
+                break;
+
+            case Phase.DutyByHand:
+                // Queues and alliance raids are long: the budget is generous, and time spent inside
+                // the duty does not count against it.
+                if (_world.InDuty)
+                    _phaseStart = now;
+                else if (now - _phaseStart > DutyByHandMax)
+                    Fail($"waited {DutyByHandMax.TotalHours:F0}h for the duty to be run by hand — {_byHandNote}");
                 break;
 
             case Phase.Instruction:
@@ -1326,26 +1347,24 @@ public sealed class StepExecutor
             case StepKind.Duty:
                 if (_handoffDone)
                     return Phase.Finish;
-                if (_world.InDuty || _world.TheseusBusy)
-                    return Phase.DutyRun; // resumed while Theseus is mid-run
                 if (step.ContentFinderConditionId is not { } cfc)
                 {
                     Fail("duty step names no ContentFinderCondition");
                     return Phase.None;
                 }
-                // Theseus runs 4-player dungeons. Anything else — the nine 8-player trials in the
-                // HW+SB MSQ, for instance — is a stop, named, before anyone is asked to try.
+                // A duty that is not ours to run is the player's, and the run waits for them rather
+                // than stopping: clearing it moves the quest, and the controller follows the quest.
+                // Decided before the in-duty check below, which is for resuming Theseus mid-run —
+                // a player inside an alliance raid is not Theseus mid-dungeon.
+                if (_dutyByHand)
+                    return BeginDutyByHand(cfc, "the Theseus handoff is off");
+                // Theseus runs 4-player dungeons. Trials and alliance raids are named and waited on.
                 if (_world.DescribeDuty(cfc) is { IsDungeon: false } notDungeon)
-                {
-                    Fail($"{notDungeon.Name} is an {notDungeon.Kind} — Odysseus does not automate those. " +
-                         "Clear it with Duty Support or a party, then Retry");
-                    return Phase.None;
-                }
+                    return BeginDutyByHand(cfc, $"{notDungeon.Name} is an {notDungeon.Kind}, which Odysseus does not run");
+                if (_world.InDuty || _world.TheseusBusy)
+                    return Phase.DutyRun; // resumed while Theseus is mid-run
                 if (!_world.TheseusCanEnterDuty)
-                {
-                    Fail("Theseus is not loaded, is disabled, or is busy — run the duty yourself, then Retry");
-                    return Phase.None;
-                }
+                    return BeginDutyByHand(cfc, "Theseus is not loaded, is disabled, or is busy");
                 if (!_world.TheseusEnterDuty(cfc))
                 {
                     Fail($"Theseus refused duty {cfc} — it may have no route for it. Run it yourself, then Retry");
@@ -1672,6 +1691,19 @@ public sealed class StepExecutor
     /// The step's emote at its target — the doze that baits a spawn. The target gets the same
     /// patience an action target does; it can pop in on approach.
     /// </summary>
+    /// <summary>
+    /// Hand a duty to the player and wait. The note names the duty and why it is theirs; the
+    /// quest sequence moving on — which clearing it does — is what releases the step.
+    /// </summary>
+    private Phase BeginDutyByHand(uint cfc, string why)
+    {
+        var name = _world.DescribeDuty(cfc)?.Name;
+        var subject = name is not null && !why.Contains(name, StringComparison.Ordinal) ? $"run {name} yourself" : "run it yourself";
+        _byHandNote = $"{why} — {subject}; the quest carries on once you clear it";
+        _world.Notify($"Odysseus: {_byHandNote}.");
+        return Phase.DutyByHand;
+    }
+
     /// <summary>
     /// The command for an emote name. The name is stored bare — every one of the shipped
     /// library's emote steps is — but a slash typed into the editor made "//pet", which the game
