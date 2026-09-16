@@ -75,6 +75,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly QuestLineOverlay _questLine;
     private readonly VnavIpc _vnav;
     private readonly GatherListsWindow _gatherWindow;
+    private readonly Services.Quest.QuestObjectives _objectives = new();
     private readonly DebugWindow _debugWindow;
     private readonly Services.Gathering.GameGatherWorld _gatherWorld;
     private readonly Services.Gathering.IOwnGatherer _ownGatherer;
@@ -348,7 +349,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
             () => ClientState.TerritoryType,
             () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—",
-            () => _gatherWindow.IsOpen = !_gatherWindow.IsOpen));
+            () => _gatherWindow.IsOpen = !_gatherWindow.IsOpen,
+            () => _objectives.Read()));
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);

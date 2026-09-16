@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
@@ -39,7 +40,8 @@ public sealed record MainWindowDeps(
     Func<Vector3> PlayerPosition,
     Func<uint> Territory,
     Func<string> JobAbbreviation,
-    Action ToggleGather);
+    Action ToggleGather,
+    Func<IReadOnlyList<Services.Quest.TrackedObjectives>> Objectives);
 
 /// <summary>
 /// The main window: a compact vertical panel in the QST style — state chip in the title, quest
@@ -98,6 +100,7 @@ public sealed class MainWindow : OdysseusWindow
             DrawQuickAccessSection();
             DrawPathToolsSection();
             DrawRemainingSection();
+            DrawObjectivesSection();
         }
         finally
         {
@@ -585,6 +588,47 @@ public sealed class MainWindow : OdysseusWindow
         }
         if (remaining.Count > 12)
             ImGui.TextColored(OdysseusTheme.TextDisabled, $"... {remaining.Count - 12} more");
+    }
+
+    /// <summary>
+    /// What the game's own to-do list says, beside what the path says. Read-only, and here to
+    /// answer one question: how much of a quest could be driven without a path at all.
+    /// </summary>
+    private void DrawObjectivesSection()
+    {
+        var quests = _d.Objectives();
+        if (!ImGui.CollapsingHeader($"WHAT THE GAME SAYS  {quests.Count}###objectives"))
+            return;
+        if (quests.Count == 0)
+        {
+            ImGui.TextColored(OdysseusTheme.TextDisabled, "No quest is tracked in the journal.");
+            return;
+        }
+
+        var here = _d.PlayerPosition();
+        foreach (var quest in quests)
+        {
+            var name = _d.Catalog.NameOf(quest.QuestId);
+            ImGui.TextColored(OdysseusTheme.TextPrimary,
+                $"{(name.Length > 0 ? name : quest.Label)}  #{quest.QuestId}");
+            if (quest.ItemIds.Count > 0)
+                ImGui.TextColored(OdysseusTheme.TextDisabled, "   items: " + string.Join(", ", quest.ItemIds));
+
+            var any = false;
+            for (var i = 0; i < quest.Objectives.Count; i++)
+            {
+                foreach (var spot in quest.Objectives[i])
+                {
+                    any = true;
+                    var away = Vector3.Distance(here, spot.Position);
+                    ImGui.TextColored(OdysseusTheme.TextDisabled,
+                        $"   {i + 1}. ({spot.Position.X:F0},{spot.Position.Y:F0},{spot.Position.Z:F0})" +
+                        $"  {away:F0}y  level {spot.LevelId}");
+                }
+            }
+            if (!any)
+                ImGui.TextColored(OdysseusTheme.TextDisabled, "   no position — the game names no place for this one");
+        }
     }
 
     // ── helpers ──
