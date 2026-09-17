@@ -147,6 +147,7 @@ public sealed class MainWindow : OdysseusWindow
         string? notice = null;
         if (!Cfg.Enabled) notice = "Odysseus is disabled — enable it in Settings.";
         else if (missing.Length > 0) notice = missing;
+        else if (_d.Presence.AdviceSummary() is { Length: > 0 } advice) notice = advice;
         else if (Cfg.HandOffDutiesToTheseus && !_d.Presence.Theseus) notice = "Theseus not loaded — dungeons inside quests will stop and wait for you.";
         else if (Cfg.HandOffSoloDuties && !_d.Presence.BossMod) notice = "BossMod not loaded — solo duties will stop and wait for you.";
         if (notice is null)

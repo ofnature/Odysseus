@@ -70,8 +70,25 @@ public sealed class PluginPresence
 
     public bool Theseus => IsLoaded(TheseusInternalName);
 
-    /// <summary>Everything required to walk a quest is present.</summary>
-    public bool CoreReady => Pathing && Lifestream && TextAdvance;
+    /// <summary>
+    /// Everything required to walk a quest is present.
+    ///
+    /// <para>
+    /// TextAdvance used to be on this list and no longer is. Odysseus advances the talk box,
+    /// answers the skip-cutscene prompt, presses Accept and Complete, and fills and hands over the
+    /// request window itself; what TextAdvance still adds is the ESC press during a cutscene and
+    /// picking an optional quest reward. Both cost time rather than correctness, so a missing
+    /// TextAdvance is now advice (<see cref="AdviceSummary"/>) instead of a locked Start button.
+    /// </para>
+    /// </summary>
+    public bool CoreReady => Pathing && Lifestream;
+
+    /// <summary>What is missing that a run can live without, or empty. Shown as a notice, never a gate.</summary>
+    public string AdviceSummary()
+        => TextAdvance
+            ? string.Empty
+            : "TextAdvance not loaded — cutscenes will play in full, and a quest offering a choice of "
+              + "rewards will stop at the window for you to pick one.";
 
     /// <summary>
     /// Human-readable reason a run cannot start, or empty when it can. Named so the UI and the run
@@ -82,7 +99,6 @@ public sealed class PluginPresence
         var missing = new List<string>();
         if (!Pathing) missing.Add(UsesAriadne ? "Ariadne" : "vnavmesh");
         if (!Lifestream) missing.Add("Lifestream");
-        if (!TextAdvance) missing.Add("TextAdvance");
         return missing.Count == 0 ? string.Empty : "Missing: " + string.Join(", ", missing);
     }
 
