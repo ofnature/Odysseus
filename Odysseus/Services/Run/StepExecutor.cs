@@ -1036,13 +1036,17 @@ public sealed class StepExecutor
     // ── phases ──
 
     /// <summary>
-    /// Travel decision. Teleport when the step names an aetheryte and either we are in the wrong
-    /// zone or the target is a long way off in this one; then the aethernet hop if named; then
-    /// walk. A step in another zone with no shortcut is a clear failure, not a doomed pathfind.
+    /// Travel decision. Standing on the mark already, no travel happens at all; otherwise teleport
+    /// when the step names an aetheryte and either we are in the wrong zone or the target is a long
+    /// way off in this one; then the aethernet hop if named; then walk. A step in another zone with
+    /// no shortcut is a clear failure, not a doomed pathfind.
     /// </summary>
     private Phase NextAfterDelay()
     {
         var step = _step!;
+
+        if (AlreadyThere(step))
+            return NextAfterTravel();
 
         if (step.AetheryteShortcut is { } aetheryteName && !_skipTeleport)
         {
@@ -1068,6 +1072,34 @@ public sealed class StepExecutor
         }
 
         return NextAfterOwnRoute();
+    }
+
+    /// <summary>
+    /// Whether the step's mark is already within reach, in the zone the step names.
+    ///
+    /// <para>
+    /// A recorded <c>AetheryteShortcut</c> is how the path's author reached the step from wherever
+    /// they happened to be — usually the previous quest's turn-in, often a zone away, and the
+    /// aetheryte they used is frequently not even in the step's own zone. Start a run cold while
+    /// standing in front of the quest giver and honouring that recording teleports the run out of
+    /// the zone and leaves it to find its way back. The step's <b>mark</b> is the authority on
+    /// where it wants us; standing on it means the travel the path recorded has already happened,
+    /// so neither the teleport nor the hop is part of the step.
+    /// </para>
+    /// </summary>
+    private bool AlreadyThere(QuestStep step)
+    {
+        if (step.TerritoryId == 0 || _world.TerritoryId != step.TerritoryId || step.Position is not { } mark)
+            return false;
+
+        var away = Vector3.Distance(_world.PlayerPosition, mark);
+        if (away > TeleportWorthDistance)
+            return false;
+
+        if (step.AetheryteShortcut is not null || step.AethernetShortcut is { Length: 2 })
+            _world.Log($"Already in the step's zone and {away:F0}y from the mark — skipping the recorded "
+                       + (step.AetheryteShortcut is { } named ? $"teleport to {named}." : "aethernet hop."));
+        return true;
     }
 
     /// <summary>

@@ -111,6 +111,61 @@ public class TravelExecutorTests
         Assert.Contains("Teleport 98", w.Calls);
     }
 
+    /// <summary>
+    /// The shape that cost a whole Return to Ivalice run: the path's author reached the NPC by
+    /// teleporting to an aetheryte in the <i>neighbouring</i> zone and walking in, so the step
+    /// names one whose territory is not the step's own. Standing in front of that NPC and pressing
+    /// Start, the old rule saw "aetheryte's zone is not my zone" and teleported the run away — from
+    /// where it had no recorded way back.
+    /// </summary>
+    [Fact]
+    public void Standing_on_the_mark_does_not_teleport_to_a_neighbouring_zones_aetheryte()
+    {
+        var w = World();
+        w.Aetherytes["Rhalgr's Reach"] = 104;
+        w.AetheryteTerritories[104] = 635;       // the shortcut lands in the next zone over
+        w.TerritoryId = 621;                     // we are already where the step is
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(621, new Vector3(50, 0, 0), aetheryte: "Rhalgr's Reach"));
+
+        Ticks(ex, w, 20);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Teleport"));
+        Assert.Equal(621u, w.TerritoryId);
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    /// <summary>Same reasoning for the hop: on the mark already, the recorded hop is not the step.</summary>
+    [Fact]
+    public void Standing_on_the_mark_does_not_take_a_recorded_hop_out_of_the_zone()
+    {
+        var w = World();
+        w.TerritoryId = 131;
+        w.AethernetTerritories["Aetheryte Plaza"] = 130;   // the hop would leave the zone
+        var ex = new StepExecutor(w);
+        var step = Interact(131, new Vector3(50, 0, 0));
+        step.AethernetShortcut = ["[Ul'dah] Goldsmiths' Guild", "[Ul'dah] Aetheryte Plaza"];
+        ex.Begin(step);
+
+        Ticks(ex, w, 20);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Aethernet"));
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    /// <summary>The rule is "on the mark", not "in the zone" — a far mark still travels as recorded.</summary>
+    [Fact]
+    public void A_far_mark_in_the_same_zone_still_uses_the_recorded_teleport()
+    {
+        var w = World();
+        w.Aetherytes["Rhalgr's Reach"] = 104;
+        w.AetheryteTerritories[104] = 635;
+        w.TerritoryId = 621;
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(621, new Vector3(1000, 0, 0), aetheryte: "Rhalgr's Reach"));
+
+        Ticks(ex, w, 2);
+        Assert.Contains("Teleport 104", w.Calls);
+    }
+
     [Fact]
     public void Skip_teleport_flag_walks_even_with_a_shortcut()
     {
