@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Odysseus.Services.Paths;
 using Odysseus.Services.Quest;
 
@@ -621,6 +622,11 @@ public sealed class QuestController
             _stepStarted = _world.UtcNow;
             if (step.Kind == StepKind.CompleteQuest)
                 QuestCompleting?.Invoke(_questId);
+            // Every choice the sequence records, not just this step's: a yes/no is attached to the
+            // step that provokes it and the window often opens while a neighbour is running.
+            _executor.SequenceChoices = _block.Steps
+                .SelectMany(s => (IEnumerable<DialogueChoice>?)s.DialogueChoices ?? [])
+                .ToList();
             _executor.Begin(step, skipTeleport, _questId, GroundOnly,
                 dutyByHand: step.Kind == StepKind.Duty && !_policy.HandOffDuties);
             _log($"Step {_stepIndex + 1}/{_block.Steps.Count} in seq {sequence}: {step}" +

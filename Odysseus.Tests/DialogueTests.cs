@@ -55,6 +55,56 @@ public class DialogueTests
         Assert.Single(w.Calls.Where(c => c.StartsWith("Notify")));               // said once, not every tick
     }
 
+    /// <summary>
+    /// The answer is recorded against the step that provokes the question, and the window opens
+    /// while a neighbouring step of the same sequence is running. That answer is this quest's own
+    /// and is used; only an unmatched question waits for the player.
+    /// </summary>
+    [Fact]
+    public void A_yes_no_answered_by_another_step_of_the_sequence_is_used()
+    {
+        var texts = new Texts();
+        texts.Map[(700, "TEXT_Q1")] = "Do you wish to travel to Gangos?";
+        var w = new FakeStepWorld { YesNoPromptText = "Do you wish to travel to Gangos?" };
+        w.Spawned.Add(7);
+        w.VisibleAddons.Add("SelectYesno");
+
+        var ex = new StepExecutor(w, texts)
+        {
+            SequenceChoices = [new DialogueChoice("YesNo", "TEXT_Q1", null, true)],
+        };
+        ex.Begin(Interact(7), questId: 700);
+        Ticks(ex, w, 10);
+
+        Assert.Contains("YesNo True", w.Calls);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Notify"));
+    }
+
+    /// <summary>
+    /// The prompt is matched, not merely counted. A step that says "answer No to this question"
+    /// used to answer No to whatever box happened to be up, because the recorded prompt was never
+    /// read; now an unrecognised question waits for the player instead.
+    /// </summary>
+    [Fact]
+    public void A_declared_answer_is_not_given_to_a_question_it_does_not_match()
+    {
+        var texts = new Texts();
+        texts.Map[(700, "TEXT_Q1")] = "Do you wish to become a Dark Knight?";
+        var w = new FakeStepWorld { YesNoPromptText = "Do you wish to abandon this quest?" };
+        w.Spawned.Add(7);
+        w.VisibleAddons.Add("SelectYesno");
+
+        var step = Interact(7);
+        step.DialogueChoices = [new DialogueChoice("YesNo", "TEXT_Q1", null, true)];
+        var ex = new StepExecutor(w, texts);
+        ex.Begin(step, questId: 700);
+        Ticks(ex, w, 400);
+
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("YesNo"));
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.Contains(w.Calls, c => c.StartsWith("Notify") && c.Contains("abandon this quest"));
+    }
+
     [Fact]
     public void A_yes_no_the_step_does_name_is_still_answered_without_waiting()
     {

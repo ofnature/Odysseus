@@ -224,6 +224,8 @@ public sealed class StepExecutor
     private static readonly TimeSpan UndeclaredListGrace = TimeSpan.FromSeconds(3);
     /// <summary>The same grace for a yes/no the step does not name — but that one is never taken, only reported.</summary>
     private static readonly TimeSpan UndeclaredYesNoGrace = TimeSpan.FromSeconds(3);
+    /// <summary>How often a yes/no answer is pressed again while its window is still standing.</summary>
+    private static readonly TimeSpan YesNoRetry = TimeSpan.FromSeconds(1.5);
     private static readonly TimeSpan DialogueMax = TimeSpan.FromSeconds(120);
     /// <summary>How long the reward window may sit before we press Complete ourselves — TextAdvance gets first go.</summary>
     private static readonly TimeSpan RewardWindowGrace = TimeSpan.FromSeconds(2.5);
@@ -282,6 +284,14 @@ public sealed class StepExecutor
     private DateTime _listOpenedAt;
     private DateTime _yesNoOpenedAt;
     private bool _yesNoReported;
+    private bool _yesNoAnswered;
+    private DateTime _lastYesNoPress;
+
+    /// <summary>
+    /// Every dialogue choice in the sequence this step belongs to, set by the controller. A yes/no
+    /// the data records against a neighbouring step is still this quest's own answer.
+    /// </summary>
+    public IReadOnlyList<DialogueChoice>? SequenceChoices { get; set; }
     private DateTime _rewardWindowSince;
     private DateTime _rewardLastTry;
     private bool _rewardNeedsChoiceLogged;
@@ -480,6 +490,10 @@ public sealed class StepExecutor
         _questId = questId;
         _listAnswered = false;
         _listOpenedAt = default;
+        _yesNoOpenedAt = default;
+        _yesNoReported = false;
+        _yesNoAnswered = false;
+        _lastYesNoPress = default;
         _rewardWindowSince = default;
         _rewardNeedsChoiceLogged = false;
         _handOverSince = default;
@@ -2904,8 +2918,11 @@ public sealed class StepExecutor
         // Answering it blind is not the fix: a yes/no is how a run takes up a class or a first DoH
         // quest it was never asked to take. So the question is repeated to the player, by name, and
         // the clock stops while it stands.
-        if (_world.IsAddonVisible("SelectYesno") && !NamesAYesNo(step))
+        if (_world.IsAddonVisible("SelectYesno"))
         {
+            if (TryAnswerYesNo(step, now))
+                return;
+
             if (_yesNoOpenedAt == default)
                 _yesNoOpenedAt = now;
             if (now - _yesNoOpenedAt > UndeclaredYesNoGrace)
@@ -2925,6 +2942,7 @@ public sealed class StepExecutor
         }
         _yesNoOpenedAt = default;
         _yesNoReported = false;
+        _yesNoAnswered = false;
 
         // The quest offer itself: TextAdvance's accept function may be off (it is a global
         // toggle over there), and an AcceptQuest step's whole purpose is this window. Press its
@@ -3193,13 +3211,94 @@ public sealed class StepExecutor
     /// a first DoH or DoL quest — are YesNo, and those are answered only where the step names them.
     /// </para>
     /// </summary>
-    /// <summary>Whether the step carries an answer for a yes/no prompt.</summary>
-    private static bool NamesAYesNo(QuestStep step)
+    /// <summary>
+    /// Answer the yes/no on screen, if anything in this quest's data says what to answer.
+    ///
+    /// <para>
+    /// The step's own choices are asked first, then every step of the sequence it belongs to. That
+    /// second look is what the old code was missing: the data attaches the choice to the step that
+    /// <i>provokes</i> the question, and the window regularly opens while a neighbouring step is
+    /// running, which left a perfectly well-recorded answer unused.
+    /// </para>
+    ///
+    /// <para>
+    /// The prompt is matched, not merely counted. 501 of the 510 yes/no choices in the shipped
+    /// library name the prompt as one of the quest's own text keys, and the old code ignored it
+    /// outright — so a step that declared "answer No to this one" answered No to whatever box
+    /// happened to be up. Where the key will not resolve, or the data names no prompt at all (the
+    /// other 9), the step's own choice is still trusted; another step's is not.
+    /// </para>
+    /// </summary>
+    private bool TryAnswerYesNo(QuestStep step, DateTime now)
     {
-        foreach (var choice in (System.Collections.Generic.IEnumerable<DialogueChoice>?)step.DialogueChoices ?? Array.Empty<DialogueChoice>())
-            if (choice.Type.Equals("YesNo", StringComparison.OrdinalIgnoreCase))
-                return true;
-        return false;
+        var asked = Squash(_world.YesNoPrompt());
+        var choice = PickYesNo(step.DialogueChoices, asked, trustUnmatched: true)
+                     ?? (asked.Length > 0 ? PickYesNo(SequenceChoices, asked, trustUnmatched: false) : null);
+        if (choice is null)
+            return false;
+
+        var yes = choice.Yes ?? true;
+        if (!_yesNoAnswered)
+        {
+            _yesNoAnswered = true;
+            _sawOccupied = true;
+            _phaseStart = now;   // an answer is progress; the dialogue budget starts again
+            _world.Log($"Answering {(yes ? "yes" : "no")} to \"{_world.YesNoPrompt()}\" "
+                + $"(quest {_questId} names it as {choice.Prompt ?? "an unnamed prompt"}).");
+            _lastYesNoPress = now;
+            _world.SelectYesNo(yes);
+            return true;
+        }
+
+        // Answered, and the window is still standing. Press again on a throttle — but the clock
+        // keeps running now, so a press that never takes ends as an honest timeout rather than a
+        // silent forever-hold.
+        if (now - _lastYesNoPress > YesNoRetry)
+        {
+            _lastYesNoPress = now;
+            _world.SelectYesNo(yes);
+        }
+        return true;
+    }
+
+    private DialogueChoice? PickYesNo(IReadOnlyList<DialogueChoice>? choices, string asked, bool trustUnmatched)
+    {
+        if (choices is null)
+            return null;
+        foreach (var choice in choices)
+        {
+            if (!choice.Type.Equals("YesNo", StringComparison.OrdinalIgnoreCase))
+                continue;
+            var wanted = choice.Prompt is { Length: > 0 } key ? Squash(_texts?.Resolve(_questId, key) ?? string.Empty) : string.Empty;
+            if (wanted.Length == 0 || asked.Length == 0)
+            {
+                if (trustUnmatched)
+                    return choice;   // nothing to compare against — the step's own data is still the best we have
+                continue;
+            }
+            if (asked.Contains(wanted, StringComparison.Ordinal) || wanted.Contains(asked, StringComparison.Ordinal))
+                return choice;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// Both sides of a prompt comparison, reduced to bare letters and digits. The live window drops
+    /// the line-break payloads the sheet renders as control characters, so the sheet text is cut at
+    /// its first control character — the first sentence is the stable part — and neither side's
+    /// whitespace or punctuation is trusted. Same reasoning as the overcap matcher in GameStepWorld.
+    /// </summary>
+    internal static string Squash(string text)
+    {
+        var builder = new System.Text.StringBuilder(text.Length);
+        foreach (var c in text)
+        {
+            if (char.IsControl(c))
+                break;
+            if (char.IsLetterOrDigit(c))
+                builder.Append(char.ToLowerInvariant(c));
+        }
+        return builder.ToString();
     }
 
     private void AnswerDialogue(QuestStep step, DateTime now)
@@ -3207,9 +3306,7 @@ public sealed class StepExecutor
         DialogueChoice? listChoice = null;
         foreach (var choice in (System.Collections.Generic.IEnumerable<DialogueChoice>?)step.DialogueChoices ?? Array.Empty<DialogueChoice>())
         {
-            if (choice.Type.Equals("YesNo", StringComparison.OrdinalIgnoreCase) && _world.IsAddonVisible("SelectYesno"))
-                _world.SelectYesNo(choice.Yes ?? true);
-            else if (choice.Type.Equals("List", StringComparison.OrdinalIgnoreCase))
+            if (choice.Type.Equals("List", StringComparison.OrdinalIgnoreCase))
                 listChoice ??= choice;
         }
 
