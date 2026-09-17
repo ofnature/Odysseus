@@ -386,6 +386,61 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// What an addon's node is and whether anything is listening to it — the question behind
     /// "why does clicking this tile do nothing".
     /// </summary>
+    /// <summary>
+    /// Every AtkValue an addon is carrying, written to the log with its index and type.
+    ///
+    /// <para>
+    /// A window's values are where its contents actually live — JournalResult keeps the optional
+    /// quest rewards in its own, past index 80 — and no sheet or header says which index means
+    /// what. Reading them off a real window is the only way to find out, and guessing a layout
+    /// from another plugin's copy is how you ship a reader that is quietly wrong. Read-only: it
+    /// fires nothing and presses nothing.
+    /// </para>
+    /// </summary>
+    public string DescribeAddonValues(string addonName)
+    {
+        try
+        {
+            var unit = (AtkUnitBase*)_gameGui.GetAddonByName(addonName).Address;
+            if (unit == null || !unit->IsVisible)
+                return $"{addonName} is not on screen.";
+
+            var count = unit->AtkValuesCount;
+            _log($"── {addonName}: {count} AtkValues ──");
+            var written = 0;
+            for (var i = 0; i < count; i++)
+            {
+                var value = unit->AtkValues[i];
+                var type = value.Type;
+                string shown;
+                if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Undefined)
+                    continue;   // empty slots are the bulk of any window and say nothing
+                if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int)
+                    shown = $"Int {value.Int}";
+                else if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
+                    shown = $"UInt {value.UInt}";
+                else if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Bool)
+                    shown = $"Bool {value.Byte != 0}";
+                else if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Float)
+                    shown = $"Float {value.Float}";
+                else if (value.String.Value != null)
+                    // Every string flavour the client uses — String, String8, ManagedString — reads
+                    // the same way, so they are told apart by having a pointer rather than by name.
+                    shown = $"{type} \"{Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue}\"";
+                else
+                    shown = $"{type} (raw {value.UInt})";
+
+                _log($"  #{i} {shown}");
+                written++;
+            }
+            return $"{addonName}: {written} of {count} values written to the log.";
+        }
+        catch (Exception ex)
+        {
+            return $"reading {addonName}'s values failed: {ex.Message}";
+        }
+    }
+
     public string DescribeAddonNode(string addonName, uint nodeId)
     {
         try
