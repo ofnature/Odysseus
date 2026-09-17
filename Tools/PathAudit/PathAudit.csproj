@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Deliberately does NOT reference Odysseus.csproj. That project's output is the dev-plugin DLL
+    Dalamud watches, so building anything that depends on it hot-reloads a live run. This tool
+    reads paths.pak as a file (one gzip stream of JSON lines) and the game's sheets straight off
+    the sqpack, so it can be run mid-session without touching the plugin.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Odysseus.Tools.PathAudit</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Lumina" Version="7.6.1" />
+    <PackageReference Include="Lumina.Excel" Version="7.5.0" />
+  </ItemGroup>
+
+</Project>
