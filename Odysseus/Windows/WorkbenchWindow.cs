@@ -230,6 +230,12 @@ public sealed class WorkbenchWindow : Window
             ImGui.SetTooltip("Whole numbers, separated by spaces — the values the callback carries.");
 
         ImGui.SameLine();
+        if (ImGui.SmallButton("Values"))
+            _addonStatus = _addons.DescribeAddonValues(_addonName);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Writes every value the named window is carrying to the log, with its index. Reads only.");
+
+        ImGui.SameLine();
         if (ImGui.SmallButton("Fire"))
         {
             var parts = _addonValues.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -259,12 +265,6 @@ public sealed class WorkbenchWindow : Window
 
         ImGui.SetNextItemWidth(90f);
         ImGui.InputInt("Node", ref _addonNode, 1, 1);
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Values"))
-            _addonStatus = _addons.DescribeAddonValues(_addonName);
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Writes every value the window is carrying to the log, with its index. Reads only.");
-
         ImGui.SameLine();
         if (ImGui.SmallButton("What is it"))
             _addonStatus = _addons.DescribeAddonNode(_addonName, (uint)Math.Max(0, _addonNode));
