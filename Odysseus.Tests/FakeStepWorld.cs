@@ -460,6 +460,8 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
 
     public bool IsAddonVisible(string name) => VisibleAddons.Contains(name);
     public void SelectYesNo(bool yes) => Calls.Add($"YesNo {yes}");
+    public string YesNoPromptText { get; set; } = string.Empty;
+    public string YesNoPrompt() => YesNoPromptText;
     public void SelectStringIndex(int index) => Calls.Add($"Select {index}");
     public bool RewardCompleteEnabled { get; set; } = true;
     public bool CompleteQuestRewardWindow()

@@ -11,9 +11,18 @@ namespace Odysseus.Services.Ipc;
 /// without touching the user's own setting.
 ///
 /// <para>
-/// The options object crosses the IPC boundary as JSON, so the property names below must match
-/// TextAdvance's <c>ExternalTerritoryConfig</c> exactly. Every call fails open: without TextAdvance
-/// the run still walks and interacts, and dialogue simply waits for a human.
+/// The options object is read by name on the far side, so the member names below must match
+/// TextAdvance's own <c>ExternalTerritoryConfig</c> exactly (its copy declares them as fields;
+/// properties cross just as well — verified in the field, no type-mismatch error in any client
+/// log). Every call fails open: without TextAdvance the run still walks and interacts, and
+/// dialogue simply waits for a human.
+/// </para>
+///
+/// <para>
+/// What it does <b>not</b> do, checked against its executors: answer an ordinary yes/no box. It
+/// covers Talk, quest accept and complete, hand-ins, reward picking and the skip-cutscene list,
+/// and nothing else — so a yes/no the path data does not name is one the <c>StepExecutor</c> has
+/// to report rather than hope someone else takes.
 /// </para>
 /// </summary>
 public sealed class TextAdvanceIpc
@@ -47,6 +56,7 @@ public sealed class TextAdvanceIpc
     private ICallGateSubscriber<string, bool>? _disable;
     private ICallGateSubscriber<bool>? _isInExternalControl;
     private bool _warned;
+    private bool _refused;
     private bool _held;
 
     /// <param name="pickRewards">
@@ -68,6 +78,20 @@ public sealed class TextAdvanceIpc
         {
             _enable ??= _pluginInterface.GetIpcSubscriber<string, ExternalTerritoryConfig, bool>(EnableGate);
             var ok = _enable.InvokeFunc(PluginName, new ExternalTerritoryConfig { EnableRewardPick = _pickRewards() });
+
+            // TextAdvance hands external control to one plugin at a time and refuses everyone else
+            // by returning false — AutoRetainer takes it for retainer runs, and so do others. That
+            // refusal used to be dropped on the floor, so dialogue simply stopped being handled
+            // with nothing anywhere saying why.
+            if (!ok && !_refused)
+            {
+                _refused = true;
+                _log?.Invoke("TextAdvance is under another plugin's control (AutoRetainer and friends take it too) — "
+                    + "it will not accept quests, pick rewards or skip dialogue for this run until that plugin lets go.");
+            }
+            if (ok)
+                _refused = false;
+
             _held = ok;
             _warned = false;
             return ok;

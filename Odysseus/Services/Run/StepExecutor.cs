@@ -222,6 +222,8 @@ public sealed class StepExecutor
 
     /// <summary>How long a list the step does not name is left to TextAdvance, or to you, before we take it.</summary>
     private static readonly TimeSpan UndeclaredListGrace = TimeSpan.FromSeconds(3);
+    /// <summary>The same grace for a yes/no the step does not name — but that one is never taken, only reported.</summary>
+    private static readonly TimeSpan UndeclaredYesNoGrace = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan DialogueMax = TimeSpan.FromSeconds(120);
     /// <summary>How long the reward window may sit before we press Complete ourselves — TextAdvance gets first go.</summary>
     private static readonly TimeSpan RewardWindowGrace = TimeSpan.FromSeconds(2.5);
@@ -278,6 +280,8 @@ public sealed class StepExecutor
     private ushort _questId;
     private bool _listAnswered;
     private DateTime _listOpenedAt;
+    private DateTime _yesNoOpenedAt;
+    private bool _yesNoReported;
     private DateTime _rewardWindowSince;
     private DateTime _rewardLastTry;
     private bool _rewardNeedsChoiceLogged;
@@ -2890,6 +2894,38 @@ public sealed class StepExecutor
             return;
         }
 
+        // A yes/no the step does not name. Nothing else in the stack answers one of these:
+        // TextAdvance's executors cover Talk, quest accept and complete, hand-ins and the
+        // skip-cutscene list, and it has no generic yes/no at all (read from its source,
+        // reference/TextAdvance/Executors). Questionable answers them from its own path data, the
+        // same as this does — so a prompt the data missed is a prompt nobody answers, and the step
+        // used to sit there until it failed with "dialogue never ended".
+        //
+        // Answering it blind is not the fix: a yes/no is how a run takes up a class or a first DoH
+        // quest it was never asked to take. So the question is repeated to the player, by name, and
+        // the clock stops while it stands.
+        if (_world.IsAddonVisible("SelectYesno") && !NamesAYesNo(step))
+        {
+            if (_yesNoOpenedAt == default)
+                _yesNoOpenedAt = now;
+            if (now - _yesNoOpenedAt > UndeclaredYesNoGrace)
+            {
+                if (!_yesNoReported)
+                {
+                    _yesNoReported = true;
+                    var prompt = _world.YesNoPrompt();
+                    var asking = prompt.Length > 0 ? $"\"{prompt}\"" : "a yes/no question";
+                    _world.Log($"Quest {_questId} names no answer for {asking} — waiting for you.");
+                    _world.Notify($"Odysseus: the game is asking {asking} — answer it and the run carries on.");
+                }
+                _sawOccupied = true;
+                _phaseStart = now;   // a question only a human can answer does not run the clock down
+            }
+            return; // nothing settles while it stands
+        }
+        _yesNoOpenedAt = default;
+        _yesNoReported = false;
+
         // The quest offer itself: TextAdvance's accept function may be off (it is a global
         // toggle over there), and an AcceptQuest step's whole purpose is this window. Press its
         // own Accept — the same press the society accept loop makes.
@@ -3157,6 +3193,15 @@ public sealed class StepExecutor
     /// a first DoH or DoL quest — are YesNo, and those are answered only where the step names them.
     /// </para>
     /// </summary>
+    /// <summary>Whether the step carries an answer for a yes/no prompt.</summary>
+    private static bool NamesAYesNo(QuestStep step)
+    {
+        foreach (var choice in (System.Collections.Generic.IEnumerable<DialogueChoice>?)step.DialogueChoices ?? Array.Empty<DialogueChoice>())
+            if (choice.Type.Equals("YesNo", StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
+
     private void AnswerDialogue(QuestStep step, DateTime now)
     {
         DialogueChoice? listChoice = null;

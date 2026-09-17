@@ -32,6 +32,46 @@ public class DialogueTests
         Assert.Equal(-1, StepExecutor.FindEntry(entries, "Attack."));
     }
 
+    /// <summary>
+    /// The Return to Ivalice shape: the quest asks a plain yes/no the path data never recorded an
+    /// answer for. TextAdvance does not answer those (its executors cover Talk, accept, complete
+    /// and hand-ins only), so the window sat there until the step failed with "dialogue never
+    /// ended" — and, because the player was not told, for no visible reason.
+    /// </summary>
+    [Fact]
+    public void A_yes_no_the_step_does_not_name_is_repeated_to_the_player_and_waited_out()
+    {
+        var w = new FakeStepWorld { YesNoPromptText = "Do you wish to join the Bozjan front?" };
+        w.Spawned.Add(7);
+        w.VisibleAddons.Add("SelectYesno");
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(7));
+
+        Ticks(ex, w, 400);   // 200s — well past the 120s dialogue budget
+
+        Assert.Equal(StepStatus.Running, ex.Status);                             // held, not failed
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("YesNo"));              // and not answered for them
+        Assert.Contains(w.Calls, c => c.StartsWith("Notify") && c.Contains("Do you wish to join the Bozjan front?"));
+        Assert.Single(w.Calls.Where(c => c.StartsWith("Notify")));               // said once, not every tick
+    }
+
+    [Fact]
+    public void A_yes_no_the_step_does_name_is_still_answered_without_waiting()
+    {
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        w.VisibleAddons.Add("SelectYesno");
+        var step = Interact(7);
+        step.DialogueChoices = [new DialogueChoice("YesNo", null, null, true)];
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+
+        Ticks(ex, w, 10);
+
+        Assert.Contains("YesNo True", w.Calls);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Notify"));
+    }
+
     [Fact]
     public void An_interaction_that_opened_nothing_is_asked_again()
     {

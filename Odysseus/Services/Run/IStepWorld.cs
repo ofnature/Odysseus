@@ -514,6 +514,9 @@ public interface IStepWorld
     /// <summary>Answers a yes/no dialog if one is showing.</summary>
     void SelectYesNo(bool yes);
 
+    /// <summary>What a visible yes/no dialog is asking, or empty when none is showing.</summary>
+    string YesNoPrompt();
+
     /// <summary>Picks an entry in a list dialog if one is showing.</summary>
     void SelectStringIndex(int index);
 

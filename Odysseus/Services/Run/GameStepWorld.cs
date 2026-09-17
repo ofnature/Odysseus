@@ -1636,6 +1636,27 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public void SelectYesNo(bool yes) => FireAddonCallback("SelectYesno", yes ? 0 : 1);
 
+    /// <summary>
+    /// What the yes/no window is asking, read the same way the overcap check reads it. Empty when
+    /// no window is up, when it has no prompt node, or when reading it throws — a question we
+    /// cannot quote is still a question we can report.
+    /// </summary>
+    public string YesNoPrompt()
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName("SelectYesno");
+            if (addon.IsNull || !addon.IsVisible)
+                return string.Empty;
+            var yesno = (FFXIVClientStructs.FFXIV.Client.UI.AddonSelectYesno*)addon.Address;
+            return yesno->PromptText == null ? string.Empty : yesno->PromptText->NodeText.ToString();
+        }
+        catch
+        {
+            return string.Empty;
+        }
+    }
+
     public void SelectStringIndex(int index)
     {
         if (IsAddonVisible("SelectString"))
