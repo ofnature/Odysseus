@@ -412,7 +412,9 @@ public sealed class MainWindow : OdysseusWindow
                     PriorityStatus.Accepted => (OdysseusTheme.WakeFoam, "under way", OdysseusTheme.WakeFoam),
                     PriorityStatus.Ready => (OdysseusTheme.StatusGreen, isNext ? "ready · next" : "ready", OdysseusTheme.StatusGreen),
                     PriorityStatus.Complete => (OdysseusTheme.TextDisabled, "complete", OdysseusTheme.TextDisabled),
-                    PriorityStatus.NoPath or PriorityStatus.UnknownQuest => (OdysseusTheme.StatusYellow, e.Detail, OdysseusTheme.StatusYellow),
+                    // Short labels: this column clips, and the whole sentence is on hover.
+                    PriorityStatus.NoPath => (OdysseusTheme.StatusYellow, "no path", OdysseusTheme.StatusYellow),
+                    PriorityStatus.UnknownQuest => (OdysseusTheme.StatusYellow, "unknown", OdysseusTheme.StatusYellow),
                     _ => (OdysseusTheme.StatusGrey, e.Detail, OdysseusTheme.TextDisabled),
                 };
                 ImGui.TextColored(dot, "●");

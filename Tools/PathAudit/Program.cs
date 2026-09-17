@@ -50,6 +50,15 @@ var questSheet = game.GetExcelSheet<Quest>()!;
 var levelSheet = game.GetExcelSheet<Level>()!;
 var aetheryteSheet = game.GetExcelSheet<Aetheryte>()!;
 
+// Territory → its place name, so a derived mark reads as a place rather than a number.
+var zoneName = new Dictionary<uint, string>();
+foreach (var t in game.GetExcelSheet<TerritoryType>()!)
+{
+    var name = t.PlaceName.ValueNullable?.Name.ExtractText() ?? string.Empty;
+    if (name.Length > 0) zoneName.TryAdd(t.RowId, name);
+}
+string Zone(uint territory) => zoneName.TryGetValue(territory, out var n) ? $"{n} ({territory})" : $"territory {territory}";
+
 // Where each placed object stands. The quest sheet names the turn-in NPC but not its position;
 // the Level sheet is the only thing that knows, so it is indexed once by what it places.
 var levelOfObject = new Dictionary<uint, Mark>();
@@ -292,7 +301,7 @@ void PrintOne(ushort id)
                 + $"{(step.Aetheryte is { } a ? $"  via {a}" : "")}");
 }
 
-static string Show(Mark? m) => m is { } v ? $"t{v.Territory} {v.Pos.X:F0},{v.Pos.Y:F0},{v.Pos.Z:F0}" : "(nowhere named)";
+string Show(Mark? m) => m is { } v ? $"{Zone(v.Territory)} {v.Pos.X:F0},{v.Pos.Y:F0},{v.Pos.Z:F0}" : "(nowhere named)";
 
 static Dictionary<ushort, PathDoc> ReadPack(string file)
 {
