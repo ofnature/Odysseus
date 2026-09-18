@@ -692,7 +692,18 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
     private void OnCommand(string command, string args)
     {
-        switch (args.Trim().ToLowerInvariant())
+        var trimmed = args.Trim();
+
+        // "/od values JournalResult" — the addon probe's values dump, without needing to see the
+        // window it is in. On four clients at once the one you want is often the one you cannot
+        // read, and a window's values are the only way to learn what it carries.
+        if (trimmed.StartsWith("values ", StringComparison.OrdinalIgnoreCase))
+        {
+            Say(_world.DescribeAddonValues(trimmed[7..].Trim()));
+            return;
+        }
+
+        switch (trimmed.ToLowerInvariant())
         {
             case "config":
             case "settings":
