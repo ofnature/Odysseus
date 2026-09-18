@@ -783,7 +783,39 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     // ── Player state ──
 
-    public int PlayerLevel => _objectTable.LocalPlayer?.Level ?? 0;
+    /// <summary>
+    /// The character's real level on the current job — never the synced one.
+    ///
+    /// <para>
+    /// Dalamud's <c>LocalPlayer.Level</c> is the <i>effective</i> level, so inside synced content it
+    /// reads the sync: a level-100 character in the Bozjan Southern Front reads 80, and every level
+    /// gate then lies about them. Field-caught 2026-09-17, where "A Winter's Dream needs level 100;
+    /// you are 80" was told to a level-100 character standing in Bozja. The unsynced levels live in
+    /// PlayerState, indexed by the job's ExpArrayIndex; the synced reading is kept only as the
+    /// fallback for when that cannot be read at all.
+    /// </para>
+    /// </summary>
+    public int PlayerLevel
+    {
+        get
+        {
+            var player = _objectTable.LocalPlayer;
+            if (player is null)
+                return 0;
+            try
+            {
+                var index = player.ClassJob.ValueNullable?.ExpArrayIndex ?? -1;
+                var state = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
+                if (index >= 0 && state != null && state->ClassJobLevels[index] is var real && real > 0)
+                    return real;
+            }
+            catch
+            {
+                // A level we cannot read unsynced is still better read synced than not at all.
+            }
+            return player.Level;
+        }
+    }
 
     /// <summary>ClassJob role 1–4 (tank, melee, ranged, healer); crafters and gatherers are role 0.</summary>
     public bool IsCombatJob => (_objectTable.LocalPlayer?.ClassJob.ValueNullable?.Role ?? 0) != 0;
