@@ -277,6 +277,18 @@ public sealed class ConfigWindow : OdysseusWindow
             "refused and the green would be wasted — and nothing happens at all until \"My Little " +
             "Chocobo\" is done on this character.");
 
+        var derive = _config.DeriveMissingPaths;
+        if (ImGui.Checkbox("Run quests with no path from the game's own journal data", ref derive))
+        {
+            _config.DeriveMissingPaths = derive;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("A thousand quests in the journal have no recorded path. The game's own data says where "
+                + "the giver stands, where each objective points and who takes the quest back, so those can be "
+                + "walked, talked and interacted through. It carries nothing else: a quest wanting an emote, an "
+                + "item or a duty stops and says so. Nothing is written to your path library.");
+
         var pickRewards = _config.PickQuestRewards;
         if (ImGui.Checkbox("Pick quest rewards automatically", ref pickRewards))
         {

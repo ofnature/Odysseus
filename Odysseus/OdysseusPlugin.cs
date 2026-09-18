@@ -43,6 +43,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly IQuestStateReader _quests;
     private readonly QuestCatalog _catalog;
     private readonly PathStore _pathStore;
+    private Services.Quest.DerivedPaths _derived = null!;
     private readonly GameStepWorld _world;
     private readonly QuestController _controller;
     private readonly StoryFrontier _frontier;
@@ -157,6 +158,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "runlog.jsonl"),
             message => Warn(message));
         _frontier = new StoryFrontier(_quests, _catalog, () => _config.PreferredGrandCompany);
+        // The 1,030 quests nobody has recorded: walked, talked and interacted from what the game's
+        // own journal data says, when the store has nothing.
+        _derived = new Services.Quest.DerivedPaths(
+            new Services.Quest.GameQuestGeometry(DataManager, message => Warn(message)),
+            () => _config.DeriveMissingPaths);
         var questExecutor = new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap);
         _controller = new QuestController(_quests, _pathStore, questExecutor, _world, _world, _config,
             _frontier.Next,
@@ -167,7 +173,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             // Custom delivery unlocks can only be taken as a crafter or gatherer.
             id => _catalog.ById(id)?.NeedsHandOrLand ?? false,
             id => _catalog.ById(id)?.NeedsCombat ?? false,
-            id => _catalog.ById(id)?.NeedsGatherer ?? false);
+            id => _catalog.ById(id)?.NeedsGatherer ?? false,
+            _derived);
 
         // Priority list: saved in config only while the persist toggle is on.
         _priority = new PriorityList(_catalog, _config.PriorityQuests, _config.PersistPriorityList, ids =>
@@ -176,7 +183,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             PluginInterface.SavePluginConfig(_config);
         })
         { AutoRemoveCompleted = _config.AutoRemoveCompletedPriority };
-        _priorityWorld = new PriorityWorld(_quests, _pathStore, () => _world.PlayerLevel);
+        _priorityWorld = new PriorityWorld(_quests, _pathStore, () => _world.PlayerLevel, _derived);
         _controller.PriorityNext = () => _priority.NextReady(_priorityWorld);
         _controller.StoryCurrent = () => _frontier.Current()?.QuestId;
 
@@ -335,7 +342,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _gatherWindow = new GatherListsWindow(_config, SaveConfig, _gatherLists, _gatherables, _ownGatherer,
             id => _world.ItemCount(id), () => _controller.State is not (RunState.Idle or RunState.Faulted));
         _mainWindow = new MainWindow(new MainWindowDeps(
-            _config, SaveConfig, _presence, _quests, _catalog, _pathStore, _controller, _frontier, _fleet, _priority, _priorityWorld,
+            _config, SaveConfig, _presence, _quests, _catalog, _pathStore, _derived, _controller, _frontier, _fleet, _priority, _priorityWorld,
             OpenConfig,
             () => _fleetWindow.IsOpen = true,
             () => _logWindow.IsOpen = true,
@@ -637,16 +644,21 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         private readonly PathStore _paths;
         private readonly System.Func<int> _level;
 
-        public PriorityWorld(IQuestStateReader quests, PathStore paths, System.Func<int> level)
+        private readonly Services.Quest.DerivedPaths? _derived;
+
+        public PriorityWorld(IQuestStateReader quests, PathStore paths, System.Func<int> level,
+            Services.Quest.DerivedPaths? derived = null)
         {
             _quests = quests;
             _paths = paths;
             _level = level;
+            _derived = derived;
         }
 
         public bool IsComplete(ushort questId) => _quests.IsComplete(questId);
         public bool IsAccepted(ushort questId) => _quests.IsAccepted(questId);
-        public bool HasPath(ushort questId) => _paths.Has(questId);
+        /// <summary>A path to run: the recorded one, or one worked out from the game's journal data.</summary>
+        public bool HasPath(ushort questId) => _paths.Has(questId) || _derived?.Has(questId) == true;
         public int PlayerLevel => _level();
         public CharacterFacts Character => _quests.Character();
     }

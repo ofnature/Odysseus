@@ -234,6 +234,15 @@ an **Unlock** button that queues the whole prerequisite chain.
 Odysseus runs from its own path format. It converts the quest bundle from **your own installed copy
 of Questionable**, on your machine, at import time — see `/od config → Import`.
 
+### Quests with no path
+
+About a thousand quests in the journal have never been recorded by anyone. For those, Odysseus
+works a path out of the game's own journal data — where the quest giver stands, where each
+objective points, and who takes the quest back. It walks, talks and interacts and carries nothing
+else: a quest wanting an emote, an item, a duty or a dialogue answer stops and says so, and a
+derived path is never written to your library. Settings has the switch; the quest line says
+*(derived path)* while one is in use.
+
 **Nothing derived from that bundle is redistributed here.** No converted paths, no bundle, no
 extracted corpus is in this repository, and none ever will be. Paths recorded with Odysseus's own
 recorder are ours and ship freely.

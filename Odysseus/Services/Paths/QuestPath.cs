@@ -343,6 +343,13 @@ public sealed class QuestPath
     public bool IsMainScenario => Category.Contains("/MSQ", System.StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Worked out from the game's own journal data rather than recorded — see
+    /// <c>Quest.DerivedPath</c>. It walks, talks and interacts and carries nothing else, so a
+    /// failure on one is usually the quest asking for something the sheets never described.
+    /// </summary>
+    public bool IsDerived => Category == Services.Quest.DerivedPath.Category;
+
+    /// <summary>
     /// The current converter would get more out of this path than the one that wrote it did.
     ///
     /// <para>

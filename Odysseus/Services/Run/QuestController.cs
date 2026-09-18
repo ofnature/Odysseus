@@ -61,6 +61,12 @@ public sealed class QuestController
 
     private readonly IQuestStateReader _quests;
     private readonly PathStore _paths;
+
+    /// <summary>
+    /// Paths worked out from the game's own journal data, for the 1,030 quests nobody has recorded.
+    /// Asked only when the store has nothing; null when the setting is off.
+    /// </summary>
+    private readonly Quest.DerivedPaths? _derived;
     private readonly StepExecutor _executor;
     private readonly IStepWorld _world;
     private readonly IConditionWorld _conditions;
@@ -124,8 +130,9 @@ public sealed class QuestController
         IStepWorld world, IConditionWorld conditions, IRunPolicy policy,
         Func<ushort, ushort?> nextQuest, Func<ushort, int> questLevel, IStepLog stepLog, Action<string> log,
         PurchasePlan.IngredientsOf? ingredientsOf = null, Func<ushort, bool>? needsHandOrLand = null, Func<ushort, bool>? needsCombat = null,
-        Func<ushort, bool>? needsGatherer = null)
+        Func<ushort, bool>? needsGatherer = null, Quest.DerivedPaths? derived = null)
     {
+        _derived = derived;
         _needsHandOrLand = needsHandOrLand ?? (_ => false);
         _needsCombat = needsCombat ?? (_ => false);
         _needsGatherer = needsGatherer ?? (_ => false);
@@ -141,6 +148,22 @@ public sealed class QuestController
         _stepLog = stepLog;
         _log = log;
     }
+
+    /// <summary>
+    /// The path to run: the recorded one, else one worked out from the game's own journal data.
+    /// A derived path walks, talks and interacts and nothing else — see <see cref="Quest.DerivedPath"/>.
+    /// </summary>
+    private QuestPath? PathFor(ushort questId) => _paths.ForQuest(questId) ?? _derived?.ForQuest(questId);
+
+    /// <summary>
+    /// What to add to a fault when the path was worked out rather than recorded. A derived path
+    /// stalling is the ordinary way it says "this quest wants something the sheets never carried",
+    /// and that is worth saying out loud rather than leaving it to look like a bug.
+    /// </summary>
+    private string DerivedNote => _path?.IsDerived != true
+        ? string.Empty
+        : " — and this path was worked out from the game's journal data, which names places and nothing else. "
+          + "An emote, an item, a duty or a dialogue answer here is yours to do; then Retry";
 
     /// <summary>The run is paused on the Wake's question: pick up mid-quest, or not.</summary>
     public bool AwaitingResumeConfirm => _awaitingResumeConfirm;
@@ -257,10 +280,11 @@ public sealed class QuestController
 
     public bool Start(ushort questId)
     {
-        var path = _paths.ForQuest(questId);
+        var path = PathFor(questId);
         if (path is null)
         {
-            StatusLine = $"No path stored for quest {questId} — import first.";
+            StatusLine = $"No path stored for quest {questId}, and the game's own journal data does not "
+                + "place enough of it to work one out — record it first.";
             return false;
         }
         Stop();
@@ -386,6 +410,9 @@ public sealed class QuestController
         State = RunState.Select;
         StatusLine = $"Starting {path.Name}";
         _log($"Start quest {questId} ({path.Name}), {path.Sequences.Count} sequences / {path.StepCount} steps.");
+        if (path.IsDerived)
+            _log($"No path is stored for {path.Name}, so this one was worked out from the game's own journal data: "
+                + "it walks, talks and interacts, and will stop and say so if the quest wants anything else.");
 
         // The Wake's question: this quest is already under way. Ask, if asked to.
         var snap = _quests.Read(questId);
@@ -527,7 +554,7 @@ public sealed class QuestController
             _waitingSince ??= _world.UtcNow;
             StatusLine = $"Sequence {sequence}: waiting for the game";
             if (_world.UtcNow - _waitingSince > NoBlockMax)
-                Fault($"sequence {sequence} has no steps and the game did not advance in {NoBlockMax.TotalMinutes:F0} min");
+                Fault($"sequence {sequence} has no steps and the game did not advance in {NoBlockMax.TotalMinutes:F0} min{DerivedNote}");
             return;
         }
 
@@ -544,7 +571,7 @@ public sealed class QuestController
             {
                 if (_replays >= MaxReplays)
                 {
-                    Fault($"sequence {sequence} did not advance after {_replays} replays");
+                    Fault($"sequence {sequence} did not advance after {_replays} replays{DerivedNote}");
                     return;
                 }
                 _replays++;
@@ -739,7 +766,7 @@ public sealed class QuestController
         // Priority list first: a ready entry runs before the story continues.
         var wasPriority = _runningPriority;
         _runningPriority = false;
-        if (PriorityNext?.Invoke() is { } priority && priority != completed && _paths.ForQuest(priority) is { } priorityPath)
+        if (PriorityNext?.Invoke() is { } priority && priority != completed && PathFor(priority) is { } priorityPath)
         {
             _log($"Rolling on to priority quest {priority} ({priorityPath.Name}).");
             _runningPriority = true;
@@ -755,7 +782,7 @@ public sealed class QuestController
             StopWith($"No next MSQ quest is available after {completed} — story blocked or finished ({count} quests, {elapsed:h\\:mm}).");
             return;
         }
-        var path = _paths.ForQuest(next.Value);
+        var path = PathFor(next.Value);
         if (path is null)
         {
             StopWith($"Next quest {next} has no stored path — import, then Start.");

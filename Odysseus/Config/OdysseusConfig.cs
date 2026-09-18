@@ -61,6 +61,13 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>Answer the "you will not be able to receive all the…" warning with Yes and keep going.</summary>
     public bool AcceptRewardOvercap { get; set; } = true;
 
+    /// <summary>
+    /// Run a quest with no recorded path off the game's own journal data — where the quest giver
+    /// stands, where each objective points, and who takes it back. It walks, talks and interacts
+    /// and nothing else; a quest that wants an emote, an item or a duty stops and says so.
+    /// </summary>
+    public bool DeriveMissingPaths { get; set; } = true;
+
     /// <summary>Advance subtitle boxes and confirm cutscene skips ourselves — works without TextAdvance.</summary>
     public bool AutoAdvanceDialogue { get; set; } = true;
 

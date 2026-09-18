@@ -136,6 +136,52 @@ Console.WriteLine($"{derived.Count} quests in the sheet, "
     + $"{derived.Values.Count(d => d.TurnIn is not null)} with a placed turn-in, "
     + $"{derived.Values.Count(d => d.BySeq.Count > 0)} with journal objectives.\n");
 
+// ── can the turn-in be had without scanning the Level sheet? ──
+//
+// The quest sheet names the turn-in NPC but not where it stands, and indexing every Level row to
+// find out costs seconds — far too long to spend on the game's frame thread. But the journal's own
+// to-do list appears to carry a sequence-255 entry pointing at the same place. This counts it.
+if (Array.IndexOf(argv, "--turnins") >= 0)
+{
+    int have = 0, fromTodo = 0, matches = 0, sameAsGiver = 0, neither = 0;
+    foreach (var quest in questSheet)
+    {
+        if (quest.RowId <= QuestRowBase) continue;
+        var id = (ushort)(quest.RowId - QuestRowBase);
+        if (!derived.TryGetValue(id, out var d) || d.TurnIn is not { } real) continue;
+        have++;
+
+        QuestMarkOfSeq255(quest, out var todo);
+        if (todo is { } t)
+        {
+            fromTodo++;
+            if (t.Territory == real.Territory && Vector3.Distance(t.Pos, real.Pos) <= 1f) matches++;
+        }
+        else if (d.AcceptNpc == d.TurnInNpc) sameAsGiver++;
+        else neither++;
+    }
+    Console.WriteLine($"turn-ins placed by the Level sheet : {have}");
+    Console.WriteLine($"  also named by a seq-255 to-do    : {fromTodo} ({100.0 * fromTodo / have:F1}%), of which {matches} agree within 1y");
+    Console.WriteLine($"  no to-do, but the giver takes it : {sameAsGiver}");
+    Console.WriteLine($"  neither                          : {neither}");
+    return 0;
+}
+
+void QuestMarkOfSeq255(Quest quest, out Mark? mark)
+{
+    mark = null;
+    foreach (var todo in quest.TodoParams)
+    {
+        if (todo.ToDoCompleteSeq != 255) continue;
+        foreach (var levelRef in todo.ToDoLocation)
+            if (levelRef.ValueNullable is { } lvl && lvl.Territory.RowId != 0)
+            {
+                mark = new Mark(lvl.Territory.RowId, new Vector3(lvl.X, lvl.Y, lvl.Z), lvl.Object.RowId);
+                return;
+            }
+    }
+}
+
 // ── one quest, side by side ──
 
 if (only is { } wanted)

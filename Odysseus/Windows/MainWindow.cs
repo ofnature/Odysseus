@@ -22,6 +22,7 @@ public sealed record MainWindowDeps(
     IQuestStateReader Quests,
     QuestCatalog Catalog,
     PathStore Paths,
+    Services.Quest.DerivedPaths Derived,
     QuestController Controller,
     StoryFrontier Frontier,
     FleetPublisher Fleet,
@@ -68,7 +69,9 @@ public sealed class MainWindow : OdysseusWindow
     private OdysseusConfig Cfg => _d.Config;
     private QuestController Ctl => _d.Controller;
     private bool Running => Ctl.State is not (RunState.Idle or RunState.Faulted);
-    private bool CanStart => Cfg.Enabled && _d.Presence.CoreReady && _selectedQuest != 0 && _d.Paths.Has(_selectedQuest);
+    /// <summary>A quest is startable on a recorded path or on one derived from the game's journal data.</summary>
+    private bool HasSomePath(ushort questId) => _d.Paths.Has(questId) || _d.Derived.Has(questId);
+    private bool CanStart => Cfg.Enabled && _d.Presence.CoreReady && _selectedQuest != 0 && HasSomePath(_selectedQuest);
 
     public override void PreDraw()
     {
@@ -204,11 +207,14 @@ public sealed class MainWindow : OdysseusWindow
             ImGui.SameLine(0f, 6f);
             ImGui.TextColored(OdysseusTheme.TextDisabled, $"({_d.Priority.Count} in priority, none ready)");
         }
-        var hasPath = _d.Paths.Has(questId);
-        if (!hasPath)
+        if (!_d.Paths.Has(questId))
         {
             ImGui.SameLine(0f, 6f);
-            ImGui.TextColored(OdysseusTheme.StatusYellow, "(no path)");
+            var derived = _d.Derived.Has(questId);
+            ImGui.TextColored(OdysseusTheme.StatusYellow, derived ? "(derived path)" : "(no path)");
+            if (ImGui.IsItemHovered() && derived)
+                ImGui.SetTooltip("No path is stored, so this one is worked out from the game's own journal data:"
+                    + (char)10 + "it walks, talks and interacts, and stops if the quest wants anything else.");
         }
 
         // Seq · step · counts
@@ -322,7 +328,8 @@ public sealed class MainWindow : OdysseusWindow
             : !Cfg.Enabled ? "Enable Odysseus in Settings."
             : !_d.Presence.CoreReady ? _d.Presence.MissingSummary()
             : _selectedQuest == 0 ? "No Main Scenario quest to start."
-            : "No stored path for this quest — import in Settings › Paths.";
+            : "No path for this quest — the game's journal data does not place enough of it either. "
+              + "Record one in the editor.";
 
     private void DrawSecondaryControls()
     {
