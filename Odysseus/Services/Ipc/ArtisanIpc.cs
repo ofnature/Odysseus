@@ -94,12 +94,29 @@ public sealed class ArtisanIpc : Deliveries.ICrafter
         }
     }
 
-    /// <summary>Start crafting <paramref name="amount"/> of a recipe. False when Artisan is not there.</summary>
-    public bool CraftItem(ushort recipeId, int amount)
+    /// <summary>
+    /// Start crafting <paramref name="amount"/> of a recipe. False when Artisan is not there — or
+    /// when the recipe is one its gate cannot express.
+    ///
+    /// <para>
+    /// Artisan's gate takes a <c>ushort</c> recipe id, so this is where the id narrows. The highest
+    /// recipe row in the sheet today is 38,500 against a ceiling of 65,535, which is a few
+    /// expansions of headroom rather than a comfortable margin — and a cast would wrap silently on
+    /// the patch that crosses it, crafting the wrong thing. So it is refused out loud instead.
+    /// </para>
+    /// </summary>
+    public bool CraftItem(uint recipeId, int amount)
     {
+        if (recipeId > ushort.MaxValue)
+        {
+            _log?.Invoke($"Recipe {recipeId} is past what Artisan's CraftItem gate can carry ({ushort.MaxValue}) — "
+                + "craft it yourself, or use a crafter whose gate takes the full id.");
+            return false;
+        }
+
         try
         {
-            (_craftItem ??= _pluginInterface.GetIpcSubscriber<ushort, int, object>("Artisan.CraftItem")).InvokeAction(recipeId, amount);
+            (_craftItem ??= _pluginInterface.GetIpcSubscriber<ushort, int, object>("Artisan.CraftItem")).InvokeAction((ushort)recipeId, amount);
             _warned = false;
             return true;
         }

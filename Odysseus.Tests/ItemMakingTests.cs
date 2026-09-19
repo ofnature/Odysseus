@@ -16,7 +16,7 @@ public class ItemMakingTests
 
     /// <summary>Item → recipe id, and recipe id → what one craft consumes.</summary>
     private static readonly Dictionary<uint, ushort> RecipeOf = new() { [Rings] = 666, [Ingot] = 663 };
-    private static readonly Dictionary<ushort, (uint ItemId, string Name, int Per)[]> Consumes = new()
+    private static readonly Dictionary<uint, (uint ItemId, string Name, int Per)[]> Consumes = new()
     {
         [666] = [(Ingot, "Copper Ingot", 1)],
         [663] = [(Ore, "Copper Ore", 3)],
@@ -32,7 +32,7 @@ public class ItemMakingTests
     {
         public IReadOnlyList<(uint ShopId, uint VendorDataId, string VendorName, uint Cost)> VendorsFor(uint itemId) => [];
 
-        public IReadOnlyList<IngredientNeed> Plan(ushort recipeId, int crafts, Func<uint, int> held)
+        public IReadOnlyList<IngredientNeed> Plan(uint recipeId, int crafts, Func<uint, int> held)
         {
             var list = new List<IngredientNeed>();
             foreach (var (itemId, name, per) in Consumes.GetValueOrDefault(recipeId, []))
@@ -45,7 +45,7 @@ public class ItemMakingTests
     {
         public bool Available => true;
         public bool IsCrafting => false;
-        public bool CraftItem(ushort recipeId, int amount) => true;
+        public bool CraftItem(uint recipeId, int amount) => true;
         public void StopCrafting() { }
     }
 
@@ -120,7 +120,7 @@ public class ItemMakingTests
     /// <summary>Two NPCs sell the ore; the near one is second, as in the real sheet.</summary>
     private sealed class ManyVendors : IIngredientSource
     {
-        public IReadOnlyList<IngredientNeed> Plan(ushort recipeId, int crafts, Func<uint, int> held) => [];
+        public IReadOnlyList<IngredientNeed> Plan(uint recipeId, int crafts, Func<uint, int> held) => [];
 
         public IReadOnlyList<(uint ShopId, uint VendorDataId, string VendorName, uint Cost)> VendorsFor(uint itemId)
             => itemId == Ore

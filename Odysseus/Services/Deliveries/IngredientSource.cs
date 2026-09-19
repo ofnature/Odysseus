@@ -27,7 +27,7 @@ public interface IIngredientSource
     /// What <paramref name="crafts"/> of a recipe needs. <paramref name="held"/> answers how many
     /// of an item are already in the bags.
     /// </summary>
-    IReadOnlyList<IngredientNeed> Plan(ushort recipeId, int crafts, Func<uint, int> held);
+    IReadOnlyList<IngredientNeed> Plan(uint recipeId, int crafts, Func<uint, int> held);
 
     /// <summary>
     /// Everyone who sells an item, without asking about any recipe. Empty when nobody does. Which
@@ -68,7 +68,7 @@ public sealed class IngredientSource : IIngredientSource
         _log = log;
     }
 
-    public IReadOnlyList<IngredientNeed> Plan(ushort recipeId, int crafts, Func<uint, int> held)
+    public IReadOnlyList<IngredientNeed> Plan(uint recipeId, int crafts, Func<uint, int> held)
     {
         var needs = new List<IngredientNeed>();
         try

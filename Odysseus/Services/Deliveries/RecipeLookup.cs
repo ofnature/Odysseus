@@ -7,7 +7,7 @@ using Lumina.Excel.Sheets;
 namespace Odysseus.Services.Deliveries;
 
 /// <summary>One way to make an item. <paramref name="CraftType"/> is 0..7 — CRP, BSM, ARM, GSM, LTW, WVR, ALC, CUL.</summary>
-public sealed record RecipeOption(ushort RecipeId, int CraftType, ushort Level)
+public sealed record RecipeOption(uint RecipeId, int CraftType, ushort Level)
 {
     public static readonly string[] JobNames = ["CRP", "BSM", "ARM", "GSM", "LTW", "WVR", "ALC", "CUL"];
 
@@ -41,10 +41,10 @@ public sealed class RecipeLookup : IRecipeLookup
             foreach (var recipe in data.GetExcelSheet<Recipe>())
             {
                 var item = recipe.ItemResult.RowId;
-                if (item == 0 || recipe.RowId > ushort.MaxValue) continue;
+                if (item == 0) continue;
                 if (!_byItem.TryGetValue(item, out var list))
                     _byItem[item] = list = [];
-                list.Add(new RecipeOption((ushort)recipe.RowId, (int)recipe.CraftType.RowId,
+                list.Add(new RecipeOption(recipe.RowId, (int)recipe.CraftType.RowId,
                     recipe.RecipeLevelTable.ValueNullable?.ClassJobLevel ?? 0));
             }
         }

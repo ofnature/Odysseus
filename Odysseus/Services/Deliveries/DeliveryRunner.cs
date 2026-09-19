@@ -23,7 +23,7 @@ public interface IGatherer
 public interface ICrafter
 {
     bool Available { get; }
-    bool CraftItem(ushort recipeId, int amount);
+    bool CraftItem(uint recipeId, int amount);
     bool IsCrafting { get; }
     void StopCrafting();
 }

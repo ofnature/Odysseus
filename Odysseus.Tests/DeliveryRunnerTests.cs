@@ -129,8 +129,8 @@ public class DeliveryRunnerTests
     {
         public bool Available { get; set; } = true;
         public bool IsCrafting { get; set; }
-        public List<(ushort Recipe, int Amount)> Asked { get; } = [];
-        public bool CraftItem(ushort recipeId, int amount) { Asked.Add((recipeId, amount)); return true; }
+        public List<(uint Recipe, int Amount)> Asked { get; } = [];
+        public bool CraftItem(uint recipeId, int amount) { Asked.Add((recipeId, amount)); return true; }
         public void StopCrafting() => IsCrafting = false;
     }
 
@@ -206,7 +206,7 @@ public class DeliveryRunnerTests
         public uint Cost { get; set; } = 100;
         public Func<uint, int>? LastHeld { get; private set; }
 
-        public IReadOnlyList<IngredientNeed> Plan(ushort recipeId, int crafts, Func<uint, int> held)
+        public IReadOnlyList<IngredientNeed> Plan(uint recipeId, int crafts, Func<uint, int> held)
         {
             LastHeld = held;
             return
@@ -303,7 +303,7 @@ public class DeliveryRunnerTests
         Assert.True(_runner.Start(Zhloe, limit: 1));
         RunTo(DeliveryRunState.Craft);
         _runner.Tick();
-        Assert.Equal(((ushort)4242, 1), _crafter.Asked.Single());
+        Assert.Equal((4242u, 1), _crafter.Asked.Single());
     }
 
     [Fact]
@@ -465,7 +465,7 @@ public class DeliveryRunnerTests
         Run();
 
         Assert.Empty(_game.Bought);
-        Assert.Equal(((ushort)4242, 1), _crafter.Asked.Single());
+        Assert.Equal((4242u, 1), _crafter.Asked.Single());
     }
 
     [Fact]
