@@ -48,6 +48,35 @@ public sealed class GatherListsWindow : OdysseusWindow
         finally { ImGui.PopStyleVar(); }
     }
 
+    /// <summary>
+    /// The ready-made lists. True when one was taken, which ends the frame's drawing: the list the
+    /// rest of it was about is no longer the selected one.
+    /// </summary>
+    private bool DrawPresetButton(System.Collections.Generic.List<GatherList> lists)
+    {
+        if (ImGui.SmallButton("+ Preset"))
+            ImGui.OpenPopup("gatherpresets");
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("A new list, filled in — the elemental shards, crystals or clusters.");
+
+        GatherPreset? taken = null;
+        if (ImGui.BeginPopup("gatherpresets"))
+        {
+            foreach (var preset in GatherPresets.All)
+                if (ImGui.Selectable($"{preset.Name} ({preset.ItemIds.Count})"))
+                    taken = preset;
+            ImGui.EndPopup();
+        }
+
+        if (taken is null)
+            return false;
+
+        lists.Add(GatherPresets.Build(taken));
+        _gatherListIndex = lists.Count - 1;
+        _save();
+        return true;
+    }
+
     private void DrawGatherLists()
     {
         var lists = _config.GatherLists;
@@ -57,6 +86,8 @@ public sealed class GatherListsWindow : OdysseusWindow
             ImGui.TextColored(OdysseusTheme.TextDisabled, "No lists yet.");
             ImGui.SameLine();
             if (ImGui.SmallButton("+ New list")) { lists.Add(new GatherList()); _save(); }
+            ImGui.SameLine();
+            DrawPresetButton(lists);
             return;
         }
 
@@ -72,6 +103,8 @@ public sealed class GatherListsWindow : OdysseusWindow
         }
         ImGui.SameLine();
         if (ImGui.SmallButton("+ New")) { lists.Add(new GatherList()); _gatherListIndex = lists.Count - 1; _save(); return; }
+        ImGui.SameLine();
+        if (DrawPresetButton(lists)) return;
         ImGui.SameLine();
         if (ImGui.SmallButton("Delete")) { lists.RemoveAt(_gatherListIndex); _save(); return; }
 
