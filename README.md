@@ -229,6 +229,21 @@ an **Unlock** button that queues the whole prerequisite chain.
 
 ---
 
+## For other plugins
+
+| Gate | Returns | Meaning |
+|---|---|---|
+| `Odysseus.IsBusy` | `bool` | A run is driving the character — a quest, or gathering asked for through the gates below. |
+| `Odysseus.Gather.CanGather(uint itemId)` | `bool` | This character could gather it unattended right now: a node exists, it is not timed, the class is unlocked and high enough, and it is not a fish. |
+| `Odysseus.Gather.Start(string json)` | `bool` | Gather a temporary list — never saved, never shown among your own lists. All-or-nothing; true means it began. |
+| `Odysseus.Gather.Stop()` | — | Stops a run that came through the gate. A run you started yourself is left alone. |
+| `Odysseus.Gather.IsRunning` | `bool` | True only for runs that came through the gate. |
+| `Odysseus.Gather.GetStatusJson()` | `string` | What it is doing and what each item came to. |
+
+Gates are extend-only: a published gate never changes its signature or meaning.
+
+---
+
 ## Quest data
 
 Odysseus runs from its own path format. It converts the quest bundle from **your own installed copy

@@ -43,6 +43,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly IQuestStateReader _quests;
     private readonly QuestCatalog _catalog;
     private readonly PathStore _pathStore;
+    private Services.Gathering.GatherGateway _gatherGateway = null!;
     private Services.Quest.DerivedPaths _derived = null!;
     private readonly GameStepWorld _world;
     private readonly QuestController _controller;
@@ -218,7 +219,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
 
         // Published once the controller exists, so the gate never reports on a half-built run.
-        _ipc = new OdysseusIpc(PluginInterface, () => _config.Enabled && _controller.State.IsDriving());
+        _ipc = new OdysseusIpc(PluginInterface,
+            () => _config.Enabled && (_controller.State.IsDriving() || _gatherGateway.IsRunning),
+            _gatherGateway);
 
         _chocobo = new Services.Run.ChocoboKeeper(_world, () => _config.KeepChocoboOut, ChocoboUnlocked);
 
@@ -272,6 +275,31 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _gatherLists = new Services.Gathering.GatherListRunner(
             _ownGatherer, id => _world.ItemCount(id), id => _gatherables.NameOf(id), message => Say(message),
             new GearRepair(_world, message => Say(message)), () => _config.RepairAtPercent, () => _world.FreeBagSlots);
+
+        // The way in for another plugin that wants something gathered. The promise it makes is
+        // stricter than the gatherer's own CanGather: a node has to exist AND this character has to
+        // be able to work it, because a crafting queue plans on the answer.
+        var nodeAtlas = new Services.Gathering.NodeAtlas(
+            Services.Gathering.NodeAtlas.PathBeside(PluginInterface.AssemblyLocation.DirectoryName),
+            message => Warn(message));
+        Services.Gathering.GatheringTarget? PlanFor(uint itemId)
+            => _config.OwnGathering ? Services.Gathering.GatheringPlan.For(itemId, gatheringSource, nodeAtlas) : null;
+        _gatherGateway = new Services.Gathering.GatherGateway(
+            _gatherLists,
+            itemId => Services.Gathering.GatherReadiness.CanGather(PlanFor(itemId), _world.LevelOfJob),
+            itemId => !_config.OwnGathering
+                ? "gathering with Odysseus is switched off in its settings"
+                : Services.Gathering.GatherReadiness.WhyNot(PlanFor(itemId), _world.LevelOfJob, $"item {itemId}")
+                  ?? "nothing is in the way",
+            id => _world.ItemCount(id),
+            // Anything at all owning the frame refuses the request: a quest, a delivery, a tribe day
+            // or a gather run the player started are all "Odysseus is busy" from outside.
+            () => _controller.State.IsDriving()
+                  || _gatherLists.State == Services.Gathering.GatherListRunState.Running
+                  || _tribeRunner.State is not (Services.Tribes.TribeRunState.Idle or Services.Tribes.TribeRunState.Done
+                      or Services.Tribes.TribeRunState.Faulted)
+                  || !_deliveryRunner.IsFinished,
+            message => Say(message));
 
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(
             _world,
@@ -558,6 +586,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             _gatherListsWereRunning = true;
             NameFrameOwner($"the gather lists ({_gatherLists.Status})");
             _gatherLists.Tick();
+            _gatherGateway.Tick();
             return;
         }
         if (_gatherListsWereRunning)

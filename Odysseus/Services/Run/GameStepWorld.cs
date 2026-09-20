@@ -1454,6 +1454,25 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// BossMod has no IPC for this — the AI's follow/idle switch is reachable only from the
     /// <c>/bmrai</c> chat command (Theseus finding #3). One call site, so a rename is one fix.
     /// </summary>
+    /// <summary>
+    /// The character's real level on any class, or 0 when that class is not unlocked. Unsynced, for
+    /// the same reason <see cref="PlayerLevel"/> is: a gatherer standing in a synced duty has not
+    /// forgotten how to mine.
+    /// </summary>
+    public int LevelOfJob(uint classJobId)
+    {
+        try
+        {
+            var index = _data.GetExcelSheet<Lumina.Excel.Sheets.ClassJob>().GetRowOrDefault(classJobId)?.ExpArrayIndex ?? -1;
+            var state = FFXIVClientStructs.FFXIV.Client.Game.UI.PlayerState.Instance();
+            return index >= 0 && state != null ? state->ClassJobLevels[index] : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
     /// <summary>Which plugin fights a solo duty — set from the config, like the pathing provider.</summary>
     public string DutyAiProvider { get; set; } = Ipc.PluginPresence.BossModRebornProvider;
 
