@@ -137,10 +137,10 @@ public sealed class GatherListsWindow : OdysseusWindow
         ImGui.InputTextWithHint("##gatheradd", "Add an item… (part of its name)", ref _gatherFilter, 64);
         if (_gatherFilter.Length >= 2)
         {
-            foreach (var (id, itemName) in _gatherables.Search(_gatherFilter, 8))
+            // What is already on the list is excluded by the search itself, so adding an item frees
+            // its slot for the next one rather than spending it.
+            foreach (var (id, itemName) in _gatherables.Search(_gatherFilter, 8, list.Items.ConvertAll(x => x.ItemId)))
             {
-                if (list.Items.Any(x => x.ItemId == id))
-                    continue;
                 if (ImGui.Selectable($"{itemName}##add{id}"))
                 {
                     list.Items.Add(new GatherListItem { ItemId = id });
