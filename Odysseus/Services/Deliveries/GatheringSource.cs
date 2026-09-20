@@ -31,6 +31,14 @@ public sealed record GatheringOrigin(string Job, int Level, string Place, string
 /// <param name="GatheringType">0–1 Miner, 2–3 Botanist, 4–5 Fisher.</param>
 public sealed record GatheringPointRef(uint NodeId, uint TerritoryId, uint GatheringType, ushort Level)
 {
+    /// <summary>
+    /// The node is only there in a window — unspoiled (a rare-pop table) or ephemeral (a clock
+    /// window). <c>GatheringPointTransient</c> says which, keyed by the point's own row id.
+    /// Odysseus cannot wait for a window, so these are no use to it and are dropped from a plan
+    /// rather than walked to and found missing.
+    /// </summary>
+    public bool Timed { get; init; }
+
     /// <summary>The sheet leaves a placeholder row behind for points it does not place.</summary>
     public bool HasZone => TerritoryId > 1;
 
@@ -75,6 +83,30 @@ public interface IGatheringSource
 /// </summary>
 public sealed class GatheringSource : IGatheringSource
 {
+    /// <summary>
+    /// Whether a gathering point only exists in a window. Two kinds, both in
+    /// <c>GatheringPointTransient</c> and both keyed by the point's own row: a rare-pop time table
+    /// (unspoiled and legendary nodes, 195 of them) or an ephemeral clock window (177). Odysseus
+    /// has no way to wait for either, so a plan that included one would send a run to an empty
+    /// patch of ground and blame the navigation.
+    /// </summary>
+    private bool IsTimed(uint pointRowId)
+    {
+        try
+        {
+            if (_data.GetExcelSheet<GatheringPointTransient>().GetRowOrDefault(pointRowId) is not { } transient)
+                return false;
+            return transient.GatheringRarePopTimeTable.RowId != 0 || transient.EphemeralStartTime != NoWindow;
+        }
+        catch
+        {
+            return false; // a sheet we cannot read is not grounds for calling a node timed
+        }
+    }
+
+    /// <summary>What <c>EphemeralStartTime</c> holds when there is no window at all.</summary>
+    private const ushort NoWindow = 65535;
+
     /// <summary>GatheringType 0–1 are Miner's, 2–3 Botanist's, 4–5 Fisher's.</summary>
     private static string JobOf(uint gatheringType) => gatheringType switch
     {
@@ -160,7 +192,8 @@ public sealed class GatheringSource : IGatheringSource
                     if (!bases.Contains(p.GatheringPointBase.RowId)) continue;
                     var b = p.GatheringPointBase.ValueNullable;
                     points.Add(new GatheringPointRef(
-                        p.RowId, p.TerritoryType.RowId, b?.GatheringType.RowId ?? 99, (ushort)(b?.GatheringLevel ?? 0)));
+                        p.RowId, p.TerritoryType.RowId, b?.GatheringType.RowId ?? 99, (ushort)(b?.GatheringLevel ?? 0))
+                        { Timed = IsTimed(p.RowId) });
                 }
 
             // Quest-hidden items are not in the base's item slots at all — GatheringItemPoint is
@@ -179,7 +212,8 @@ public sealed class GatheringSource : IGatheringSource
                         if (p is not { } point || !seen.Add(point.RowId)) continue;
                         var b = point.GatheringPointBase.ValueNullable;
                         points.Add(new GatheringPointRef(
-                            point.RowId, point.TerritoryType.RowId, b?.GatheringType.RowId ?? 99, (ushort)(b?.GatheringLevel ?? 0)));
+                            point.RowId, point.TerritoryType.RowId, b?.GatheringType.RowId ?? 99, (ushort)(b?.GatheringLevel ?? 0))
+                            { Timed = IsTimed(point.RowId) });
                     }
                 }
             }

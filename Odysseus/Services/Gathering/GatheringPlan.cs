@@ -40,6 +40,8 @@ public static class GatheringPlan
             var territory = point.HasZone ? point.TerritoryId : territoryHint;
             if (territory <= 1)
                 continue; // the sheet leaves a placeholder behind; there is nowhere to send anyone
+            if (point.Timed)
+                continue; // unspoiled or ephemeral: there is nothing there outside its window
             var spawns = atlas.SpawnsOf(point.NodeId);
             if (spawns.Count == 0)
                 continue;
