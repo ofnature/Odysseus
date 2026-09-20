@@ -89,6 +89,13 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>Which plugin fights a solo duty: "BossMod Reborn" (default) or "Minerva".</summary>
     public string DutyAiProvider { get; set; } = Services.Ipc.PluginPresence.BossModRebornProvider;
 
+    /// <summary>
+    /// The Minerva preset to hold a fight under. Empty just switches its dodging on, which is what
+    /// a duty runner with no opinion about clearance wants; a name lets the preset decide how it
+    /// fights. Only read when Minerva is the chosen duty AI.
+    /// </summary>
+    public string MinervaPreset { get; set; } = string.Empty;
+
     /// <summary>Repair gear during a gather run once the worst piece is at or under this percent; 0 never repairs.</summary>
     public int RepairAtPercent { get; set; } = 30;
 

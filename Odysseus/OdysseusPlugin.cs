@@ -152,6 +152,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             _quests, deliveryWorld, making, message => Say(message),
             // A path note is for the player: chat is where they are looking, and it stays put.
             message => { try { Service.ChatGui.Print(message); } catch { /* chat is never worth a fault */ } });
+        _world.Minerva = new MinervaIpc(PluginInterface, message => Warn(message));
         _recorderFeed = new RecorderFeed(_world, _quests, aetherytes, duties);
         var dialogue = new DialogueCatalog(DataManager, message => Warn(message));
         _runLog = new RunLog(
@@ -551,6 +552,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _presence.PathingProvider = _config.PathingProvider;
         _presence.DutyAiProvider = _config.DutyAiProvider;
         _world.DutyAiProvider = _config.DutyAiProvider;
+        _world.MinervaPreset = _config.MinervaPreset;
         if (_gatherLists.State == Services.Gathering.GatherListRunState.Running)
         {
             _gatherListsWereRunning = true;

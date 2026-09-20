@@ -644,8 +644,23 @@ public sealed class ConfigWindow : OdysseusWindow
         }
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Which plugin fights a solo instanced duty. BossMod Reborn's AI is switched on for the "
-                + "fight and off for travel; Minerva has no such switch, so it is left to its own settings. "
+                + "fight and off for travel; Minerva is claimed for the fight and handed back after. "
                 + "Switching takes effect immediately.");
+
+        if (_presence.UsesMinerva)
+        {
+            var preset = _config.MinervaPreset;
+            ImGui.SetNextItemWidth(160f);
+            if (ImGui.InputTextWithHint("Minerva preset", "(just switch its dodging on)", ref preset, 48))
+                _config.MinervaPreset = preset;
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                _save();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Odysseus claims Minerva's preset slot as \"odysseus\" for the length of a fight "
+                    + "and hands it back after, which returns your own Default. Name a preset to fight to its "
+                    + "settings, or leave this empty to just switch dodging on. A name Minerva does not know is "
+                    + "refused and said so in the log, never guessed at.");
+        }
 
         var duties = _config.HandOffDutiesToTheseus;
         if (ImGui.Checkbox("Dungeons and trials → Theseus", ref duties))

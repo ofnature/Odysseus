@@ -1457,6 +1457,12 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// <summary>Which plugin fights a solo duty — set from the config, like the pathing provider.</summary>
     public string DutyAiProvider { get; set; } = Ipc.PluginPresence.BossModRebornProvider;
 
+    /// <summary>The Minerva preset to hold the fight under, or empty to just switch its dodging on.</summary>
+    public string MinervaPreset { get; set; } = string.Empty;
+
+    /// <summary>The Minerva handoff, when that is the chosen duty AI. Null changes nothing.</summary>
+    public Ipc.MinervaIpc? Minerva { get; set; }
+
     /// <summary>
     /// Hand the fight to the duty AI, or take it back. A provider with no such switch — see
     /// <see cref="Ipc.PluginPresence.DutyAiCommand"/> — is left to its own settings.
@@ -1464,7 +1470,13 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     public void SetBossModAi(bool enabled)
     {
         if (Ipc.PluginPresence.DutyAiCommand(DutyAiProvider, enabled) is { } command)
+        {
             _chat.Send(command);
+            return;
+        }
+
+        // Minerva: claimed for the fight, handed back after. Its slot is the toggle.
+        Minerva?.Drive(enabled, MinervaPreset);
     }
 
     public DutyDescription? DescribeDuty(uint contentFinderConditionId) => _duties.Describe(contentFinderConditionId);
