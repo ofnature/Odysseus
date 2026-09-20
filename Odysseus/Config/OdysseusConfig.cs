@@ -86,6 +86,9 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>Which plugin paths and moves the character: "vnavmesh" (default) or "Ariadne".</summary>
     public string PathingProvider { get; set; } = Services.Ipc.VnavIpc.VnavmeshProvider;
 
+    /// <summary>Which plugin fights a solo duty: "BossMod Reborn" (default) or "Minerva".</summary>
+    public string DutyAiProvider { get; set; } = Services.Ipc.PluginPresence.BossModRebornProvider;
+
     /// <summary>Repair gear during a gather run once the worst piece is at or under this percent; 0 never repairs.</summary>
     public int RepairAtPercent { get; set; } = 30;
 

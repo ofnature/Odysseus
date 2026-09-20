@@ -549,6 +549,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _ownGatherer.Enabled = _config.OwnGathering;
         _vnav.Provider = _config.PathingProvider;
         _presence.PathingProvider = _config.PathingProvider;
+        _presence.DutyAiProvider = _config.DutyAiProvider;
+        _world.DutyAiProvider = _config.DutyAiProvider;
         if (_gatherLists.State == Services.Gathering.GatherListRunState.Running)
         {
             _gatherListsWereRunning = true;

@@ -42,7 +42,7 @@ dotnet build Odysseus.sln -c Release
 | **vnavmesh** | walking and flying | movement stops; the step says so |
 | **Lifestream** | teleports and aethernet hops | travel steps fail with the aetheryte named |
 | **TextAdvance** | the ESC press during a cutscene, and picking an optional quest reward | cutscenes play in full; a quest offering a choice of rewards stops at the window |
-| **BossMod Reborn** | solo instanced duties | stops at the entrance and waits for you |
+| **BossMod Reborn** or **Minerva** | solo instanced duties — whichever Settings names | stops at the entrance and waits for you |
 | **Theseus** | full dungeons inside a quest | stops at the entrance and waits for you |
 | **Artisan** | crafting for custom deliveries | the delivery stops and says what to craft |
 | **GatherBuddy Reborn** | gathering for custom deliveries | the delivery stops and says where to find it |

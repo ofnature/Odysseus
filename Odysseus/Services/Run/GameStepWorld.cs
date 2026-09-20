@@ -1454,7 +1454,18 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// BossMod has no IPC for this — the AI's follow/idle switch is reachable only from the
     /// <c>/bmrai</c> chat command (Theseus finding #3). One call site, so a rename is one fix.
     /// </summary>
-    public void SetBossModAi(bool enabled) => _chat.Send($"/bmrai {(enabled ? "on" : "off")}");
+    /// <summary>Which plugin fights a solo duty — set from the config, like the pathing provider.</summary>
+    public string DutyAiProvider { get; set; } = Ipc.PluginPresence.BossModRebornProvider;
+
+    /// <summary>
+    /// Hand the fight to the duty AI, or take it back. A provider with no such switch — see
+    /// <see cref="Ipc.PluginPresence.DutyAiCommand"/> — is left to its own settings.
+    /// </summary>
+    public void SetBossModAi(bool enabled)
+    {
+        if (Ipc.PluginPresence.DutyAiCommand(DutyAiProvider, enabled) is { } command)
+            _chat.Send(command);
+    }
 
     public DutyDescription? DescribeDuty(uint contentFinderConditionId) => _duties.Describe(contentFinderConditionId);
 

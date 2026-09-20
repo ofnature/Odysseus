@@ -42,6 +42,13 @@ public sealed class PluginPresence
     public const string BossModRebornInternalName = "BossModReborn";
     public const string BossModInternalName = "BossMod";
 
+    /// <summary>The other duty-AI this fleet can be pointed at.</summary>
+    public const string MinervaInternalName = "Minerva";
+
+    /// <summary>The two names <see cref="DutyAiProvider"/> takes, as the settings combo spells them.</summary>
+    public const string BossModRebornProvider = "BossMod Reborn";
+    public const string MinervaProvider = "Minerva";
+
     /// <summary>Full duties (dungeons, trials) inside a quest.</summary>
     public const string TheseusInternalName = "Theseus";
 
@@ -66,7 +73,34 @@ public sealed class PluginPresence
 
     public bool Daedalus => IsLoaded(DaedalusInternalName);
 
-    public bool BossMod => IsLoaded(BossModRebornInternalName) || IsLoaded(BossModInternalName);
+    /// <summary>
+    /// Which plugin is asked to fight a solo duty. Set from the config, the same way
+    /// <see cref="PathingProvider"/> is — the setting is a pointer, not a second feature.
+    /// </summary>
+    public string DutyAiProvider { get; set; } = BossModRebornProvider;
+
+    public bool UsesMinerva => string.Equals(DutyAiProvider, MinervaProvider, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The chat command that hands a fight to the chosen duty AI, or takes it back — null when it
+    /// has no such switch.
+    ///
+    /// <para>
+    /// BossMod Reborn's AI is a mode, switched with <c>/bmrai</c>. Minerva's is not one: it
+    /// publishes guidance for a rotation plugin to act on (must-not-act, safe spots, presets) and
+    /// exposes no on/off command or gate. So with Minerva chosen nothing is sent, rather than a
+    /// command going to a plugin that has never heard of it.
+    /// </para>
+    /// </summary>
+    public static string? DutyAiCommand(string provider, bool on)
+        => string.Equals(provider, MinervaProvider, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : $"/bmrai {(on ? "on" : "off")}";
+
+    /// <summary>The chosen duty-AI is loaded. Upstream BossMod counts for the Reborn setting; it serves the same gates.</summary>
+    public bool BossMod => UsesMinerva
+        ? IsLoaded(MinervaInternalName)
+        : IsLoaded(BossModRebornInternalName) || IsLoaded(BossModInternalName);
 
     public bool Theseus => IsLoaded(TheseusInternalName);
 

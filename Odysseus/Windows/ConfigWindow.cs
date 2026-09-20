@@ -620,7 +620,7 @@ public sealed class ConfigWindow : OdysseusWindow
         ImGui.Spacing();
 
         var solo = _config.HandOffSoloDuties;
-        if (ImGui.Checkbox("Solo duties → BossMod Reborn", ref solo))
+        if (ImGui.Checkbox($"Solo duties → {_config.DutyAiProvider}", ref solo))
         {
             _config.HandOffSoloDuties = solo;
             _save();
@@ -628,8 +628,24 @@ public sealed class ConfigWindow : OdysseusWindow
         if (!_presence.BossMod)
         {
             ImGui.SameLine();
-            ImGui.TextColored(OdysseusTheme.StatusYellow, "(BossMod not loaded)");
+            ImGui.TextColored(OdysseusTheme.StatusYellow, $"({_config.DutyAiProvider} not loaded)");
         }
+
+        ImGui.SetNextItemWidth(160f);
+        if (ImGui.BeginCombo("Duty AI", _config.DutyAiProvider))
+        {
+            foreach (var provider in new[] { PluginPresence.BossModRebornProvider, PluginPresence.MinervaProvider })
+                if (ImGui.Selectable(provider, provider == _config.DutyAiProvider))
+                {
+                    _config.DutyAiProvider = provider;
+                    _save();
+                }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Which plugin fights a solo instanced duty. BossMod Reborn's AI is switched on for the "
+                + "fight and off for travel; Minerva has no such switch, so it is left to its own settings. "
+                + "Switching takes effect immediately.");
 
         var duties = _config.HandOffDutiesToTheseus;
         if (ImGui.Checkbox("Dungeons and trials → Theseus", ref duties))
