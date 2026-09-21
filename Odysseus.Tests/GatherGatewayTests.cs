@@ -40,6 +40,8 @@ public class GatherGatewayTests
         public List<string> Log { get; } = [];
         public HashSet<uint> Ungatherable { get; } = [];
         public bool Busy { get; set; }
+        public List<GatherList> Lists { get; } = [];
+        public int Saves { get; private set; }
         public GatherListRunner Runner { get; }
         public GatherGateway Gateway { get; }
 
@@ -47,7 +49,7 @@ public class GatherGatewayTests
         {
             Runner = new GatherListRunner(Gatherer, id => Gatherer.Bag.GetValueOrDefault(id),
                 id => $"item {id}", Log.Add);
-            Gateway = new GatherGateway(Runner,
+            Gateway = new GatherGateway(Runner, Lists, () => Saves++,
                 id => !Ungatherable.Contains(id),
                 id => $"item {id} is not something this character can gather",
                 id => Gatherer.Bag.GetValueOrDefault(id),
@@ -72,7 +74,7 @@ public class GatherGatewayTests
         """;
 
     [Fact]
-    public void A_request_runs_as_a_temporary_list_and_ends_by_itself()
+    public void A_request_runs_and_ends_by_itself()
     {
         var f = new Fixture();
         Assert.True(f.Gateway.Start(TwoItems));
@@ -84,6 +86,125 @@ public class GatherGatewayTests
         Assert.Equal(3, f.Gatherer.Bag[5111]);
         Assert.Equal(2, f.Gatherer.Bag[5106]);
         Assert.False(f.Gateway.IsRunning);          // and falls when the run ends, with nothing to poll for
+    }
+
+    /// <summary>
+    /// The caller's work lives in a list of its own, shown beside the player's: named after it,
+    /// "Remove completed" on, so it holds exactly what is still owed and can be finished by hand.
+    /// </summary>
+    [Fact]
+    public void A_request_is_kept_in_a_list_of_its_own_named_after_the_caller()
+    {
+        var f = new Fixture();
+        Assert.True(f.Gateway.Start(TwoItems));
+
+        var list = Assert.Single(f.Lists);
+        Assert.Equal("Hephaestus", list.Name);
+        Assert.True(list.RemoveCompleted);
+        Assert.True(list.Enabled);
+        Assert.Equal([5111u, 5106u], list.Items.Select(i => i.ItemId));
+        Assert.True(f.Saves > 0);
+    }
+
+    /// <summary>
+    /// "Volatile": one list, reused. The caller re-reads its bags and replans every time, so a new
+    /// request is the whole of what it needs now — it replaces the list, it does not pile onto it.
+    /// </summary>
+    [Fact]
+    public void A_second_request_reuses_the_list_and_replaces_what_it_holds()
+    {
+        var f = new Fixture();
+        Assert.True(f.Gateway.Start(TwoItems));
+        f.Run();
+
+        Assert.True(f.Gateway.Start("""{ "requestedBy": "hephaestus", "items": [ { "itemId": 5120, "targetCount": 1 } ] }"""));
+
+        var list = Assert.Single(f.Lists);            // matched however the name is cased
+        Assert.Equal([5120u], list.Items.Select(i => i.ItemId));
+    }
+
+    [Fact]
+    public void A_list_the_player_deleted_is_made_again_on_the_next_request()
+    {
+        var f = new Fixture();
+        f.Gateway.Start(TwoItems);
+        f.Run();
+        f.Lists.Clear();
+
+        Assert.True(f.Gateway.Start("{ \"requestedBy\": \"Hephaestus\", \"items\": [ { \"itemId\": 5120, \"targetCount\": 1 } ] }"));
+        Assert.Equal("Hephaestus", Assert.Single(f.Lists).Name);
+    }
+
+    /// <summary>
+    /// The list holds what is owed and nothing else. A row the bags already cover is left out, and
+    /// a request that is wholly covered starts nothing — and leaves the list empty rather than
+    /// holding rows no run will ever come along to prune.
+    /// </summary>
+    [Fact]
+    public void Rows_the_bags_already_cover_are_never_put_on_the_list()
+    {
+        var f = new Fixture();
+        f.Gatherer.Bag[5106] = 50;                      // already have plenty
+
+        Assert.True(f.Gateway.Start(TwoItems));
+        Assert.Equal([5111u], Assert.Single(f.Lists).Items.Select(i => i.ItemId));
+
+        f.Run();
+        Assert.False(f.Gateway.Start(TwoItems));        // everything covered now
+        Assert.Empty(Assert.Single(f.Lists).Items);
+        Assert.Contains(f.Log, m => m.Contains("already hold all of them"));
+    }
+
+    /// <summary>
+    /// A crafting plugin asking for ore must not also send the character off after the player's
+    /// crystals list — and must not change it.
+    /// </summary>
+    [Fact]
+    public void A_request_runs_only_its_own_list_and_leaves_the_players_alone()
+    {
+        var f = new Fixture();
+        var crystals = new GatherList
+        {
+            Name = "crystals", Enabled = true,
+            Items = [new GatherListItem { ItemId = 8, TargetCount = 300 }],
+        };
+        f.Lists.Add(crystals);
+
+        Assert.True(f.Gateway.Start(TwoItems));
+        f.Run();
+
+        Assert.False(f.Gatherer.Bag.ContainsKey(8));   // not gathered
+        Assert.True(crystals.Enabled);                  // not touched
+        Assert.Equal(300, Assert.Single(crystals.Items).TargetCount);
+    }
+
+    /// <summary>
+    /// The player's "Afterwards" is for the player's own runs. Applied to a request it sent a
+    /// crafter to the FC estate between two crafts; the caller says for itself.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Whether_to_go_home_comes_from_the_request(bool asked)
+    {
+        var f = new Fixture();
+        var json = "{ \"requestedBy\": \"Hephaestus\", \"returnHome\": " + (asked ? "true" : "false")
+                   + ", \"items\": [ { \"itemId\": 5111, \"targetCount\": 1 } ] }";
+        Assert.True(f.Gateway.Start(json));
+        f.Run();
+
+        Assert.True(f.Gateway.TakeEndedRequest(out var goHome));
+        Assert.Equal(asked, goHome);
+        Assert.False(f.Gateway.TakeEndedRequest(out _));   // read once, then cleared
+    }
+
+    [Fact]
+    public void A_run_the_player_started_is_not_mistaken_for_a_request()
+    {
+        var f = new Fixture();
+        f.Runner.Begin([new GatherList { Name = "mine", Items = [new GatherListItem { ItemId = 5111, TargetCount = 1 }] }]);
+        f.Run();
+        Assert.False(f.Gateway.TakeEndedRequest(out _));
     }
 
     /// <summary>

@@ -286,6 +286,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             => _config.OwnGathering ? Services.Gathering.GatheringPlan.For(itemId, gatheringSource, nodeAtlas) : null;
         _gatherGateway = new Services.Gathering.GatherGateway(
             _gatherLists,
+            _config.GatherLists,
+            SaveConfig,
             itemId => Services.Gathering.GatherReadiness.CanGather(PlanFor(itemId), _world.LevelOfJob),
             itemId => !_config.OwnGathering
                 ? "gathering with Odysseus is switched off in its settings"
@@ -604,7 +606,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             }
             // Going home is for a run that finished, not one you stopped; sent once the
             // character can act, since the last node's window has only just shut.
-            if (_gatherLists.State == Services.Gathering.GatherListRunState.Done)
+            // A request says for itself whether to go home; the player's "Afterwards" is for the
+            // player's own runs, and sending a crafter to the estate between crafts is not one.
+            var requested = _gatherGateway.TakeEndedRequest(out var requestWantsHome);
+            if (_gatherLists.State == Services.Gathering.GatherListRunState.Done && (!requested || requestWantsHome))
                 _gatherHomeCommand = Services.Gathering.GatherHomeCommands.For(_config.GatherHome);
         }
         if (_gatherHomeCommand is { } goHome && _world.IsReady && !_world.IsOccupied)

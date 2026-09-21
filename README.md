@@ -235,7 +235,7 @@ an **Unlock** button that queues the whole prerequisite chain.
 |---|---|---|
 | `Odysseus.IsBusy` | `bool` | A run is driving the character — a quest, or gathering asked for through the gates below. |
 | `Odysseus.Gather.CanGather(uint itemId)` | `bool` | This character could gather it unattended right now: a node exists, it is not timed, the class is unlocked and high enough, and it is not a fish. |
-| `Odysseus.Gather.Start(string json)` | `bool` | Gather a temporary list — never saved, never shown among your own lists. All-or-nothing; true means it began. |
+| `Odysseus.Gather.Start(string json)` | `bool` | Gather into the caller's own list — one per caller, named after it, shown beside yours and reused every time, with completed rows removed. Runs only that list. All-or-nothing; true means it began. |
 | `Odysseus.Gather.Stop()` | — | Stops a run that came through the gate. A run you started yourself is left alone. |
 | `Odysseus.Gather.IsRunning` | `bool` | True only for runs that came through the gate. |
 | `Odysseus.Gather.GetStatusJson()` | `string` | What it is doing and what each item came to. |

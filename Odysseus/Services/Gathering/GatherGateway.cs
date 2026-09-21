@@ -50,10 +50,18 @@ public sealed class GatherOutcomeDto
 /// the first, turning the shortfalls it cannot buy or sub-craft into a list.
 ///
 /// <para>
-/// The list it runs is <b>temporary</b>: never saved, never shown among the player's named lists,
-/// gone when the run ends. It cannot enable, disable or edit those lists. That is the whole
-/// difference between this and the gather window — the engine underneath is the same
-/// <see cref="GatherListRunner"/>, zone-ordered, one bad row not ending the run.
+/// Each caller gets <b>one list of its own</b>, named after it — "Hephaestus" — and shown in the
+/// gather window beside the player's. "Remove completed" is on, so it holds exactly what is still
+/// owed: a request <i>replaces</i> its items, the run gathers them, and whatever arrived is pruned
+/// when the run ends. The next request reuses the same list. That makes the caller's work visible
+/// and finishable by hand, which a hidden throwaway list was not, and it needs nothing new — the
+/// engine underneath is the same <see cref="GatherListRunner"/>, and pruning is the one every list
+/// already has.
+/// </para>
+///
+/// <para>
+/// A request runs <b>only its own list</b>. The player's other lists are neither run nor touched: a
+/// crafting plugin asking for ore must not also send the character off after the crystals list.
 /// </para>
 ///
 /// <para>
@@ -76,6 +84,8 @@ public sealed class GatherGateway
     };
 
     private readonly GatherListRunner _runner;
+    private readonly IList<GatherList> _lists;
+    private readonly Action _save;
     private readonly Func<uint, bool> _canGather;
     private readonly Func<uint, string> _whyNot;
     private readonly Func<uint, int> _held;
@@ -84,6 +94,8 @@ public sealed class GatherGateway
 
     public GatherGateway(
         GatherListRunner runner,
+        IList<GatherList> lists,
+        Action save,
         Func<uint, bool> canGather,
         Func<uint, string> whyNot,
         Func<uint, int> held,
@@ -91,6 +103,8 @@ public sealed class GatherGateway
         Action<string> log)
     {
         _runner = runner;
+        _lists = lists;
+        _save = save;
         _canGather = canGather;
         _whyNot = whyNot;
         _held = held;
@@ -163,7 +177,25 @@ public sealed class GatherGateway
             items.Add(new GatherListItem { ItemId = line.ItemId, TargetCount = target });
         }
 
-        var list = new GatherList { Name = $"requested by {who}", Enabled = true, Items = items };
+        // The caller's own list: found by name, made if it is not there (or was deleted), and its
+        // items replaced — the caller re-reads its bags and replans every time, so what it sends is
+        // the whole of what it needs now, not an addition to what it needed last time.
+        // Only what is actually owed goes in. The list is meant to hold exactly that, and pruning
+        // only happens when a run ends — a row already satisfied would otherwise sit there for good,
+        // since a request with nothing short starts no run to prune it.
+        var owed = items.FindAll(i => _held(i.ItemId) < i.TargetCount);
+        var list = ListFor(who);
+        list.Enabled = true;
+        list.RemoveCompleted = true;
+        list.Items = owed;
+        _save();
+
+        if (owed.Count == 0)
+        {
+            _log($"{who} asked for {items.Count} item(s) and the bags already hold all of them — nothing to gather.");
+            return false;
+        }
+
         if (!_runner.Begin([list]))
         {
             _log($"{who}'s gathering request started nothing: {_runner.Status}");
@@ -172,8 +204,39 @@ public sealed class GatherGateway
 
         IsRunning = true;
         RequestedBy = who;
+        _returnHome = request.ReturnHome;
         _log($"Gathering {items.Count} item(s) for {who}.");
         return true;
+    }
+
+    /// <summary>The list a caller's requests live in, made the first time it asks.</summary>
+    public GatherList ListFor(string who)
+    {
+        foreach (var list in _lists)
+            if (string.Equals(list.Name, who, StringComparison.OrdinalIgnoreCase))
+                return list;
+        var made = new GatherList { Name = who, Enabled = true, RemoveCompleted = true };
+        _lists.Add(made);
+        return made;
+    }
+
+    /// <summary>
+    /// Whether the run that just ended was a request, and whether that request wanted to go home
+    /// afterwards. Read once by whoever sends the character home, then cleared.
+    ///
+    /// <para>
+    /// The player's own "Afterwards" setting is for the player's own runs. Applied to a request it
+    /// sent a crafter to the FC estate between two crafts — the caller asks with
+    /// <c>returnHome: false</c> precisely so the character stays where it is working.
+    /// </para>
+    /// </summary>
+    public bool TakeEndedRequest(out bool returnHome)
+    {
+        returnHome = _endedReturnHome;
+        var was = _endedRequest;
+        _endedRequest = false;
+        _endedReturnHome = false;
+        return was;
     }
 
     /// <summary>
@@ -224,11 +287,18 @@ public sealed class GatherGateway
         }
     }
 
+    private bool _returnHome;
+    private bool _endedRequest;
+    private bool _endedReturnHome;
+
     private void Finish()
     {
         if (RequestedBy.Length > 0)
             _log($"Gathering for {RequestedBy} ended: {_runner.Status}");
+        _endedRequest = true;
+        _endedReturnHome = _returnHome;
         IsRunning = false;
         RequestedBy = string.Empty;
+        _returnHome = false;
     }
 }
