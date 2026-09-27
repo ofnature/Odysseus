@@ -187,6 +187,7 @@ an **Unlock** button that queues the whole prerequisite chain.
 | **Continue into the next MSQ quest** | on | off = finish the current quest and stop |
 | **Stop at level** | 0 (off) | park before a level cap or a duty sync level |
 | **Pick quest rewards** | on | TextAdvance chooses; Odysseus presses Complete |
+| **Skip optional side-quest pick-ups** | off | leave the side quests a story path collects on the way, and the walk to them — unless the story or the priority list needs one |
 | **Preferred Grand Company** | — | which company the story joins when it asks |
 
 ### The Wake (resume)
@@ -200,7 +201,8 @@ an **Unlock** button that queues the whole prerequisite chain.
 
 | Option | Default | What it does |
 |---|---|---|
-| **Hand solo duties to BossMod Reborn** | on | off = stop at the entrance |
+| **Hand solo duties to the duty AI** | on | off = stop at the entrance. A lost duty is tried again where it stands (twice, on Normal), then the run stays put until you win it — it never walks off |
+| **Duty AI** | BossMod Reborn | or Minerva, claimed for the fight and handed back after |
 | **Hand dungeons to Theseus** | on | off = stop at the entrance. 8-player trials always stop |
 
 ### Priority list

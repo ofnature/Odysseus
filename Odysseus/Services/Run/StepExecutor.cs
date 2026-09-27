@@ -37,6 +37,10 @@ public sealed class StepExecutor
         SoloDutyEnter,
         /// <summary>Solo instance: inside, BossMod AI has it, waiting to be out.</summary>
         SoloDutyRun,
+        /// <summary>Solo instance: back outside — did the quest actually move, or was it lost?</summary>
+        SoloDutyVerify,
+        /// <summary>Solo instance: lost too many times; staying put until it is won by hand.</summary>
+        SoloDutyHold,
         /// <summary>Full duty: asked Theseus, waiting for it to take over.</summary>
         DutyEnter,
         /// <summary>Full duty: Theseus is running it, waiting for it to finish and for us to be outside.</summary>
@@ -259,6 +263,23 @@ public sealed class StepExecutor
     private static readonly TimeSpan AethernetRetry = TimeSpan.FromSeconds(8);
     private static readonly TimeSpan DutyEnterMax = TimeSpan.FromSeconds(120);
     private static readonly TimeSpan SoloDutyMax = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// How long after coming out of a solo duty the quest is given to show it moved. The wrap-up
+    /// cutscene holds this clock like every other; once the character can act again, this is only
+    /// the server's word catching up.
+    /// </summary>
+    private static readonly TimeSpan SoloVerifySettle = TimeSpan.FromSeconds(4);
+
+    /// <summary>How many times a lost solo duty is tried again before the run stays and waits.</summary>
+    public const int MaxSoloRetries = 2;
+
+    /// <summary>
+    /// The difficulty a retry is answered with: 0, Normal. That is what Questionable ships — it has
+    /// Easy and Very Easy in its code and switched them off in its own settings — so it is the one
+    /// known to work through this prompt.
+    /// </summary>
+    public const int SoloRetryDifficulty = 0;
     private static readonly TimeSpan DutyMax = TimeSpan.FromMinutes(90);
     private static readonly TimeSpan ActionSettle = TimeSpan.FromSeconds(2);
     /// <summary>A purchase is a server round trip; leave a beat between rounds rather than spamming the handler.</summary>
@@ -285,6 +306,14 @@ public sealed class StepExecutor
     private DateTime _yesNoOpenedAt;
     private bool _yesNoReported;
     private bool _yesNoAnswered;
+
+    // A solo duty's attempts outlive a retry of the same step — that is the point of counting them.
+    private int _soloFailures;
+    private Quest.QuestSnapshot _soloProgressAtStart;
+    private bool _soloRetrying;
+    private bool _soloHoldSaid;
+    private DateTime _lastDifficultyAnswer;
+    private DateTime _lastDutyCallsYes;
     private DateTime _lastYesNoPress;
 
     /// <summary>
@@ -485,6 +514,13 @@ public sealed class StepExecutor
     /// </param>
     public void Begin(QuestStep step, bool skipTeleport = false, ushort questId = 0, bool groundOnly = false, bool dutyByHand = false)
     {
+        if (!(_soloRetrying && ReferenceEquals(step, _step)))
+        {
+            _soloFailures = 0;
+            _soloHoldSaid = false;
+            _soloProgressAtStart = step.Kind == StepKind.SinglePlayerDuty ? _world.QuestState(questId) : default;
+        }
+        _soloRetrying = false;
         _groundOnly = groundOnly;
         _step = step;
         _questId = questId;
@@ -914,15 +950,75 @@ public sealed class StepExecutor
             case Phase.SoloDutyRun:
                 if (!_world.InDuty && !_world.IsTravelBusy)
                 {
+                    // Back outside — which is where a lost duty leaves you too. Calling that done
+                    // sent the run on to the next step with the quest unmoved, and the controller
+                    // then replayed the sequence from its top: for The Key to Victory, a walk to
+                    // another zone. Whether it was won is the quest's to say, not the door's.
                     CommandAi(false);
-                    _handoffDone = true;
-                    Enter(Phase.WaitReady); // back outside; the wrap-up cutscene may still be playing
+                    Enter(Phase.SoloDutyVerify);
                 }
                 else if (now - _phaseStart > SoloDutyMax)
                 {
                     CommandAi(false);
                     Fail($"solo duty did not finish in {SoloDutyMax.TotalMinutes:F0} min");
                 }
+                break;
+
+            case Phase.SoloDutyVerify:
+                if (_world.InDuty)
+                {
+                    Enter(Phase.SoloDutyRun); // straight back in (the game's own retry, or ours)
+                    break;
+                }
+                if (!_soloProgressAtStart.IsAvailable)
+                {
+                    // Nothing to judge by: done, as it always was, with no wait for a verdict.
+                    _handoffDone = true;
+                    Enter(Phase.WaitReady);
+                    break;
+                }
+                HoldClockForCutscene(now);    // the wrap-up plays before the quest can have moved
+                if (_world.InCutscene || !_world.IsReady || now - _phaseStart < SoloVerifySettle)
+                    break;
+                if (SoloDutyWon())
+                {
+                    _handoffDone = true;
+                    Enter(Phase.WaitReady);
+                    break;
+                }
+                _soloFailures++;
+                if (_soloFailures <= MaxSoloRetries)
+                {
+                    _world.Log($"The solo duty was lost — quest {_questId} did not move. Trying again "
+                        + $"({_soloFailures}/{MaxSoloRetries}), from right here rather than the top of the sequence.");
+                    RetrySoloDuty();
+                    break;
+                }
+                Enter(Phase.SoloDutyHold);
+                break;
+
+            case Phase.SoloDutyHold:
+                if (!_soloHoldSaid)
+                {
+                    _soloHoldSaid = true;
+                    var tries = MaxSoloRetries + 1;
+                    _world.Log($"The solo duty for quest {_questId} was lost {tries} times. Staying here rather than "
+                        + "moving on — run it yourself and the quest carries on from where it is.");
+                    _world.Notify($"Odysseus: the solo duty was lost {tries} times — staying put. Run it yourself and the run carries on.");
+                }
+                if (_world.InDuty)
+                {
+                    _phaseStart = now; // they are in it now; time inside does not count
+                    break;
+                }
+                if (SoloDutyWon())
+                {
+                    _handoffDone = true;
+                    Enter(Phase.WaitReady);
+                    break;
+                }
+                if (now - _phaseStart > DutyByHandMax)
+                    Fail($"waited {DutyByHandMax.TotalHours:F0}h for the solo duty of quest {_questId} to be won by hand");
                 break;
 
             case Phase.DutyEnter:
@@ -2918,10 +3014,40 @@ public sealed class StepExecutor
         // Answering it blind is not the fix: a yes/no is how a run takes up a class or a first DoH
         // quest it was never asked to take. So the question is repeated to the player, by name, and
         // the clock stops while it stands.
+        // A lost solo duty offers its difficulty again when the NPC is spoken to. Unanswered, the
+        // retry stands at the door for good.
+        if (step.Kind == StepKind.SinglePlayerDuty && _world.IsAddonVisible("DifficultySelectYesNo"))
+        {
+            if (now - _lastDifficultyAnswer > TimeSpan.FromSeconds(1.5))
+            {
+                _lastDifficultyAnswer = now;
+                _world.AnswerDifficulty(SoloRetryDifficulty);
+                _world.Log("Answering the solo duty's difficulty prompt: Normal.");
+            }
+            _sawOccupied = true;
+            _phaseStart = now;
+            return;
+        }
+
         if (_world.IsAddonVisible("SelectYesno"))
         {
             if (TryAnswerYesNo(step, now))
                 return;
+
+            // "Duty calls — begin?" is the step's whole purpose, the way the offer window is an
+            // AcceptQuest step's: Questionable answers it Yes for the same reason. Without this the
+            // undeclared-question hold would stop every solo duty, and every retry, at the door.
+            if (step.Kind == StepKind.SinglePlayerDuty)
+            {
+                if (now - _lastDutyCallsYes > TimeSpan.FromSeconds(1.5))
+                {
+                    _lastDutyCallsYes = now;
+                    _world.SelectYesNo(true);
+                }
+                _sawOccupied = true;
+                _phaseStart = now;
+                return;
+            }
 
             if (_yesNoOpenedAt == default)
                 _yesNoOpenedAt = now;
@@ -3233,6 +3359,33 @@ public sealed class StepExecutor
     /// other 9), the step's own choice is still trusted; another step's is not.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Whether the solo duty moved the quest. Anything changed — sequence, variables, or the quest
+    /// leaving the journal altogether — counts: a win does not always advance the sequence, but it
+    /// always leaves a mark, and a loss leaves none. With nothing to compare against, this cannot
+    /// tell, and says won rather than retrying a duty that may well be done.
+    /// </summary>
+    private bool SoloDutyWon()
+    {
+        var before = _soloProgressAtStart;
+        if (!before.IsAvailable)
+            return true;
+        var now = _world.QuestState(_questId);
+        return !now.IsAvailable
+               || now.Sequence != before.Sequence
+               || !now.Variables.Span.SequenceEqual(before.Variables.Span);
+    }
+
+    /// <summary>
+    /// Go again, from right here: the same step begun afresh — walk back to the NPC if the game
+    /// put us down somewhere else, talk, answer the prompts, go in — with the attempt count kept.
+    /// </summary>
+    private void RetrySoloDuty()
+    {
+        _soloRetrying = true;
+        Begin(_step!, _skipTeleport, _questId, _groundOnly, _dutyByHand);
+    }
+
     private bool TryAnswerYesNo(QuestStep step, DateTime now)
     {
         var asked = Squash(_world.YesNoPrompt());

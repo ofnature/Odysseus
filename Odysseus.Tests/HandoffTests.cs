@@ -97,6 +97,133 @@ public class HandoffTests
         Assert.Equal(1, w.Calls.Count(c => c == "Interact 1016034")); // never re-entered
     }
 
+    // ── A lost solo duty ──
+
+    private const ushort KeyToVictory = 2549;
+    private const uint Mistress = 1021705;
+
+    /// <summary>The quest as the game has it before the duty: sequence 1, nothing set.</summary>
+    private static Odysseus.Services.Quest.QuestSnapshot Before()
+        => new(KeyToVictory, 1, new byte[6]);
+
+    /// <summary>What a win leaves behind: the sequence moves on.</summary>
+    private static Odysseus.Services.Quest.QuestSnapshot Won()
+        => new(KeyToVictory, 255, new byte[6]);
+
+    /// <summary>Talk to the NPC, go in, come out — the lap each attempt makes.</summary>
+    private static void Lap(StepExecutor ex, FakeStepWorld w)
+    {
+        Ticks(ex, w, 3);
+        w.IsOccupied = true; Ticks(ex, w, 2); w.IsOccupied = false;
+        Ticks(ex, w, 2);
+        w.InDuty = true; Ticks(ex, w, 3);
+        w.InDuty = false;
+        Ticks(ex, w, 12);   // out, past the wrap-up settle, and judged
+    }
+
+    private static (StepExecutor, FakeStepWorld) Solo()
+    {
+        var w = new FakeStepWorld { PlayerPosition = Vector3.Zero };
+        w.Spawned.Add(Mistress);
+        w.QuestStates[KeyToVictory] = Before();
+        var ex = new StepExecutor(w);
+        ex.Begin(Step(StepKind.SinglePlayerDuty, dataId: Mistress), questId: KeyToVictory);
+        return (ex, w);
+    }
+
+    [Fact]
+    public void A_won_solo_duty_is_done_once_the_quest_shows_it()
+    {
+        var (ex, w) = Solo();
+        Ticks(ex, w, 3);
+        w.IsOccupied = true; Ticks(ex, w, 2); w.IsOccupied = false;
+        Ticks(ex, w, 2);
+        w.InDuty = true; Ticks(ex, w, 3);
+
+        w.QuestStates[KeyToVictory] = Won();
+        w.InDuty = false;
+        Ticks(ex, w, 20);
+
+        Assert.Equal(StepStatus.Done, ex.Status);
+        Assert.Equal(1, w.Calls.Count(c => c == $"Interact {Mistress}"));   // won first time: never re-entered
+    }
+
+    /// <summary>
+    /// The field report: a lost duty put the character back outside, the step called that done, and
+    /// the controller replayed the sequence from its top — for The Key to Victory, a walk into
+    /// another zone — with nobody watching. Coming out is not winning; the quest has to have moved.
+    /// </summary>
+    [Fact]
+    public void A_lost_solo_duty_is_tried_again_where_it_stands_not_marked_done()
+    {
+        var (ex, w) = Solo();
+        Lap(ex, w);                                   // lost: the quest did not move
+
+        Assert.Equal(StepStatus.Running, ex.Status);  // not "done", so the controller never replays the top
+        Ticks(ex, w, 4);
+        Assert.Equal(2, w.Calls.Count(c => c == $"Interact {Mistress}"));   // back to the same NPC
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("was lost") && c.Contains("1/2"));
+    }
+
+    /// <summary>
+    /// After the retries it stays put — it does not move off and it does not fault — until the duty
+    /// is won by hand, however long that takes. One client at a time can be watched; the rest wait.
+    /// </summary>
+    [Fact]
+    public void Lost_every_time_it_stays_put_says_so_once_and_carries_on_when_won_by_hand()
+    {
+        var (ex, w) = Solo();
+        for (var lap = 0; lap <= StepExecutor.MaxSoloRetries; lap++)
+            Lap(ex, w);
+
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.Equal(StepExecutor.MaxSoloRetries + 1, w.Calls.Count(c => c == $"Interact {Mistress}"));
+        Assert.Single(w.Calls.Where(c => c.StartsWith("Notify") && c.Contains("staying put")));
+
+        // A long wait holds — no fault, no wandering, no fourth attempt on its own.
+        Ticks(ex, w, 600);
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.Equal(StepExecutor.MaxSoloRetries + 1, w.Calls.Count(c => c == $"Interact {Mistress}"));
+
+        // The player runs it: in, won, out. The run carries on.
+        w.InDuty = true; Ticks(ex, w, 5);
+        w.QuestStates[KeyToVictory] = Won();
+        w.InDuty = false;
+        Ticks(ex, w, 10);
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    [Fact]
+    public void The_retry_difficulty_prompt_is_answered_normal()
+    {
+        var (ex, w) = Solo();
+        Ticks(ex, w, 3);
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("DifficultySelectYesNo");
+        Ticks(ex, w, 2);
+
+        Assert.Contains($"Difficulty {StepExecutor.SoloRetryDifficulty}", w.Calls);
+        Assert.Equal(0, StepExecutor.SoloRetryDifficulty);   // Normal: the one Questionable ships
+    }
+
+    /// <summary>
+    /// "Duty calls — begin?" is the step's own purpose. Held as an undeclared question, it would stop
+    /// every solo duty — and every retry — at the door.
+    /// </summary>
+    [Fact]
+    public void The_duty_calls_prompt_is_answered_yes_rather_than_held()
+    {
+        var (ex, w) = Solo();
+        Ticks(ex, w, 3);
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectYesno");
+        w.YesNoPromptText = "Duty calls! Commence the quest battle?";
+        Ticks(ex, w, 10);
+
+        Assert.Contains("YesNo True", w.Calls);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Notify"));
+    }
+
     [Fact]
     public void Solo_duty_that_never_loads_fails_with_a_reason()
     {

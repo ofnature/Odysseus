@@ -517,6 +517,15 @@ public interface IStepWorld
     /// <summary>What a visible yes/no dialog is asking, or empty when none is showing.</summary>
     string YesNoPrompt();
 
+    /// <summary>
+    /// Pick a difficulty in the prompt the game shows when a failed solo duty is tried again:
+    /// 0 Normal, 1 Easy, 2 Very Easy.
+    /// </summary>
+    void AnswerDifficulty(int difficulty);
+
+    /// <summary>Where a quest stands right now — sequence and variables — or unavailable when it is not in the journal.</summary>
+    Quest.QuestSnapshot QuestState(ushort questId);
+
     /// <summary>Picks an entry in a list dialog if one is showing.</summary>
     void SelectStringIndex(int index);
 
