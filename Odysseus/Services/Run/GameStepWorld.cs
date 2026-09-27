@@ -1770,25 +1770,6 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// no window is up, when it has no prompt node, or when reading it throws — a question we
     /// cannot quote is still a question we can report.
     /// </summary>
-    /// <summary>
-    /// The retry-difficulty prompt, answered the way Questionable answers it: callback
-    /// <c>[0, difficulty]</c>, with 0 Normal, 1 Easy, 2 Very Easy.
-    /// </summary>
-    public void AnswerDifficulty(int difficulty)
-    {
-        try
-        {
-            var addon = _gameGui.GetAddonByName("DifficultySelectYesNo");
-            if (addon.IsNull || !addon.IsVisible)
-                return;
-            FireCallback((AtkUnitBase*)addon.Address, false, 0, difficulty);
-        }
-        catch (Exception ex)
-        {
-            _log($"Answering the difficulty prompt failed: {ex.Message}");
-        }
-    }
-
     public Quest.QuestSnapshot QuestState(ushort questId) => _quests.Read(questId);
 
     public string YesNoPrompt()

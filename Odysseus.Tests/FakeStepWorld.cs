@@ -462,7 +462,6 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public void SelectYesNo(bool yes) => Calls.Add($"YesNo {yes}");
     public string YesNoPromptText { get; set; } = string.Empty;
     public string YesNoPrompt() => YesNoPromptText;
-    public void AnswerDifficulty(int difficulty) => Calls.Add($"Difficulty {difficulty}");
     public Dictionary<ushort, Odysseus.Services.Quest.QuestSnapshot> QuestStates { get; } = new();
     public Odysseus.Services.Quest.QuestSnapshot QuestState(ushort questId)
         => QuestStates.TryGetValue(questId, out var s) ? s : Odysseus.Services.Quest.QuestSnapshot.Unavailable;

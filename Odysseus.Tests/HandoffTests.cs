@@ -151,59 +151,63 @@ public class HandoffTests
     /// <summary>
     /// The field report: a lost duty put the character back outside, the step called that done, and
     /// the controller replayed the sequence from its top — for The Key to Victory, a walk into
-    /// another zone — with nobody watching. Coming out is not winning; the quest has to have moved.
+    /// another zone — with nobody watching. And there are no duty-AI modules for quest battles, so
+    /// trying again only loses again. One loss, and it stays put.
     /// </summary>
     [Fact]
-    public void A_lost_solo_duty_is_tried_again_where_it_stands_not_marked_done()
+    public void A_lost_solo_duty_stays_put_and_is_not_tried_again()
     {
         var (ex, w) = Solo();
         Lap(ex, w);                                   // lost: the quest did not move
 
         Assert.Equal(StepStatus.Running, ex.Status);  // not "done", so the controller never replays the top
-        Ticks(ex, w, 4);
-        Assert.Equal(2, w.Calls.Count(c => c == $"Interact {Mistress}"));   // back to the same NPC
-        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("was lost") && c.Contains("1/2"));
+        Ticks(ex, w, 600);                            // a long wait: no fault, no wandering, no second go
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.Equal(1, w.Calls.Count(c => c == $"Interact {Mistress}"));
+        Assert.Single(w.Calls.Where(c => c.StartsWith("Notify") && c.Contains("was lost") && c.Contains("staying put")));
     }
 
-    /// <summary>
-    /// After the retries it stays put — it does not move off and it does not fault — until the duty
-    /// is won by hand, however long that takes. One client at a time can be watched; the rest wait.
-    /// </summary>
     [Fact]
-    public void Lost_every_time_it_stays_put_says_so_once_and_carries_on_when_won_by_hand()
+    public void Won_by_hand_after_a_loss_the_run_carries_on()
     {
         var (ex, w) = Solo();
-        for (var lap = 0; lap <= StepExecutor.MaxSoloRetries; lap++)
-            Lap(ex, w);
-
+        Lap(ex, w);
         Assert.Equal(StepStatus.Running, ex.Status);
-        Assert.Equal(StepExecutor.MaxSoloRetries + 1, w.Calls.Count(c => c == $"Interact {Mistress}"));
-        Assert.Single(w.Calls.Where(c => c.StartsWith("Notify") && c.Contains("staying put")));
 
-        // A long wait holds — no fault, no wandering, no fourth attempt on its own.
-        Ticks(ex, w, 600);
-        Assert.Equal(StepStatus.Running, ex.Status);
-        Assert.Equal(StepExecutor.MaxSoloRetries + 1, w.Calls.Count(c => c == $"Interact {Mistress}"));
-
-        // The player runs it: in, won, out. The run carries on.
+        // The player runs it: in, won, out.
         w.InDuty = true; Ticks(ex, w, 5);
         w.QuestStates[KeyToVictory] = Won();
         w.InDuty = false;
         Ticks(ex, w, 10);
+
         Assert.Equal(StepStatus.Done, ex.Status);
+        Assert.Equal(1, w.Calls.Count(c => c == $"Interact {Mistress}"));   // the player went in, not us
     }
 
+    /// <summary>
+    /// The path data marks the quest battles known not to run unattended — 33 of 276. Going in only
+    /// spends an attempt that is certain to be lost; it waits at the entrance instead.
+    /// </summary>
     [Fact]
-    public void The_retry_difficulty_prompt_is_answered_normal()
+    public void A_duty_marked_not_runnable_waits_at_the_entrance_without_going_in()
     {
-        var (ex, w) = Solo();
-        Ticks(ex, w, 3);
-        w.IsOccupied = true;
-        w.VisibleAddons.Add("DifficultySelectYesNo");
-        Ticks(ex, w, 2);
+        var w = new FakeStepWorld { PlayerPosition = Vector3.Zero };
+        w.Spawned.Add(Mistress);
+        w.QuestStates[KeyToVictory] = Before();
+        var step = Step(StepKind.SinglePlayerDuty, dataId: Mistress);
+        step.DutyEnabled = false;
+        var ex = new StepExecutor(w);
+        ex.Begin(step, questId: KeyToVictory);
 
-        Assert.Contains($"Difficulty {StepExecutor.SoloRetryDifficulty}", w.Calls);
-        Assert.Equal(0, StepExecutor.SoloRetryDifficulty);   // Normal: the one Questionable ships
+        Ticks(ex, w, 40);
+
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Interact"));
+        Assert.Contains(w.Calls, c => c.StartsWith("Notify") && c.Contains("not runnable unattended"));
+
+        w.QuestStates[KeyToVictory] = Won();          // done by hand
+        Ticks(ex, w, 5);
+        Assert.Equal(StepStatus.Done, ex.Status);
     }
 
     /// <summary>

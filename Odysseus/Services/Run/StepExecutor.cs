@@ -271,15 +271,7 @@ public sealed class StepExecutor
     /// </summary>
     private static readonly TimeSpan SoloVerifySettle = TimeSpan.FromSeconds(4);
 
-    /// <summary>How many times a lost solo duty is tried again before the run stays and waits.</summary>
-    public const int MaxSoloRetries = 2;
 
-    /// <summary>
-    /// The difficulty a retry is answered with: 0, Normal. That is what Questionable ships — it has
-    /// Easy and Very Easy in its code and switched them off in its own settings — so it is the one
-    /// known to work through this prompt.
-    /// </summary>
-    public const int SoloRetryDifficulty = 0;
     private static readonly TimeSpan DutyMax = TimeSpan.FromMinutes(90);
     private static readonly TimeSpan ActionSettle = TimeSpan.FromSeconds(2);
     /// <summary>A purchase is a server round trip; leave a beat between rounds rather than spamming the handler.</summary>
@@ -307,12 +299,9 @@ public sealed class StepExecutor
     private bool _yesNoReported;
     private bool _yesNoAnswered;
 
-    // A solo duty's attempts outlive a retry of the same step — that is the point of counting them.
-    private int _soloFailures;
     private Quest.QuestSnapshot _soloProgressAtStart;
-    private bool _soloRetrying;
     private bool _soloHoldSaid;
-    private DateTime _lastDifficultyAnswer;
+    private string _soloHoldReason = string.Empty;
     private DateTime _lastDutyCallsYes;
     private DateTime _lastYesNoPress;
 
@@ -514,13 +503,9 @@ public sealed class StepExecutor
     /// </param>
     public void Begin(QuestStep step, bool skipTeleport = false, ushort questId = 0, bool groundOnly = false, bool dutyByHand = false)
     {
-        if (!(_soloRetrying && ReferenceEquals(step, _step)))
-        {
-            _soloFailures = 0;
-            _soloHoldSaid = false;
-            _soloProgressAtStart = step.Kind == StepKind.SinglePlayerDuty ? _world.QuestState(questId) : default;
-        }
-        _soloRetrying = false;
+        _soloHoldSaid = false;
+        _soloHoldReason = string.Empty;
+        _soloProgressAtStart = step.Kind == StepKind.SinglePlayerDuty ? _world.QuestState(questId) : default;
         _groundOnly = groundOnly;
         _step = step;
         _questId = questId;
@@ -986,14 +971,9 @@ public sealed class StepExecutor
                     Enter(Phase.WaitReady);
                     break;
                 }
-                _soloFailures++;
-                if (_soloFailures <= MaxSoloRetries)
-                {
-                    _world.Log($"The solo duty was lost — quest {_questId} did not move. Trying again "
-                        + $"({_soloFailures}/{MaxSoloRetries}), from right here rather than the top of the sequence.");
-                    RetrySoloDuty();
-                    break;
-                }
+                // Lost. Not tried again: neither duty AI has modules for quest battles, so a retry
+                // loses the same way — a chain of failures with nobody watching. It waits instead.
+                _soloHoldReason = "the solo duty was lost";
                 Enter(Phase.SoloDutyHold);
                 break;
 
@@ -1001,10 +981,9 @@ public sealed class StepExecutor
                 if (!_soloHoldSaid)
                 {
                     _soloHoldSaid = true;
-                    var tries = MaxSoloRetries + 1;
-                    _world.Log($"The solo duty for quest {_questId} was lost {tries} times. Staying here rather than "
-                        + "moving on — run it yourself and the quest carries on from where it is.");
-                    _world.Notify($"Odysseus: the solo duty was lost {tries} times — staying put. Run it yourself and the run carries on.");
+                    _world.Log($"Quest {_questId}: {_soloHoldReason}. Staying here rather than moving on — "
+                        + "run it yourself and the quest carries on from where it is.");
+                    _world.Notify($"Odysseus: {_soloHoldReason} — staying put. Run it yourself and the run carries on.");
                 }
                 if (_world.InDuty)
                 {
@@ -1487,6 +1466,14 @@ public sealed class StepExecutor
                 {
                     CommandAi(true);
                     return Phase.SoloDutyRun; // already inside (resumed mid-instance)
+                }
+                // The path data marks the quest battles known not to run unattended — 33 of the
+                // 276 in the library. Going in anyway only spends an attempt that is certain to be
+                // lost; waiting at the entrance is the same outcome without the wasted fight.
+                if (step.DutyEnabled == false)
+                {
+                    _soloHoldReason = "this solo duty is marked as not runnable unattended";
+                    return Phase.SoloDutyHold;
                 }
                 return step.DataId is not null ? Phase.Interact : Phase.SoloDutyEnter;
 
@@ -3014,21 +3001,6 @@ public sealed class StepExecutor
         // Answering it blind is not the fix: a yes/no is how a run takes up a class or a first DoH
         // quest it was never asked to take. So the question is repeated to the player, by name, and
         // the clock stops while it stands.
-        // A lost solo duty offers its difficulty again when the NPC is spoken to. Unanswered, the
-        // retry stands at the door for good.
-        if (step.Kind == StepKind.SinglePlayerDuty && _world.IsAddonVisible("DifficultySelectYesNo"))
-        {
-            if (now - _lastDifficultyAnswer > TimeSpan.FromSeconds(1.5))
-            {
-                _lastDifficultyAnswer = now;
-                _world.AnswerDifficulty(SoloRetryDifficulty);
-                _world.Log("Answering the solo duty's difficulty prompt: Normal.");
-            }
-            _sawOccupied = true;
-            _phaseStart = now;
-            return;
-        }
-
         if (_world.IsAddonVisible("SelectYesno"))
         {
             if (TryAnswerYesNo(step, now))
@@ -3036,7 +3008,7 @@ public sealed class StepExecutor
 
             // "Duty calls — begin?" is the step's whole purpose, the way the offer window is an
             // AcceptQuest step's: Questionable answers it Yes for the same reason. Without this the
-            // undeclared-question hold would stop every solo duty, and every retry, at the door.
+            // undeclared-question hold would stop every solo duty at the door.
             if (step.Kind == StepKind.SinglePlayerDuty)
             {
                 if (now - _lastDutyCallsYes > TimeSpan.FromSeconds(1.5))
@@ -3374,16 +3346,6 @@ public sealed class StepExecutor
         return !now.IsAvailable
                || now.Sequence != before.Sequence
                || !now.Variables.Span.SequenceEqual(before.Variables.Span);
-    }
-
-    /// <summary>
-    /// Go again, from right here: the same step begun afresh — walk back to the NPC if the game
-    /// put us down somewhere else, talk, answer the prompts, go in — with the attempt count kept.
-    /// </summary>
-    private void RetrySoloDuty()
-    {
-        _soloRetrying = true;
-        Begin(_step!, _skipTeleport, _questId, _groundOnly, _dutyByHand);
     }
 
     private bool TryAnswerYesNo(QuestStep step, DateTime now)

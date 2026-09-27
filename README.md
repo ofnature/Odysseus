@@ -201,7 +201,7 @@ an **Unlock** button that queues the whole prerequisite chain.
 
 | Option | Default | What it does |
 |---|---|---|
-| **Hand solo duties to the duty AI** | on | off = stop at the entrance. A lost duty is tried again where it stands (twice, on Normal), then the run stays put until you win it — it never walks off |
+| **Hand solo duties to the duty AI** | on | off = stop at the entrance. A lost duty is not retried — there are no quest-battle modules, so it would only lose again — and the run stays put until you win it; it never walks off. Duties the path data marks as not runnable unattended wait at the entrance without going in |
 | **Duty AI** | BossMod Reborn | or Minerva, claimed for the fight and handed back after |
 | **Hand dungeons to Theseus** | on | off = stop at the entrance. 8-player trials always stop |
 
