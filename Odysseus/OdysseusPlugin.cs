@@ -178,8 +178,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             id => _catalog.ById(id)?.NeedsGatherer ?? false,
             _derived,
             // A pick-up is optional unless the story needs it, or something on the priority list
-            // does — followed back through the sheet's own prerequisite links.
-            id => _catalog.StoryNeeds(id) || _priority.Contains(id) || _catalog.PrerequisitesOf(_priority.Ids).Contains(id));
+            // does — followed back through the sheet's own prerequisite links. The list is built a
+            // few lines below; this only runs once the plugin is up.
+            id => _catalog.StoryNeeds(id) || _priority!.Contains(id) || _catalog.PrerequisitesOf(_priority!.Ids).Contains(id));
 
         // Priority list: saved in config only while the persist toggle is on.
         _priority = new PriorityList(_catalog, _config.PriorityQuests, _config.PersistPriorityList, ids =>
@@ -303,7 +304,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                   || _gatherLists.State == Services.Gathering.GatherListRunState.Running
                   || _tribeRunner.State is not (Services.Tribes.TribeRunState.Idle or Services.Tribes.TribeRunState.Done
                       or Services.Tribes.TribeRunState.Faulted)
-                  || !_deliveryRunner.IsFinished,
+                  || !_deliveryRunner!.IsFinished,   // built just below; only asked once the plugin is up
             message => Say(message));
 
         _deliveryRunner = new Services.Deliveries.DeliveryRunner(
