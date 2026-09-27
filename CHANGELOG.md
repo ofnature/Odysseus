@@ -1,7 +1,9 @@
 # Changelog
 
 <!-- LATEST-START -->
-## v0.2.9 — unreleased
+## v0.2.9 — 2026-09-26
+
+Quests that want an item used on a weakened mob now use it, the shipped path library is rebuilt with 84 more quests, and a toon with Daedalus switched off keeps its target.
 
 ### Quest fights
 - A combat step no longer pulls while Daedalus is switched off: nobody would fight, and every pull re-targeted the nearest mob, so a toon with Daedalus off could not keep anything targeted. The step waits, says so once, and carries on when Daedalus is turned back on (needs Daedalus v0.1.87)
