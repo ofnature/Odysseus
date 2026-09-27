@@ -272,6 +272,19 @@ public static class QuestionableImporter
             }
         }
 
+        if (e.TryGetProperty("CombatItemUse", out var use) && use.ValueKind == JsonValueKind.Object
+            && U32(use, "ItemId") is { } useItem)
+        {
+            var condition = Str(use, "Condition") switch
+            {
+                "Health%" => CombatItemCondition.HealthPercent,
+                "Incapacitated" => CombatItemCondition.Incapacitated,
+                "MissingStatus" => CombatItemCondition.MissingStatus,
+                _ => CombatItemCondition.Unknown,
+            };
+            step.CombatItemUse = new CombatItemUse(useItem, condition, I32(use, "Value") ?? 0);
+        }
+
         foreach (var optionsName in new[] { "DutyOptions", "SinglePlayerDutyOptions" })
         {
             if (!e.TryGetProperty(optionsName, out var opts) || opts.ValueKind != JsonValueKind.Object)

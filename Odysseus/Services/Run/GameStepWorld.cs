@@ -1774,6 +1774,35 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// </summary>
     public Quest.QuestSnapshot QuestState(ushort questId) => _quests.Read(questId);
 
+    /// <summary>
+    /// The target's health, whether it is down on one knee, and its statuses. The knee is
+    /// <c>ActorControlFlags &amp; 0x40</c> — the same bit Questionable reads for "Incapacitated".
+    /// </summary>
+    public CombatTargetReading? CombatTarget(IReadOnlyCollection<uint> dataIds)
+    {
+        try
+        {
+            if (_targets.Target is not IBattleNpc npc || npc.IsDead)
+                return null;
+            if (dataIds.Count > 0 && !dataIds.Contains(npc.BaseId))
+                return null;
+            var health = npc.MaxHp == 0 ? 100f : 100f * npc.CurrentHp / npc.MaxHp;
+            var chara = (FFXIVClientStructs.FFXIV.Client.Game.Character.BattleChara*)npc.Address;
+            var incapacitated = chara != null && ((byte)chara->ActorControlFlags & 0x40) != 0;
+            var statuses = new List<uint>();
+            foreach (var status in npc.StatusList)
+                if (status.StatusId != 0)
+                    statuses.Add(status.StatusId);
+            return new CombatTargetReading(npc.BaseId, health, incapacitated, statuses);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public void HoldCombatActions(bool hold) => _daedalus.HoldActions(hold);
+
     public string YesNoPrompt()
     {
         try

@@ -466,6 +466,15 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Dictionary<ushort, Odysseus.Services.Quest.QuestSnapshot> QuestStates { get; } = new();
     public Odysseus.Services.Quest.QuestSnapshot QuestState(ushort questId)
         => QuestStates.TryGetValue(questId, out var s) ? s : Odysseus.Services.Quest.QuestSnapshot.Unavailable;
+    public CombatTargetReading? Target { get; set; }
+    public CombatTargetReading? CombatTarget(IReadOnlyCollection<uint> dataIds)
+        => Target is { } t && (dataIds.Count == 0 || dataIds.Contains(t.DataId)) ? t : null;
+    public bool ActionsHeld { get; private set; }
+    public void HoldCombatActions(bool hold)
+    {
+        if (hold != ActionsHeld) Calls.Add($"Hold {hold}");
+        ActionsHeld = hold;
+    }
     public void SelectStringIndex(int index) => Calls.Add($"Select {index}");
     public bool RewardCompleteEnabled { get; set; } = true;
     public bool CompleteQuestRewardWindow()

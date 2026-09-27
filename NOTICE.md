@@ -53,8 +53,9 @@ Odysseus imports from an AGPL-licensed Questionable only; see the table above.
 
 **From v0.2.1 the converted path library ships** as `Assets/paths.pak`, under AGPL-3.0 with this
 notice. It is built for each release from the bundle an installed **PunishXIV/Questionable** (AGPL)
-downloaded — for v0.2.1, bundle `1787426647`, generated 2026-08-22T19:25:29Z, 4,239 quests — and
-converted with the importer in that release. The WigglyMuffin build's bundle is never used, for the
+downloaded — currently bundle `1789898831`, generated 2026-09-20T10:08:25Z, 4,324 quests (v0.2.1
+shipped bundle `1787426647`, generated 2026-08-22T19:25:29Z, 4,239 quests) — and converted with
+the importer in that release. The WigglyMuffin build's bundle is never used, for the
 reason in the table above. The importer logs the bundle id it read, so this stays checkable.
 
 History: v0.1.1 (2026-08-20) shipped the pack while Odysseus was still LGPL-3.0 and carried no

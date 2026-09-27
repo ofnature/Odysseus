@@ -1501,4 +1501,20 @@ public class ItemRefusalTests
         Assert.Contains(w.Calls, c => c == "UseItem 2001288");
         Assert.Equal(StepStatus.Done, ex.Status);
     }
+
+    /// <summary>
+    /// New upstream on Rock the Castrum (3873), which ran without it before: passed, and said,
+    /// rather than stopping the main story on a verb this build had never seen.
+    /// </summary>
+    [Fact]
+    public void A_journal_clean_up_step_is_passed_without_touching_the_journal()
+    {
+        var world = new FakeStepWorld();
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.CleanUpOtherQuests, KindName = "CleanUpOtherQuests", TerritoryId = 147 });
+        for (var i = 0; i < 10 && ex.Status == StepStatus.Running; i++) { ex.Tick(); world.Advance(0.5); }
+        Assert.Equal(StepStatus.Done, ex.Status);
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("leaves your journal"));
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Move") || c.StartsWith("Teleport"));
+    }
 }

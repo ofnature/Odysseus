@@ -314,6 +314,17 @@ public sealed class StepExecutor
     private DateTime _settledSince;
     private bool _settleWaived;
 
+    /// <summary>How often a quest item is tried again while its target is still ready for it.</summary>
+    private static readonly TimeSpan CombatItemRetry = TimeSpan.FromSeconds(2);
+
+    /// <summary>How often the hold on Daedalus is renewed — well inside its lease.</summary>
+    private static readonly TimeSpan CombatHoldRenew = TimeSpan.FromSeconds(1);
+
+    private DateTime _combatItemUsedAt;
+    private DateTime _combatHoldAsserted;
+    private bool _combatHoldOn;
+    private bool _combatItemUnknownSaid;
+
     private Quest.QuestSnapshot _soloProgressAtStart;
     private bool _soloHoldSaid;
     private string _soloHoldReason = string.Empty;
@@ -524,6 +535,9 @@ public sealed class StepExecutor
         _soloHoldReason = string.Empty;
         _settledSince = default;
         _settleWaived = false;
+        ReleaseCombatHold();
+        _combatItemUsedAt = default;
+        _combatItemUnknownSaid = false;
         _soloProgressAtStart = step.Kind == StepKind.SinglePlayerDuty ? _world.QuestState(questId) : default;
         _groundOnly = groundOnly;
         _step = step;
@@ -629,6 +643,7 @@ public sealed class StepExecutor
             _ownGatherAsked = false;
         }
         _world.ReleaseDialogue();
+        ReleaseCombatHold();
         _step = null;
         _phase = Phase.None;
         Status = StepStatus.Idle;
@@ -642,7 +657,8 @@ public sealed class StepExecutor
         or StepKind.WaitForNpcAtPosition
         or StepKind.EquipRecommended or StepKind.Action or StepKind.Instruction or StepKind.StatusOff
         or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Craft or StepKind.Gather
-        or StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset or StepKind.Dive;
+        or StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset or StepKind.Dive
+        or StepKind.CleanUpOtherQuests;
 
     /// <summary>The step hands the character to another plugin for a whole instance.</summary>
     public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
@@ -674,7 +690,8 @@ public sealed class StepExecutor
 
     public static bool IsPlaceless(StepKind kind) => kind is
         StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset or StepKind.SwitchClass
-        or StepKind.Craft or StepKind.EquipRecommended or StepKind.Instruction or StepKind.StatusOff;
+        or StepKind.Craft or StepKind.EquipRecommended or StepKind.Instruction or StepKind.StatusOff
+        or StepKind.CleanUpOtherQuests;
 
     /// <summary>
     /// Why a step cannot run — and the two reasons are not the same reason.
@@ -1167,6 +1184,7 @@ public sealed class StepExecutor
 
             case Phase.Finish:
                 _world.ReleaseDialogue();
+                ReleaseCombatHold();
                 Status = StepStatus.Done;
                 break;
         }
@@ -1485,6 +1503,13 @@ public sealed class StepExecutor
                 return Phase.Instruction;
 
             case StepKind.Instruction or StepKind.StatusOff:
+                return Phase.Finish;
+
+            // Questionable's journal clean-up before a duty. Abandoning quests on the player's
+            // behalf is not something to do on a guess about why the step exists, and Rock the
+            // Castrum ran without it before upstream added it — so it is passed, and said.
+            case StepKind.CleanUpOtherQuests:
+                _world.Log("This step is Questionable clearing other quests out of the journal. Odysseus leaves your journal as it is and carries on.");
                 return Phase.Finish;
 
             case StepKind.Dive:
@@ -3557,10 +3582,103 @@ public sealed class StepExecutor
         return -1;
     }
 
+    /// <summary>
+    /// A quest item to use on the mob once it is ready for it — "weaken it, then use the net".
+    ///
+    /// <para>
+    /// Daedalus does the fighting, and at level 100 one GCD kills a level-65 mob from full: for a
+    /// health threshold the mob never sits below it long enough to take the item. So for the kinds
+    /// where it can die first — a health threshold, a missing status — Daedalus is asked to hold its
+    /// actions for the whole fight. Auto-attack is the game's and keeps swinging, a few percent a hit,
+    /// which is exactly the controlled damage the quest wants. An incapacitated mob cannot die, so
+    /// there Daedalus fights freely and is held only while the item goes on.
+    /// </para>
+    ///
+    /// <para>
+    /// The hold is a lease on Daedalus's side, so it is renewed here every second while wanted and
+    /// simply lapses if Odysseus stops asking — a crash cannot leave the character standing idle.
+    /// </para>
+    /// </summary>
+    /// <returns>True when this tick was spent on the item and nothing else should happen.</returns>
+    private bool TickCombatItem(CombatItemUse use, System.Collections.Generic.IReadOnlyCollection<uint> enemies, DateTime now)
+    {
+        if (use.Condition == CombatItemCondition.Unknown)
+        {
+            if (!_combatItemUnknownSaid)
+            {
+                _combatItemUnknownSaid = true;
+                _world.Log($"This step wants item {use.ItemId} used on the mob under a condition this build does not know — fighting it as an ordinary fight.");
+            }
+            return false;
+        }
+
+        var target = _world.CombatTarget(enemies);
+        var ready = target is { } t && CombatItemReady(use, t);
+        var holdAllFight = use.Condition is CombatItemCondition.HealthPercent or CombatItemCondition.MissingStatus;
+        SetCombatHold(holdAllFight || ready, now);
+
+        // Held, in a fight, and not facing the mob the item is for: nobody else will pick it up —
+        // Daedalus is holding — so engage it, and auto-attack takes it from there.
+        if (holdAllFight && target is null && _world.InCombat)
+        {
+            _world.AttackNearestEnemy(enemies, CombatSearchRadius);
+            return true;
+        }
+
+        if (!ready || now - _combatItemUsedAt < CombatItemRetry || _world.IsTravelBusy)
+            return false;
+
+        _combatItemUsedAt = now;
+        _world.Log(use.Condition switch
+        {
+            CombatItemCondition.HealthPercent => $"The mob is at {target!.HealthPercent:F0}% — under {use.Value}%; using item {use.ItemId} on it.",
+            CombatItemCondition.Incapacitated => $"The mob is down on one knee; using item {use.ItemId} on it.",
+            _ => $"The mob no longer has status {use.Value}; using item {use.ItemId} on it.",
+        });
+        _world.UseItem(use.ItemId);
+        return true;
+    }
+
+    /// <summary>Whether the mob is ready for the item. Pure, so the three conditions are pinned by tests.</summary>
+    internal static bool CombatItemReady(CombatItemUse use, CombatTargetReading target) => use.Condition switch
+    {
+        CombatItemCondition.HealthPercent => target.HealthPercent < use.Value,
+        CombatItemCondition.Incapacitated => target.Incapacitated,
+        CombatItemCondition.MissingStatus => !System.Linq.Enumerable.Contains(target.StatusIds, (uint)use.Value),
+        _ => false,
+    };
+
+    private void SetCombatHold(bool hold, DateTime now)
+    {
+        if (!hold)
+        {
+            ReleaseCombatHold();
+            return;
+        }
+        if (_combatHoldOn && now - _combatHoldAsserted < CombatHoldRenew)
+            return;
+        if (!_combatHoldOn)
+            _world.Log("Holding Daedalus's actions for this fight — auto-attack will bring the mob down for the item.");
+        _world.HoldCombatActions(true);
+        _combatHoldOn = true;
+        _combatHoldAsserted = now;
+    }
+
+    private void ReleaseCombatHold()
+    {
+        if (!_combatHoldOn)
+            return;
+        _world.HoldCombatActions(false);
+        _combatHoldOn = false;
+    }
+
     private void TickCombat(QuestStep step, DateTime now)
     {
         CommandAi(true);
         var enemies = (System.Collections.Generic.IReadOnlyCollection<uint>?)step.KillEnemyDataIds ?? Array.Empty<uint>();
+
+        if (step.CombatItemUse is { } use && TickCombatItem(use, enemies, now))
+            return;
 
         if (_world.InCombat)
         {
@@ -3675,6 +3793,7 @@ public sealed class StepExecutor
     {
         _world.StopMoving();
         _world.ReleaseDialogue();
+        ReleaseCombatHold();
         FailReason = reason;
         Status = StepStatus.Failed;
         return Status;

@@ -12,12 +12,17 @@ public sealed class DaedalusIpc
 {
     private const string RecordExternalWriteGate = "Daedalus.Targeting.RecordExternalWrite";
     private const string IsDisabledByUserGate = "Daedalus.IsDisabledByUser";
+    private const string HoldActionsGate = "Daedalus.HoldActions";
+
+    /// <summary>What Odysseus calls itself when it holds Daedalus's actions.</summary>
+    public const string HoldOwner = "odysseus";
 
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly Action<string>? _logDegraded;
 
     private ICallGateSubscriber<ulong, object>? _recordExternalWrite;
     private ICallGateSubscriber<bool>? _isDisabledByUser;
+    private ICallGateSubscriber<string, bool, bool>? _holdActions;
     private bool _warnedMissing;
 
     public DaedalusIpc(IDalamudPluginInterface pluginInterface, Action<string>? logDegraded = null)
@@ -71,6 +76,26 @@ public sealed class DaedalusIpc
         {
             _isDisabledByUser ??= _pluginInterface.GetIpcSubscriber<bool>(IsDisabledByUserGate);
             return _isDisabledByUser.InvokeFunc();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Hold every action Daedalus would submit, or let it go — for a quest item that has to go on a
+    /// mob before Daedalus kills it. Auto-attack is the game's and keeps swinging, which is the
+    /// controlled damage wanted. Daedalus treats the hold as a lease that lapses a few seconds after
+    /// the last call, so a crashed Odysseus cannot leave the character idle. False when Daedalus is
+    /// missing, too old to have the gate, or another plugin already holds it.
+    /// </summary>
+    public bool HoldActions(bool hold)
+    {
+        try
+        {
+            _holdActions ??= _pluginInterface.GetIpcSubscriber<string, bool, bool>(HoldActionsGate);
+            return _holdActions.InvokeFunc(HoldOwner, hold);
         }
         catch
         {

@@ -48,6 +48,12 @@ public enum StepKind
     RegisterFreeOrFavoredAetheryte,
     WaitForManualProgress,
     StatusOff,
+    /// <summary>
+    /// New upstream in the 2026-09-20 bundle, on one step of Rock the Castrum (3873), with no
+    /// parameters. Presumably Questionable abandoning other quests before Castrum Meridianum;
+    /// Odysseus leaves the journal alone and carries on, as it did before the step existed.
+    /// </summary>
+    CleanUpOtherQuests,
 }
 
 /// <summary>How the enemies for a <see cref="StepKind.Combat"/> step come to exist.</summary>
@@ -69,6 +75,27 @@ public enum EnemySpawnType
     /// <summary>Combat is optional: kill what is already here or on us, and skip cleanly when nothing is.</summary>
     FinishCombatIfAny,
 }
+
+/// <summary>When, during a fight, a quest item goes on the target.</summary>
+public enum CombatItemCondition
+{
+    /// <summary>A condition this build does not know: the fight runs as an ordinary one.</summary>
+    Unknown,
+    /// <summary>Below <see cref="CombatItemUse.Value"/> percent health — and the mob can still die first.</summary>
+    HealthPercent,
+    /// <summary>The mob has gone down on one knee: the game will not let it die, so there is no race.</summary>
+    Incapacitated,
+    /// <summary>The mob lacks the status <see cref="CombatItemUse.Value"/>.</summary>
+    MissingStatus,
+}
+
+/// <summary>
+/// A quest item used on the mob being fought, once it is ready for it — "weaken it, then use the
+/// net". Questionable's <c>CombatItemUse</c>: 60 steps across 34 quests in the bundle, dropped by the
+/// converter until 2026-09-26, which left Are They Ill-tempered (2883) killing the mob it was meant
+/// to catch.
+/// </summary>
+public sealed record CombatItemUse(uint ItemId, CombatItemCondition Condition, int Value);
 
 /// <summary>A dialogue answer the step needs. Prompts and answers are the game's own text keys, never display text.</summary>
 public sealed record DialogueChoice(string Type, string? Prompt, string? Answer, bool? Yes);
@@ -217,6 +244,9 @@ public sealed class QuestStep
     public SkipConditions? SkipConditions { get; set; }
     public EnemySpawnType? EnemySpawnType { get; set; }
     public List<uint>? KillEnemyDataIds { get; set; }
+
+    /// <summary>A quest item to use on the mob once it is ready for it. See <see cref="Paths.CombatItemUse"/>.</summary>
+    public CombatItemUse? CombatItemUse { get; set; }
     public int? MinimumKillCount { get; set; }
     public ushort? PickUpQuestId { get; set; }
     public uint? AetherCurrentId { get; set; }
@@ -319,7 +349,12 @@ public sealed class QuestPath
     /// ground; a stored path without the flag interacts with the air over the mark.
     /// </para>
     /// </summary>
-    public const int CurrentFormatVersion = 4;
+    ///
+    /// <para>
+    /// 4 → 5 (2026-09-26): <c>CombatItemUse</c> on Combat steps. Without it a "weaken it, then use the
+    /// item" step simply killed the mob.
+    /// </para>
+    public const int CurrentFormatVersion = 5;
 
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     public ushort QuestId { get; set; }
@@ -389,7 +424,7 @@ public sealed class QuestPath
             foreach (var step in sequence.Steps)
             {
                 if (step.Kind is StepKind.Craft or StepKind.Gather or StepKind.Fish
-                    or StepKind.PurchaseItem or StepKind.SwitchClass)
+                    or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Combat)
                     return true;
                 if (step.Kind == StepKind.Unknown && step.KindName is { Length: > 0 } named
                     && Enum.TryParse<StepKind>(named, ignoreCase: false, out _))

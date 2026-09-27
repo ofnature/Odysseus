@@ -527,6 +527,15 @@ public interface IStepWorld
     /// <summary>Where a quest stands right now — sequence and variables — or unavailable when it is not in the journal.</summary>
     Quest.QuestSnapshot QuestState(ushort questId);
 
+    /// <summary>The current target, when it is alive and one of <paramref name="dataIds"/> (any, when empty).</summary>
+    CombatTargetReading? CombatTarget(System.Collections.Generic.IReadOnlyCollection<uint> dataIds);
+
+    /// <summary>
+    /// Ask the rotation (Daedalus) to hold every action, or let it go. A lease on Daedalus's side:
+    /// it lapses a few seconds after the last hold, so it is asserted again while it is wanted.
+    /// </summary>
+    void HoldCombatActions(bool hold);
+
     /// <summary>Picks an entry in a list dialog if one is showing.</summary>
     void SelectStringIndex(int index);
 
@@ -593,3 +602,8 @@ public interface IStepWorld
     /// </summary>
     void Notify(string message);
 }
+
+/// <summary>What a combat item waits on: how the mob being fought is doing.</summary>
+/// <param name="Incapacitated">Down on one knee — the game's own "ready for the item", when it will not let the mob die.</param>
+public sealed record CombatTargetReading(
+    uint DataId, float HealthPercent, bool Incapacitated, System.Collections.Generic.IReadOnlyCollection<uint> StatusIds);

@@ -5,7 +5,13 @@
 
 ### Quest fights
 - A combat step no longer pulls while Daedalus is switched off: nobody would fight, and every pull re-targeted the nearest mob, so a toon with Daedalus off could not keep anything targeted. The step waits, says so once, and carries on when Daedalus is turned back on (needs Daedalus v0.1.87)
+- Quests that want an item used on a weakened mob use it: 34 quests, among them Are They Ill-tempered (2883). For "below X% health", Daedalus is held for the fight so auto-attack brings the mob down slowly and the item goes on under the line; for a mob down on one knee, Daedalus fights normally and pauses only while the item goes on. Without Daedalus v0.1.87 the item still goes on when the mob is ready, but Daedalus may kill it first
+
+### Path library
+- Rebuilt from Questionable bundle 1789898831 (2026-09-20): 4,324 quests, 84 more, including full paths for Strangers in the Wood (5490) and The Wilds Call (5491). Paths you imported with an older build step aside for the shipped copy — no re-import needed
+- Rock the Castrum (3873) gained a new step upstream that asks to clear other quests from the journal. Odysseus passes it and leaves your journal alone instead of stopping the main story there
 <!-- LATEST-END -->
+
 ## v0.2.8 — 2026-09-26
 
 TextAdvance no longer blocks Start, quests nobody recorded can run, and a run that meets something it cannot do stays where it is and says so instead of wandering off.
