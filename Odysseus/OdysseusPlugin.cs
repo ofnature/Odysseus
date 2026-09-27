@@ -176,7 +176,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             id => _catalog.ById(id)?.NeedsHandOrLand ?? false,
             id => _catalog.ById(id)?.NeedsCombat ?? false,
             id => _catalog.ById(id)?.NeedsGatherer ?? false,
-            _derived);
+            _derived,
+            // A pick-up is optional unless the story needs it, or something on the priority list
+            // does — followed back through the sheet's own prerequisite links.
+            id => _catalog.StoryNeeds(id) || _priority.Contains(id) || _catalog.PrerequisitesOf(_priority.Ids).Contains(id));
 
         // Priority list: saved in config only while the persist toggle is on.
         _priority = new PriorityList(_catalog, _config.PriorityQuests, _config.PersistPriorityList, ids =>

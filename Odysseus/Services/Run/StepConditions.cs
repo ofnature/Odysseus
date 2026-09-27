@@ -92,8 +92,7 @@ public static class StepConditions
     public static bool ShouldSkipStep(QuestStep step, IConditionWorld world, QuestSnapshot quest)
         => PickUpAlreadyTaken(step, world) || Holds(step.SkipConditions?.StepIf, world, quest, step);
 
-    private static bool PickUpAlreadyTaken(QuestStep step, IConditionWorld world)
-        => step.PickUpQuestId is { } pick && (world.IsQuestAccepted(pick) || world.IsQuestComplete(pick));
+    private static bool PickUpAlreadyTaken(QuestStep step, IConditionWorld world) => OptionalPickups.Taken(step, world);
 
     /// <summary>The step's aetheryte teleport should be skipped (already nearby, etc.).</summary>
     public static bool ShouldSkipAetheryte(QuestStep step, IConditionWorld world, QuestSnapshot quest)

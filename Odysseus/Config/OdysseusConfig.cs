@@ -62,6 +62,13 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     public bool AcceptRewardOvercap { get; set; } = true;
 
     /// <summary>
+    /// Leave the side quests a path picks up on the way — The Key to Victory's detour into The Peaks
+    /// for two of them — unless the story or the priority list needs one. Off by default: the
+    /// paths were written to collect them, and a later side chain may be glad of them.
+    /// </summary>
+    public bool SkipOptionalPickups { get; set; }
+
+    /// <summary>
     /// Run a quest with no recorded path off the game's own journal data — where the quest giver
     /// stands, where each objective points, and who takes it back. It walks, talks and interacts
     /// and nothing else; a quest that wants an emote, an item or a duty stops and says so.

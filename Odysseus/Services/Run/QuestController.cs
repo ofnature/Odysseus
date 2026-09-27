@@ -35,6 +35,9 @@ public interface IRunPolicy
     int StopAtLevel { get; }
     /// <summary>Ask before picking a quest up mid-way rather than just doing it.</summary>
     bool ConfirmBeforeResume { get; }
+
+    /// <summary>Leave the side quests a path picks up on the way, when nothing ahead needs them.</summary>
+    bool SkipOptionalPickups => false;
 }
 
 public sealed class QuestController
@@ -67,6 +70,9 @@ public sealed class QuestController
     /// Asked only when the store has nothing; null when the setting is off.
     /// </summary>
     private readonly Quest.DerivedPaths? _derived;
+
+    /// <summary>Whether a quest is on the chain the run is working towards — the story, or the priority list.</summary>
+    private readonly Func<ushort, bool> _pickupNeeded;
     private readonly StepExecutor _executor;
     private readonly IStepWorld _world;
     private readonly IConditionWorld _conditions;
@@ -130,9 +136,12 @@ public sealed class QuestController
         IStepWorld world, IConditionWorld conditions, IRunPolicy policy,
         Func<ushort, ushort?> nextQuest, Func<ushort, int> questLevel, IStepLog stepLog, Action<string> log,
         PurchasePlan.IngredientsOf? ingredientsOf = null, Func<ushort, bool>? needsHandOrLand = null, Func<ushort, bool>? needsCombat = null,
-        Func<ushort, bool>? needsGatherer = null, Quest.DerivedPaths? derived = null)
+        Func<ushort, bool>? needsGatherer = null, Quest.DerivedPaths? derived = null,
+        Func<ushort, bool>? pickupNeeded = null)
     {
         _derived = derived;
+        // Unknown means needed: without the chain to consult, no pick-up is called optional.
+        _pickupNeeded = pickupNeeded ?? (_ => true);
         _needsHandOrLand = needsHandOrLand ?? (_ => false);
         _needsCombat = needsCombat ?? (_ => false);
         _needsGatherer = needsGatherer ?? (_ => false);
@@ -593,6 +602,22 @@ public sealed class QuestController
                 _log($"Skip step {_stepIndex} ({step}) — condition holds.");
                 _stepStarted = _world.UtcNow;
                 LogStep(step, "Skipped", "condition holds");
+                _stepIndex++;
+                return;
+            }
+            if (OptionalPickups.Dropped(step, Conditions, _policy.SkipOptionalPickups, _pickupNeeded))
+            {
+                _log($"Skip step {_stepIndex} ({step}) — picking up quest {step.PickUpQuestId} is optional and nothing ahead needs it.");
+                _stepStarted = _world.UtcNow;
+                LogStep(step, "Skipped", "optional side-quest pick-up");
+                _stepIndex++;
+                return;
+            }
+            if (OptionalPickups.LeadsOnlyToDropped(_block.Steps, _stepIndex, Conditions, _policy.SkipOptionalPickups, _pickupNeeded))
+            {
+                _log($"Skip step {_stepIndex} ({step}) — it only leads to pick-ups this run is leaving.");
+                _stepStarted = _world.UtcNow;
+                LogStep(step, "Skipped", "leads only to skipped pick-ups");
                 _stepIndex++;
                 return;
             }

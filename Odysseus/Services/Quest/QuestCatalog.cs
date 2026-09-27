@@ -383,6 +383,42 @@ public sealed class QuestCatalog
         return best;
     }
 
+    /// <summary>
+    /// Every quest the goals need done first, however far back — the sheet's own
+    /// <c>PreviousQuest</c> links, followed to the end. Not the goals themselves.
+    /// </summary>
+    public HashSet<ushort> PrerequisitesOf(IEnumerable<ushort> goals)
+    {
+        var found = new HashSet<ushort>();
+        var pending = new Stack<ushort>(goals);
+        while (pending.Count > 0)
+        {
+            if (ById(pending.Pop()) is not { } listing)
+                continue;
+            foreach (var previous in listing.Previous)
+                if (previous != 0 && found.Add(previous))
+                    pending.Push(previous);
+        }
+        return found;
+    }
+
+    private HashSet<ushort>? _story;
+
+    /// <summary>
+    /// Whether a quest is on the story's chain: an MSQ quest itself, or something one needs done
+    /// first. Built once — the story does not change while the game is running.
+    /// </summary>
+    public bool StoryNeeds(ushort questId)
+    {
+        if (_story is null)
+        {
+            var msq = _byId.Values.Where(q => q.IsMainScenario).Select(q => q.QuestId).ToList();
+            _story = PrerequisitesOf(msq);
+            _story.UnionWith(msq);
+        }
+        return _story.Contains(questId);
+    }
+
     public QuestListing? ById(ushort questId)
         => _byId.TryGetValue(questId, out var listing) ? listing : null;
 

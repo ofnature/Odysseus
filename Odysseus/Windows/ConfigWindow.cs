@@ -289,6 +289,18 @@ public sealed class ConfigWindow : OdysseusWindow
                 + "walked, talked and interacted through. It carries nothing else: a quest wanting an emote, an "
                 + "item or a duty stops and says so. Nothing is written to your path library.");
 
+        var skipPickups = _config.SkipOptionalPickups;
+        if (ImGui.Checkbox("Skip optional side-quest pick-ups", ref skipPickups))
+        {
+            _config.SkipOptionalPickups = skipPickups;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Some paths detour to pick up side quests on the way — The Key to Victory crosses into "
+                + "The Peaks for two before its solo duty. On: those are left, and so is the walk to them, unless "
+                + "the story or your priority list needs one (checked through each quest's prerequisites). "
+                + "Checked against the whole library: none of today's pick-ups is needed by the story.");
+
         var pickRewards = _config.PickQuestRewards;
         if (ImGui.Checkbox("Pick quest rewards automatically", ref pickRewards))
         {
