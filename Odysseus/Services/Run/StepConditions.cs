@@ -79,9 +79,21 @@ public static class StepConditions
         return true;
     }
 
-    /// <summary>The step itself should be skipped right now.</summary>
+    /// <summary>
+    /// The step itself should be skipped right now.
+    ///
+    /// <para>
+    /// Besides the path's own clause, a <b>pick-up</b> step — one that takes a different quest from
+    /// an NPC on the way — is skipped once that quest is already in the journal or done. The path
+    /// data carries the quest id for exactly this and Odysseus had been ignoring it, so a character
+    /// that had long since finished the side quests still detoured a zone away to "pick them up".
+    /// </para>
+    /// </summary>
     public static bool ShouldSkipStep(QuestStep step, IConditionWorld world, QuestSnapshot quest)
-        => Holds(step.SkipConditions?.StepIf, world, quest, step);
+        => PickUpAlreadyTaken(step, world) || Holds(step.SkipConditions?.StepIf, world, quest, step);
+
+    private static bool PickUpAlreadyTaken(QuestStep step, IConditionWorld world)
+        => step.PickUpQuestId is { } pick && (world.IsQuestAccepted(pick) || world.IsQuestComplete(pick));
 
     /// <summary>The step's aetheryte teleport should be skipped (already nearby, etc.).</summary>
     public static bool ShouldSkipAetheryte(QuestStep step, IConditionWorld world, QuestSnapshot quest)

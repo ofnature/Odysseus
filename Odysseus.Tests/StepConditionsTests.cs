@@ -8,6 +8,35 @@ public class StepConditionsTests
 {
     private static readonly QuestSnapshot Snap = new(1622, 1, new byte[] { 16, 16, 0, 0, 0, 32 });
 
+    /// <summary>
+    /// A pick-up step takes a different quest from an NPC on the way. Once that quest is in the
+    /// journal or done, walking a zone away to "pick it up" again is pure waste — the path carries
+    /// the id for exactly this, and it had been ignored.
+    /// </summary>
+    [Theory]
+    [InlineData(true, false, true)]    // already accepted
+    [InlineData(false, true, true)]    // already completed
+    [InlineData(false, false, false)]  // not taken yet: go and get it
+    public void A_pick_up_step_is_skipped_once_its_quest_is_taken(bool accepted, bool completed, bool skip)
+    {
+        var world = new FakeStepWorld();
+        if (accepted) world.AcceptedQuests.Add(2851);
+        if (completed) world.CompletedQuests.Add(2851);
+        var step = new QuestStep { Kind = StepKind.AcceptQuest, DataId = 1023167, PickUpQuestId = 2851 };
+
+        Assert.Equal(skip, StepConditions.ShouldSkipStep(step, world, QuestSnapshot.Unavailable));
+    }
+
+    [Fact]
+    public void An_ordinary_accept_step_is_not_skipped_by_the_pick_up_rule()
+    {
+        var world = new FakeStepWorld();
+        world.CompletedQuests.Add(2851);
+        var step = new QuestStep { Kind = StepKind.AcceptQuest, DataId = 1023167 };
+        Assert.False(StepConditions.ShouldSkipStep(step, world, QuestSnapshot.Unavailable));
+    }
+
+
     [Fact]
     public void An_empty_condition_never_holds()
     {

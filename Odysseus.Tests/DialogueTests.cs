@@ -231,6 +231,35 @@ public class DialogueTests
         Assert.Equal(StepStatus.Done, ex.Status);
     }
 
+    /// <summary>
+    /// The Key to Victory (2549) detours into The Peaks to pick up A Hunger for Trade (2851) from an
+    /// NPC on the way. The path names that quest in PickUpQuestId; the menu was answered with the
+    /// running quest's name instead, found nothing, and the step sat with the menu up.
+    /// </summary>
+    [Fact]
+    public void A_pick_up_step_answers_the_quest_menu_with_the_quest_it_is_picking_up()
+    {
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        w.QuestNames[2549] = "The Key to Victory";
+        w.QuestNames[2851] = "A Hunger for Trade";
+        var step = Interact(7);
+        step.Kind = StepKind.AcceptQuest;
+        step.PickUpQuestId = 2851;
+        var ex = new StepExecutor(w);
+        ex.Begin(step, questId: 2549);
+        Ticks(ex, w, 3);
+
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectIconString");
+        w.IconEntries.AddRange(["Quiet Deeps", "A Hunger for Trade", "Nothing"]);
+        ex.Tick(); w.Advance(0.5);
+        ex.Tick();
+
+        Assert.Equal(1, w.Calls.Count(c => c == "IconSelect 1"));
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Log") && c.Contains("does not list"));
+    }
+
     [Fact]
     public void A_menu_that_does_not_list_our_quest_is_left_alone_and_says_so()
     {

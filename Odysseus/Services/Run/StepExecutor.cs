@@ -2968,7 +2968,11 @@ public sealed class StepExecutor
                 var entries = _world.SelectIconStringEntries();
                 if (entries.Count > 0)
                 {
-                    var name = _world.QuestName(_questId);
+                    // A pick-up step is taking a DIFFERENT quest from this NPC — the path detours to
+                    // collect it on the way. Answering the menu with the running quest's name found
+                    // nothing, and the step sat with the menu up until it faulted.
+                    var wanted = step.PickUpQuestId ?? _questId;
+                    var name = _world.QuestName(wanted);
                     var index = name is null ? -1 : FindEntry(entries, name);
                     if (index >= 0)
                     {
@@ -2980,7 +2984,7 @@ public sealed class StepExecutor
                     else if (!_iconReported)
                     {
                         _iconReported = true;
-                        _world.Log($"The hand-in menu does not list \"{name ?? _questId.ToString()}\" — " +
+                        _world.Log($"The quest menu does not list \"{name ?? wanted.ToString()}\" — " +
                                    $"[{string.Join(" | ", entries)}]; leaving it for you.");
                     }
                 }
