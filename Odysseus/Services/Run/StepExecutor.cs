@@ -31,7 +31,10 @@ public sealed class StepExecutor
 {
     private enum Phase
     {
-        None, Delay, Teleport, TeleportWait, Aethernet, AethernetWait, Mount, Move, WaitReady, Interact, Dialogue,
+        None, Delay,
+        /// <summary>The game is still moving the character — a cutscene, a zone load, a conversation. Travel waits for it to finish.</summary>
+        Settle,
+        Teleport, TeleportWait, Aethernet, AethernetWait, Mount, Move, WaitReady, Interact, Dialogue,
         CombatWait, Combat,
         /// <summary>Solo instance: interacted, waiting to be inside.</summary>
         SoloDutyEnter,
@@ -299,6 +302,18 @@ public sealed class StepExecutor
     private bool _yesNoReported;
     private bool _yesNoAnswered;
 
+    /// <summary>How long the world must stay still before a travel decision trusts where the character is.</summary>
+    private static readonly TimeSpan SettleGrace = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// How long to wait for the game to let go before deciding anyway. Cutscenes do not count
+    /// against it — they hold the clock — so this is only a conversation or a menu left hanging.
+    /// </summary>
+    private static readonly TimeSpan SettleMax = TimeSpan.FromSeconds(30);
+
+    private DateTime _settledSince;
+    private bool _settleWaived;
+
     private Quest.QuestSnapshot _soloProgressAtStart;
     private bool _soloHoldSaid;
     private string _soloHoldReason = string.Empty;
@@ -505,6 +520,8 @@ public sealed class StepExecutor
     {
         _soloHoldSaid = false;
         _soloHoldReason = string.Empty;
+        _settledSince = default;
+        _settleWaived = false;
         _soloProgressAtStart = step.Kind == StepKind.SinglePlayerDuty ? _world.QuestState(questId) : default;
         _groundOnly = groundOnly;
         _step = step;
@@ -700,6 +717,34 @@ public sealed class StepExecutor
             case Phase.Delay:
                 if (now - _phaseStart >= TimeSpan.FromSeconds(step.DelaySecondsAtStart ?? 0))
                     Enter(NextAfterDelay());
+                break;
+
+            case Phase.Settle:
+                // An open conversation that belongs to this step — a turn-in chain, a hand-over
+                // window — is not the game moving us somewhere: it is the step. Join it, as every
+                // other phase does, rather than waiting for it to go away.
+                if (_world.IsOccupied && NeedsDialogueJoin(step))
+                {
+                    _sawOccupied = true;
+                    Enter(Phase.Dialogue);
+                    break;
+                }
+                HoldClockForCutscene(now);
+                if (!SettledForTravel)
+                {
+                    _settledSince = default;
+                    if (now - _phaseStart > SettleMax)
+                    {
+                        _world.Log($"The game has not let go of the character in {SettleMax.TotalSeconds:F0}s — deciding the route anyway.");
+                        _settleWaived = true;
+                        Enter(NextAfterDelay());
+                    }
+                    break;
+                }
+                if (_settledSince == default)
+                    _settledSince = now;
+                if (now - _settledSince >= SettleGrace)
+                    Enter(NextAfterDelay()); // where we are now is where the game put us
                 break;
 
             case Phase.Teleport:
@@ -1138,6 +1183,15 @@ public sealed class StepExecutor
     {
         var step = _step!;
 
+        // Where the character is, is only worth deciding a route from once the game has stopped
+        // moving it. A quest step ending with a cutscene that carries you to the next NPC begins
+        // the next step while the cutscene is still playing: In the Dark of Night (3159) decided
+        // "teleport to New Gridania, then aethernet" from East Shroud, the cutscene then set the
+        // character down beside the Old Gridania NPC, and the teleport — already chosen, only
+        // waiting for the cutscene to end — took it away from there, to run straight back.
+        if (!_settleWaived && !TravelsNowhere(step) && !SettledForTravel)
+            return Phase.Settle;
+
         if (AlreadyThere(step))
             return NextAfterTravel();
 
@@ -1180,6 +1234,12 @@ public sealed class StepExecutor
     /// so neither the teleport nor the hop is part of the step.
     /// </para>
     /// </summary>
+    /// <summary>
+    /// Nothing is moving the character: no cutscene or conversation, no zone load, no cast, no
+    /// Lifestream hop. Mounted or riding pillion does not count — that is travel we chose.
+    /// </summary>
+    private bool SettledForTravel => !_world.IsOccupied && !_world.IsTravelBusy;
+
     private bool AlreadyThere(QuestStep step)
     {
         if (step.TerritoryId == 0 || _world.TerritoryId != step.TerritoryId || step.Position is not { } mark)

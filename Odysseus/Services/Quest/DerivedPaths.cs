@@ -7,7 +7,11 @@ namespace Odysseus.Services.Quest;
 
 /// <summary>One place the game's own journal data names: where it is, and what stands there.</summary>
 /// <param name="Object">The ENpc or EObj placed there, or 0 when the game names a spot and nothing on it.</param>
-public sealed record QuestMark(uint Territory, Vector3 Position, uint Object);
+/// <param name="Radius">
+/// How big the place is. A mark with something on it is a point (radius 1); a mark with nothing on
+/// it is usually the quest map's search circle — In the Dark of Night's fight is a 204-yalm area.
+/// </param>
+public sealed record QuestMark(uint Territory, Vector3 Position, uint Object, float Radius = 0);
 
 /// <summary>
 /// A quest as the game's own sheets describe it: who gives it, who takes it back, and where each
@@ -109,7 +113,22 @@ public static class DerivedPath
         DataId = dataId is > 0 ? dataId : null,
         Position = mark.Position,
         TerritoryId = mark.Territory,
+        StopDistance = kind == StepKind.WalkTo ? ArrivalFor(mark) : null,
     };
+
+    /// <summary>The nearest a walk to an object-less mark needs to get.</summary>
+    public const float MinArrival = 3f;
+
+    /// <summary>
+    /// The farthest from an area's centre that still counts as there. The quest map's circle can be
+    /// two hundred yalms across, and its trigger is somewhere inside; the centre itself is often in a
+    /// rock. In the Dark of Night faulted twice 11 yalms from the centre of its 204-yalm area with the
+    /// fight already in reach — fifteen is inside every case seen, and still close enough to trip it.
+    /// </summary>
+    public const float MaxArrival = 15f;
+
+    /// <summary>A small mark is a point to stand on; a large one is an area, entered near its middle.</summary>
+    private static float ArrivalFor(QuestMark mark) => Math.Clamp(mark.Radius, MinArrival, MaxArrival);
 
     /// <summary>
     /// A mark with a person or a thing on it is interacted with; one with neither is walked to.

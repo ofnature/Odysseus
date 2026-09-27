@@ -166,6 +166,69 @@ public class TravelExecutorTests
         Assert.Contains("Teleport 104", w.Calls);
     }
 
+    /// <summary>
+    /// In the Dark of Night (3159): the NPC after the fight ends in a cutscene that carries the
+    /// character to Old Gridania. The next step began while it played, decided "teleport to New
+    /// Gridania, then aethernet" from East Shroud, and — once the cutscene set the character down
+    /// beside the very NPC it wanted — cast that teleport anyway and ran back. Where the character
+    /// is, is only worth reading once the game has stopped moving it.
+    /// </summary>
+    [Fact]
+    public void A_route_is_decided_after_the_cutscene_that_moves_you_not_during_it()
+    {
+        const uint EastShroud = 152, OldGridania = 133, NewGridania = 132;
+        var w = new FakeStepWorld { ArriveOnMove = true, TerritoryId = EastShroud, InCutscene = true, IsOccupied = true };
+        w.AethernetByTerritory[OldGridania] = (Aetheryte: 2, Hop: "Leatherworkers' Guild & Shaded Bower", Lands: OldGridania);
+        w.AetheryteTerritories[2] = NewGridania;
+        w.Spawned.Add(1026867);
+        w.Positions[1026867] = new Vector3(-36, 7, -121);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.Interact, KindName = "Interact", DataId = 1026867,
+            TerritoryId = OldGridania, Position = new Vector3(-36, 7, -121),
+        });
+
+        Ticks(ex, w, 20);                                   // the cutscene plays; nothing is decided
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Teleport") || c.StartsWith("Aethernet"));
+
+        // The cutscene sets the character down beside the NPC, in Old Gridania.
+        w.TerritoryId = OldGridania;
+        w.PlayerPosition = new Vector3(-34, 7, -119);
+        w.InCutscene = false;
+        w.IsOccupied = false;
+        Ticks(ex, w, 20);
+
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Teleport") || c.StartsWith("Aethernet"));
+        Assert.Contains("Interact 1026867", w.Calls);
+    }
+
+    /// <summary>When nothing moves the character, the route is decided as before — the wait costs one second.</summary>
+    [Fact]
+    public void Once_settled_a_step_in_another_zone_still_travels()
+    {
+        var w = World();
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(621, new Vector3(50, 0, 0), aetheryte: "Lochs - Ala Mhigan Quarter"));
+        Ticks(ex, w, 6);
+        Assert.Contains("Teleport 98", w.Calls);
+    }
+
+    /// <summary>A conversation left hanging must not hold travel forever: after the wait it decides anyway.</summary>
+    [Fact]
+    public void A_conversation_that_never_closes_does_not_hold_travel_for_good()
+    {
+        var w = World();
+        w.IsOccupied = true;                                // stuck, and not this step's own chain
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(621, new Vector3(50, 0, 0), aetheryte: "Lochs - Ala Mhigan Quarter"));
+
+        Ticks(ex, w, 40);                                   // 20s: still waiting
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Teleport"));
+        Ticks(ex, w, 30);                                   // past 30s: decides
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("deciding the route anyway"));
+    }
+
     [Fact]
     public void Skip_teleport_flag_walks_even_with_a_shortcut()
     {

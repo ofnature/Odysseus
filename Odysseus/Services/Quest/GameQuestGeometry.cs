@@ -98,5 +98,7 @@ public sealed class GameQuestGeometry : IQuestGeometry
     }
 
     private static QuestMark? MarkOf(Level level)
-        => level.Territory.RowId == 0 ? null : new QuestMark(level.Territory.RowId, new Vector3(level.X, level.Y, level.Z), level.Object.RowId);
+        => level.Territory.RowId == 0
+            ? null
+            : new QuestMark(level.Territory.RowId, new Vector3(level.X, level.Y, level.Z), level.Object.RowId, level.Radius);
 }

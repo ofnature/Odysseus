@@ -132,6 +132,31 @@ public class DerivedPathTests
     }
 
     /// <summary>
+    /// A mark with nothing on it is the quest map's search circle, not a point — In the Dark of
+    /// Night's fight is a 204-yalm area whose centre the mesh cannot reach, and the walk faulted
+    /// twice eleven yalms out with the fight already in reach. It is entered near the middle.
+    /// </summary>
+    [Theory]
+    [InlineData(204f, DerivedPath.MaxArrival)]   // a search area: near the middle is there
+    [InlineData(8f, 8f)]                         // a small area: its own edge
+    [InlineData(1f, DerivedPath.MinArrival)]     // a point: close enough to stand on
+    [InlineData(0f, DerivedPath.MinArrival)]     // unknown: as for a point
+    public void A_walk_to_an_area_arrives_anywhere_near_its_middle(float radius, float expected)
+    {
+        var path = DerivedPath.Build(Lighting((3, [new QuestMark(Enclave, new Vector3(-200, 4, 29), 0, radius)])));
+        var walk = Assert.Single(path!.Block(3)!.Steps);
+        Assert.Equal(StepKind.WalkTo, walk.Kind);
+        Assert.Equal(expected, walk.StopDistance);
+    }
+
+    [Fact]
+    public void An_interaction_keeps_the_ordinary_reach()
+    {
+        var path = DerivedPath.Build(Lighting((1, [new QuestMark(Enclave, Vector3.Zero, 1_025_757, 1)])));
+        Assert.Null(Assert.Single(path!.Block(1)!.Steps).StopDistance);
+    }
+
+    /// <summary>
     /// The wiring, not just the shape: a quest with nothing in the path store starts anyway, on a
     /// path the controller asked the sheets for.
     /// </summary>
