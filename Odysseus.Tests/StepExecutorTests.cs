@@ -1177,6 +1177,33 @@ public class StepExecutorTests
         Assert.Contains("not in the water", ex.FailReason);
     }
 
+    /// <summary>
+    /// If I Were a Fish (2881): diving began with Descend still down, the step finished without
+    /// letting go, and the character sank without end. The key is released the moment the dive
+    /// takes, and on every other way out of the step.
+    /// </summary>
+    [Fact]
+    public void A_dive_lets_go_of_the_descent_key_once_under()
+    {
+        var world = new FakeStepWorld { TerritoryId = 621, IsSwimming = true };
+        world.PlayerPosition = new Vector3(-91, -0.6f, -263);
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Dive, KindName = "Dive", TerritoryId = 621, Position = new Vector3(-91, -0.6f, -263) });
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.False(world.DescentHeld);
+        Assert.Contains("ReleaseDescend", world.Calls);
+
+        // Cancelled mid-press: let go as well.
+        var stopped = new FakeStepWorld { TerritoryId = 621, IsSwimming = true, DivePressesNeeded = 100 };
+        stopped.PlayerPosition = new Vector3(-91, -0.6f, -263);
+        ex = new StepExecutor(stopped);
+        ex.Begin(new QuestStep { Kind = StepKind.Dive, KindName = "Dive", TerritoryId = 621, Position = new Vector3(-91, -0.6f, -263) });
+        for (var i = 0; i < 3; i++) { ex.Tick(); stopped.Advance(0.1); }
+        Assert.True(stopped.DescentHeld);
+        ex.Cancel();
+        Assert.False(stopped.DescentHeld);
+    }
+
     [Fact]
     public void A_flight_hanging_over_a_walkto_mark_lands_before_judging_arrival()
     {

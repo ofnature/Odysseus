@@ -209,6 +209,56 @@ public class CombatItemTests
         Assert.Contains("Hold False", w.Calls);
     }
 
+    /// <summary>
+    /// 2883 run solo on v0.2.9: the mob died to Daedalus without the item. A mob that aggroes on the
+    /// approach is fought before the fight phase starts, so the hold starts with the step itself.
+    /// </summary>
+    [Fact]
+    public void The_hold_starts_with_the_step_not_with_the_fight()
+    {
+        var w = new FakeStepWorld { TerritoryId = 400, PlayerPosition = new Vector3(300, 0, 300) };
+        var ex = new StepExecutor(w);
+        ex.Begin(Fight(CombatItemCondition.HealthPercent));
+
+        ex.Tick();
+        Assert.True(w.ActionsHeld);                                      // from the first tick
+
+        Ticks(ex, w, 6);
+        Assert.Contains(w.Calls, c => c.StartsWith("Move") || c == "Mount"); // still on the way there
+        Assert.DoesNotContain("Attack", w.Calls);
+        Assert.True(w.ActionsHeld);
+    }
+
+    [Fact]
+    public void A_hold_daedalus_does_not_take_is_said_once()
+    {
+        var w = new FakeStepWorld { InCombat = true, Target = Reading(100), HoldAccepted = false };
+        var ex = new StepExecutor(w);
+        ex.Begin(Fight(CombatItemCondition.HealthPercent));
+
+        Ticks(ex, w, 8);
+        Assert.Single(w.Calls, c => c.StartsWith("Log") && c.Contains("did not take the hold"));
+    }
+
+    [Fact]
+    public void A_fight_that_ends_without_the_item_says_where_the_mob_was_last_seen()
+    {
+        var w = new FakeStepWorld { InCombat = true, Target = Reading(100) };
+        var ex = new StepExecutor(w);
+        ex.Begin(Fight(CombatItemCondition.HealthPercent));
+        Ticks(ex, w, 4);
+
+        w.Target = Reading(62);
+        Ticks(ex, w, 2);
+        w.Target = null;                                                 // one swing: gone
+        w.InCombat = false;
+        Ticks(ex, w, 40);
+
+        Assert.DoesNotContain($"UseItem {Net}", w.Calls);
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("at 62%"));
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("without item") && c.Contains("last seen at 62%"));
+    }
+
     [Fact]
     public void An_unknown_condition_is_fought_as_an_ordinary_fight_and_said_once()
     {

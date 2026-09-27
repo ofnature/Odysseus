@@ -22,10 +22,18 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     /// <summary>Presses until this many calls, then the water accepts us.</summary>
     public int DivePressesNeeded { get; set; } = 3;
     private int _divePresses;
+    /// <summary>True from a press until the release — the game's view of the Descend key.</summary>
+    public bool DescentHeld { get; private set; }
     public void PressDescent()
     {
         Calls.Add("Descend");
+        DescentHeld = true;
         if (++_divePresses >= DivePressesNeeded) IsDiving = true;
+    }
+    public void ReleaseDescent()
+    {
+        if (DescentHeld) Calls.Add("ReleaseDescend");
+        DescentHeld = false;
     }
     public void AdvanceTalk() { if (VisibleAddons.Contains("Talk")) Calls.Add("AdvanceTalk"); }
     public bool AcceptOfferedQuest()
@@ -463,6 +471,9 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public void SelectYesNo(bool yes) => Calls.Add($"YesNo {yes}");
     public string YesNoPromptText { get; set; } = string.Empty;
     public string YesNoPrompt() => YesNoPromptText;
+    public Dictionary<uint, List<string>> Warps { get; } = new();
+    public IReadOnlyCollection<string> TravelPrompts(uint territoryId)
+        => Warps.TryGetValue(territoryId, out var prompts) ? prompts : [];
     public Dictionary<ushort, Odysseus.Services.Quest.QuestSnapshot> QuestStates { get; } = new();
     public Odysseus.Services.Quest.QuestSnapshot QuestState(ushort questId)
         => QuestStates.TryGetValue(questId, out var s) ? s : Odysseus.Services.Quest.QuestSnapshot.Unavailable;
@@ -470,10 +481,12 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public CombatTargetReading? CombatTarget(IReadOnlyCollection<uint> dataIds)
         => Target is { } t && (dataIds.Count == 0 || dataIds.Contains(t.DataId)) ? t : null;
     public bool ActionsHeld { get; private set; }
-    public void HoldCombatActions(bool hold)
+    public bool HoldAccepted { get; set; } = true;
+    public bool HoldCombatActions(bool hold)
     {
         if (hold != ActionsHeld) Calls.Add($"Hold {hold}");
-        ActionsHeld = hold;
+        ActionsHeld = hold && HoldAccepted;
+        return HoldAccepted;
     }
     public void SelectStringIndex(int index) => Calls.Add($"Select {index}");
     public bool RewardCompleteEnabled { get; set; } = true;

@@ -324,11 +324,14 @@ public sealed class StepExecutor
     private DateTime _combatHoldAsserted;
     private bool _combatHoldOn;
     private bool _combatItemUnknownSaid;
+    private bool _combatHoldRefusedSaid;
+    private float _combatItemLoggedHealth = -1;
 
     private Quest.QuestSnapshot _soloProgressAtStart;
     private bool _soloHoldSaid;
     private string _soloHoldReason = string.Empty;
     private DateTime _lastDutyCallsYes;
+    private DateTime _lastTravelYes;
     private DateTime _lastYesNoPress;
 
     /// <summary>
@@ -538,6 +541,9 @@ public sealed class StepExecutor
         ReleaseCombatHold();
         _combatItemUsedAt = default;
         _combatItemUnknownSaid = false;
+        _combatHoldRefusedSaid = false;
+        _lastTravelYes = default;
+        _combatItemLoggedHealth = -1;
         _soloProgressAtStart = step.Kind == StepKind.SinglePlayerDuty ? _world.QuestState(questId) : default;
         _groundOnly = groundOnly;
         _step = step;
@@ -644,6 +650,7 @@ public sealed class StepExecutor
         }
         _world.ReleaseDialogue();
         ReleaseCombatHold();
+        _world.ReleaseDescent();
         _step = null;
         _phase = Phase.None;
         Status = StepStatus.Idle;
@@ -731,6 +738,13 @@ public sealed class StepExecutor
         // away from the hand-in it belongs to. So it is answered wherever it appears, which is
         // safe because the world matches it against the game's own string for that one prompt.
         _world.ConfirmTradeDialog();
+
+        // A fight that wants its mob left alive under a line holds Daedalus from the step's first
+        // tick, not from the fight phase: a mob that aggroes on the approach or the landing is
+        // otherwise Daedalus's to kill before the fight phase ever sees it (2883, run solo, on
+        // v0.2.9). Out of combat the hold costs nothing.
+        if (step.Kind == StepKind.Combat && step.CombatItemUse is { } heldFor && HoldsAllFight(heldFor))
+            SetCombatHold(true, now);
 
         switch (_phase)
         {
@@ -1185,6 +1199,7 @@ public sealed class StepExecutor
             case Phase.Finish:
                 _world.ReleaseDialogue();
                 ReleaseCombatHold();
+                _world.ReleaseDescent();
                 Status = StepStatus.Done;
                 break;
         }
@@ -1887,6 +1902,9 @@ public sealed class StepExecutor
     {
         if (_world.IsDiving)
         {
+            // Diving starts while the key is still down: release it now, or the game keeps
+            // holding Descend and the character sinks without end (If I Were a Fish, 2881).
+            _world.ReleaseDescent();
             Enter(Phase.Finish);
             return;
         }
@@ -3109,6 +3127,24 @@ public sealed class StepExecutor
                 return;
             }
 
+            // A crossing the path names — TargetTerritoryId — asked the game's own way: the gate
+            // guard's "Leave the Ala Mhigan Quarter?" (The Mad King's Trove, 2964). Questionable
+            // answers these Yes for the same reason; the match is against the Warp sheet's
+            // questions into the step's destination, so no other question is taken for one.
+            if (step.TargetTerritoryId is { } bound && IsTravelPromptInto(bound))
+            {
+                if (now - _lastTravelYes > TimeSpan.FromSeconds(1.5))
+                {
+                    if (_lastTravelYes == default)
+                        _world.Log($"Answering yes to \"{_world.YesNoPrompt()}\" — the crossing this step makes.");
+                    _lastTravelYes = now;
+                    _world.SelectYesNo(true);
+                }
+                _sawOccupied = true;
+                _phaseStart = now;
+                return;
+            }
+
             if (_yesNoOpenedAt == default)
                 _yesNoOpenedAt = now;
             if (now - _yesNoOpenedAt > UndeclaredYesNoGrace)
@@ -3436,6 +3472,17 @@ public sealed class StepExecutor
                || !now.Variables.Span.SequenceEqual(before.Variables.Span);
     }
 
+    private bool IsTravelPromptInto(uint territoryId)
+    {
+        var asked = Squash(_world.YesNoPrompt());
+        if (asked.Length == 0)
+            return false;
+        foreach (var prompt in _world.TravelPrompts(territoryId))
+            if (Squash(prompt) == asked)
+                return true;
+        return false;
+    }
+
     private bool TryAnswerYesNo(QuestStep step, DateTime now)
     {
         var asked = Squash(_world.YesNoPrompt());
@@ -3614,8 +3661,18 @@ public sealed class StepExecutor
 
         var target = _world.CombatTarget(enemies);
         var ready = target is { } t && CombatItemReady(use, t);
-        var holdAllFight = use.Condition is CombatItemCondition.HealthPercent or CombatItemCondition.MissingStatus;
+        var holdAllFight = HoldsAllFight(use);
         SetCombatHold(holdAllFight || ready, now);
+
+        // The mob's health on its way down, every ten points, so a fight that ends without the
+        // item says how: one hit from above the line to dead reads differently from a mob that
+        // never got near it.
+        if (target is { } seen && use.Condition == CombatItemCondition.HealthPercent
+            && (_combatItemLoggedHealth < 0 || Math.Abs(_combatItemLoggedHealth - seen.HealthPercent) >= 10))
+        {
+            _combatItemLoggedHealth = seen.HealthPercent;
+            _world.Log($"Mob {seen.DataId} at {seen.HealthPercent:F0}% (item {use.ItemId} goes on under {use.Value}%).");
+        }
 
         // Held, in a fight, and not facing the mob the item is for: nobody else will pick it up —
         // Daedalus is holding — so engage it, and auto-attack takes it from there.
@@ -3639,6 +3696,10 @@ public sealed class StepExecutor
         return true;
     }
 
+    /// <summary>The kinds where the mob can die before it is ready: Daedalus is held for all of it.</summary>
+    private static bool HoldsAllFight(CombatItemUse use)
+        => use.Condition is CombatItemCondition.HealthPercent or CombatItemCondition.MissingStatus;
+
     /// <summary>Whether the mob is ready for the item. Pure, so the three conditions are pinned by tests.</summary>
     internal static bool CombatItemReady(CombatItemUse use, CombatTargetReading target) => use.Condition switch
     {
@@ -3659,7 +3720,11 @@ public sealed class StepExecutor
             return;
         if (!_combatHoldOn)
             _world.Log("Holding Daedalus's actions for this fight — auto-attack will bring the mob down for the item.");
-        _world.HoldCombatActions(true);
+        if (!_world.HoldCombatActions(true) && !_combatHoldRefusedSaid)
+        {
+            _combatHoldRefusedSaid = true;
+            _world.Log("Daedalus did not take the hold (not loaded, older than v0.1.87, or held by another plugin) — it may kill the mob before the item goes on.");
+        }
         _combatHoldOn = true;
         _combatHoldAsserted = now;
     }
@@ -3741,7 +3806,12 @@ public sealed class StepExecutor
                 return;
             // Otherwise give stragglers a moment to spawn, then call it.
             if (now - _lastCombatSeen > CombatClearSettle)
+            {
+                if (step.CombatItemUse is { } unused && _combatItemUsedAt == default)
+                    _world.Log($"The fight ended without item {unused.ItemId} going on"
+                        + (_combatItemLoggedHealth >= 0 ? $" — the mob was last seen at {_combatItemLoggedHealth:F0}%." : " — the mob was never seen targeted."));
                 Enter(Phase.Finish);
+            }
             return;
         }
 
@@ -3794,6 +3864,7 @@ public sealed class StepExecutor
         _world.StopMoving();
         _world.ReleaseDialogue();
         ReleaseCombatHold();
+        _world.ReleaseDescent();
         FailReason = reason;
         Status = StepStatus.Failed;
         return Status;

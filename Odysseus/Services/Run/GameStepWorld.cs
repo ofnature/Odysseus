@@ -1192,6 +1192,24 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
+    public void ReleaseDescent()
+    {
+        try
+        {
+            // Only the key-ups matter now: a key never pressed is released harmlessly, and the
+            // quiet frames and any key-downs still waiting are simply dropped.
+            var hWnd = (nint)FFXIVClientStructs.FFXIV.Client.Graphics.Kernel.Device.Instance()->hWnd;
+            while (_descentKeys.TryDequeue(out var message))
+                if (message.Type == WmKeyup)
+                    SendMessage(hWnd, message.Type, message.Key, nint.Zero);
+        }
+        catch (Exception ex)
+        {
+            _descentKeys.Clear();
+            _log($"Descent release failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     private static System.Collections.Generic.List<nint>? DescentKeys(
         FFXIVClientStructs.FFXIV.Client.System.Input.KeySetting setting)
     {
@@ -1801,7 +1819,7 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
-    public void HoldCombatActions(bool hold) => _daedalus.HoldActions(hold);
+    public bool HoldCombatActions(bool hold) => _daedalus.HoldActions(hold);
 
     public string YesNoPrompt()
     {
@@ -1816,6 +1834,34 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         catch
         {
             return string.Empty;
+        }
+    }
+
+    private Dictionary<uint, List<string>>? _travelPrompts;
+
+    public IReadOnlyCollection<string> TravelPrompts(uint territoryId)
+    {
+        try
+        {
+            if (_travelPrompts is null)
+            {
+                var byTerritory = new Dictionary<uint, List<string>>();
+                foreach (var warp in _data.GetExcelSheet<Warp>())
+                {
+                    var question = warp.Question.ExtractText();
+                    if (question.Length == 0)
+                        continue;
+                    if (!byTerritory.TryGetValue(warp.TerritoryType.RowId, out var list))
+                        byTerritory[warp.TerritoryType.RowId] = list = [];
+                    list.Add(question);
+                }
+                _travelPrompts = byTerritory;
+            }
+            return _travelPrompts.TryGetValue(territoryId, out var prompts) ? prompts : [];
+        }
+        catch
+        {
+            return [];
         }
     }
 

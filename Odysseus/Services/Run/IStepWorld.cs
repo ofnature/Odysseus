@@ -114,6 +114,13 @@ public interface IStepWorld
     /// </summary>
     void PressDescent();
 
+    /// <summary>
+    /// Let go of every key the descent press still holds down, at once. Diving can start between
+    /// the key going down and its release; a press abandoned there leaves the game holding Descend,
+    /// and the character sinks until someone presses the key by hand. Safe when nothing is held.
+    /// </summary>
+    void ReleaseDescent();
+
     /// <summary>Click the subtitle box (Talk) once, advancing the line. No-op when it is not up.</summary>
     void AdvanceTalk();
 
@@ -524,6 +531,12 @@ public interface IStepWorld
     /// <summary>What a visible yes/no dialog is asking, or empty when none is showing.</summary>
     string YesNoPrompt();
 
+    /// <summary>
+    /// The game's own travel questions — the Warp sheet's "Leave the Ala Mhigan Quarter?" — that
+    /// carry the player into <paramref name="territoryId"/>. Empty when there are none.
+    /// </summary>
+    System.Collections.Generic.IReadOnlyCollection<string> TravelPrompts(uint territoryId);
+
     /// <summary>Where a quest stands right now — sequence and variables — or unavailable when it is not in the journal.</summary>
     Quest.QuestSnapshot QuestState(ushort questId);
 
@@ -534,7 +547,8 @@ public interface IStepWorld
     /// Ask the rotation (Daedalus) to hold every action, or let it go. A lease on Daedalus's side:
     /// it lapses a few seconds after the last hold, so it is asserted again while it is wanted.
     /// </summary>
-    void HoldCombatActions(bool hold);
+    /// <returns>False when Daedalus did not take it: missing, too old, or held by another plugin.</returns>
+    bool HoldCombatActions(bool hold);
 
     /// <summary>Picks an entry in a list dialog if one is showing.</summary>
     void SelectStringIndex(int index);

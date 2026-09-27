@@ -56,6 +56,47 @@ public class DialogueTests
     }
 
     /// <summary>
+    /// The Mad King's Trove (2964): the gate guard's "Leave the Ala Mhigan Quarter?" on a step that
+    /// names its crossing (TargetTerritoryId) and no answer. It is the game's own travel question
+    /// into that territory — the Warp sheet's — so it is the step's purpose and is answered Yes.
+    /// </summary>
+    [Fact]
+    public void A_crossing_s_own_travel_question_is_answered_yes()
+    {
+        var w = new FakeStepWorld { YesNoPromptText = "Leave the Ala Mhigan Quarter?" };
+        w.Warps[400] = ["Enter the Ala Mhigan Quarter?", "Leave the Ala Mhigan Quarter?"];
+        w.Spawned.Add(7);
+        w.VisibleAddons.Add("SelectYesno");
+        var step = Interact(7);
+        step.TargetTerritoryId = 400;
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+
+        Ticks(ex, w, 10);
+        Assert.Contains("YesNo True", w.Calls);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Notify"));
+    }
+
+    /// <summary>Only the travel questions into the step's destination: anything else still waits for the player.</summary>
+    [Theory]
+    [InlineData(400u, "Do you wish to abandon this quest?")]   // not a travel question
+    [InlineData(401u, "Leave the Ala Mhigan Quarter?")]        // a travel question, into somewhere else
+    public void Other_questions_on_a_crossing_still_wait_for_the_player(uint target, string asked)
+    {
+        var w = new FakeStepWorld { YesNoPromptText = asked };
+        w.Warps[400] = ["Leave the Ala Mhigan Quarter?"];
+        w.Spawned.Add(7);
+        w.VisibleAddons.Add("SelectYesno");
+        var step = Interact(7);
+        step.TargetTerritoryId = target;
+        var ex = new StepExecutor(w);
+        ex.Begin(step);
+
+        Ticks(ex, w, 400);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("YesNo"));
+    }
+
+    /// <summary>
     /// The answer is recorded against the step that provokes the question, and the window opens
     /// while a neighbouring step of the same sequence is running. That answer is this quest's own
     /// and is used; only an unmatched question waits for the player.

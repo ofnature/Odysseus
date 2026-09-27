@@ -1,6 +1,17 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.10 — unreleased
+
+### Getting there
+- A dive lets go of the Descend key once under water: If I Were a Fish (2881) and every other dive step sank without end until someone pressed the key by hand
+- A step that crosses into another area answers the game's own travel question for it — the gate guard's "Leave the Ala Mhigan Quarter?" in The Mad King's Trove (2964) waited for a click. Only the questions the game lists for travel into the step's destination are answered; any other yes/no still waits for you
+
+### Quest fights
+- A fight that wants the mob kept alive under a health line holds Daedalus from the start of the step, not from the start of the fight: a mob that aggroed on the approach was Daedalus's to kill before the item could go on (Are They Ill-tempered, 2883)
+- The log follows the mob's health on the way down, says when Daedalus did not take the hold, and says where the mob was last seen when a fight ends without the item
+<!-- LATEST-END -->
+
 ## v0.2.9 — 2026-09-26
 
 Quests that want an item used on a weakened mob now use it, the shipped path library is rebuilt with 84 more quests, and a toon with Daedalus switched off keeps its target.
@@ -12,7 +23,6 @@ Quests that want an item used on a weakened mob now use it, the shipped path lib
 ### Path library
 - Rebuilt from Questionable bundle 1789898831 (2026-09-20): 4,324 quests, 84 more, including full paths for Strangers in the Wood (5490) and The Wilds Call (5491). Paths you imported with an older build step aside for the shipped copy — no re-import needed
 - Rock the Castrum (3873) gained a new step upstream that asks to clear other quests from the journal. Odysseus passes it and leaves your journal alone instead of stopping the main story there
-<!-- LATEST-END -->
 
 ## v0.2.8 — 2026-09-26
 
