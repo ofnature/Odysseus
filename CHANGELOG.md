@@ -1,7 +1,9 @@
 # Changelog
 
 <!-- LATEST-START -->
-## v0.2.10 — unreleased
+## v0.2.10 — 2026-09-27
+
+Dives stop sinking, area crossings answer their own travel question, and item fights hold Daedalus from the start of the step.
 
 ### Getting there
 - A dive lets go of the Descend key once under water: If I Were a Fish (2881) and every other dive step sank without end until someone pressed the key by hand
