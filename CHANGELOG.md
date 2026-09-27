@@ -1,6 +1,60 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.8 — 2026-09-26
+
+TextAdvance no longer blocks Start, quests nobody recorded can run, and a run that meets something it cannot do stays where it is and says so instead of wandering off.
+
+### Required plugins
+- TextAdvance is optional: Start needs only a pathing plugin and Lifestream. Without TextAdvance the main window says what is slower — cutscenes play in full, and a quest offering a choice of rewards waits at the window for you to pick
+
+### Quests with no path
+- A quest with no recorded path is run from the game's own journal data — where the giver stands, where each objective points, who takes it back — walking, talking and interacting, and stopping with a reason if the quest wants anything else. Settings → "Run quests with no path from the game's own journal data"; the quest line says *(derived path)* while one is in use
+- A derived walk to a quest-map search area arrives anywhere near its middle instead of faulting yards from a centre the mesh cannot reach
+- The main window's "What the game says" section shows the journal's own objective positions beside the path's
+- A priority row says "no path" instead of a sentence cut off mid-word
+
+### Getting there
+- A step already standing on its own mark does not travel to it: the recorded teleport to a neighbouring zone's aetheryte no longer throws the run out of the zone it is already in
+- A route is decided once the game has stopped moving the character: a quest cutscene that carries you to the next NPC no longer ends with a teleport away from them and a run back
+- Side quests a story path picks up on the way are taken by name from the NPC's quest menu, skipped once already taken, and the walk to them is skipped when nothing is left to pick up
+- Settings → "Skip optional side-quest pick-ups" leaves them — and the detour — unless the story or the priority list needs one
+- A Duty Finder duty does not travel to where it was recorded; the aetheryte list is warmed before the first teleport
+
+### Duties
+- A lost solo duty is not called done: the run stays put, says so once in chat, and carries on when you win it — it no longer replays the sequence from the top and walks off
+- Quest battles the path data marks as not runnable unattended wait at the entrance without going in
+- A duty Odysseus does not run (raids, trials) waits for you instead of faulting
+- Settings → "Duty AI": BossMod Reborn or Minerva. Minerva is claimed for the fight as "odysseus" and handed back after, with an optional preset
+- "Duty calls — begin?" is answered on a solo-duty step
+
+### Dialogue
+- A yes/no is answered only when it matches the question the path recorded, looked up across the whole sequence, not just the running step
+- A yes/no nobody recorded is repeated to you in chat and waits, rather than timing the step out
+- A path note is told to you in chat and holds the run until you have done it
+- An ability still cooling down is waited for, not called refused
+
+### Levels
+- Level gates read your real level, not the synced one — a level-100 character in Bozja is no longer told they are 80
+
+### Gathering
+- Worn gear is repaired between items, and a full bag ends the run with the reason
+- A node that comes back after depleting is worked again where it stands
+- "+ Preset" makes a list of the elemental shards, crystals, clusters, or all eighteen
+- The item search shows what is not on the list yet, plainest names first — Water and Wind Shard were unreachable once four shards were listed
+- A gatherable item means one this character can actually gather: timed nodes are skipped, and Miner or Botanist must be unlocked and high enough
+
+### For other plugins
+- `Odysseus.Gather.*` gates let another plugin ask for gathering: `CanGather`, `Start`, `Stop`, `IsRunning`, `GetStatusJson`. Each caller gets its own list in the gather window, reused and pruned as it goes, and a request never touches your own lists
+- Recipe ids are carried whole; Artisan's narrower gate refuses rather than crafting the wrong item
+
+### Paths and the editor
+- Strangers in the Wood (5490) ships in the library, recorded the day it released
+- A recorded teleport is never written as a zone-line walk; a step can be moved between sequences; the editor can name a SwitchClass step's class and an Action step's ability
+- An emote keeps one slash however it was written; stopping a recording no longer throws; the edit button opens the editor for a quest with no path, where the recorder is
+- `/od values <Window>` writes what a game window carries to the log, without needing to see it
+<!-- LATEST-END -->
+
 ## v0.2.7 — 2026-09-06
 
 Gather lists, and the gatherer that runs them, field-proven on a crystals list end to end.
@@ -51,7 +105,6 @@ The Qitari and Arkasodara unlock chains, run live end to end. Every change came 
 - WaitForNpcAtPosition is implemented — escort steps hold until the NPC stands on their spot
 - Quest gathers are done by Odysseus itself when the own gatherer is switched on: plain nodes worked by the row, quest-hidden items resolved through their own sheet, unplaced points borrowing the step's zone — and a decline names exactly which link is missing before handing to GatherBuddy
 
-<!-- LATEST-END -->
 
 ## v0.2.4 — 2026-08-23
 
