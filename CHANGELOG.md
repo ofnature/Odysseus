@@ -1,6 +1,11 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.9 — unreleased
+
+### Quest fights
+- A combat step no longer pulls while Daedalus is switched off: nobody would fight, and every pull re-targeted the nearest mob, so a toon with Daedalus off could not keep anything targeted. The step waits, says so once, and carries on when Daedalus is turned back on (needs Daedalus v0.1.87)
+<!-- LATEST-END -->
 ## v0.2.8 — 2026-09-26
 
 TextAdvance no longer blocks Start, quests nobody recorded can run, and a run that meets something it cannot do stays where it is and says so instead of wandering off.
@@ -53,7 +58,6 @@ TextAdvance no longer blocks Start, quests nobody recorded can run, and a run th
 - A recorded teleport is never written as a zone-line walk; a step can be moved between sequences; the editor can name a SwitchClass step's class and an Action step's ability
 - An emote keeps one slash however it was written; stopping a recording no longer throws; the edit button opens the editor for a quest with no path, where the recorder is
 - `/od values <Window>` writes what a game window carries to the log, without needing to see it
-<!-- LATEST-END -->
 
 ## v0.2.7 — 2026-09-06
 

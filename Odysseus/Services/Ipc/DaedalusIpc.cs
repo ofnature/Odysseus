@@ -11,11 +11,13 @@ namespace Odysseus.Services.Ipc;
 public sealed class DaedalusIpc
 {
     private const string RecordExternalWriteGate = "Daedalus.Targeting.RecordExternalWrite";
+    private const string IsDisabledByUserGate = "Daedalus.IsDisabledByUser";
 
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly Action<string>? _logDegraded;
 
     private ICallGateSubscriber<ulong, object>? _recordExternalWrite;
+    private ICallGateSubscriber<bool>? _isDisabledByUser;
     private bool _warnedMissing;
 
     public DaedalusIpc(IDalamudPluginInterface pluginInterface, Action<string>? logDegraded = null)
@@ -55,6 +57,24 @@ public sealed class DaedalusIpc
                     $"{RecordExternalWriteGate} unavailable ({ex.GetType().Name}) — Daedalus will " +
                     "read our retargets as manual clicks and hold its movement pulses.");
             }
+        }
+    }
+
+    /// <summary>
+    /// The user switched Daedalus OFF, so it will not fight for us. Not the same as "not enabled":
+    /// Daedalus's switch starts off and still fights for automation until someone presses Disable.
+    /// False when Daedalus is missing or too old to say — the pull then goes ahead as before.
+    /// </summary>
+    public bool IsDisabledByUser()
+    {
+        try
+        {
+            _isDisabledByUser ??= _pluginInterface.GetIpcSubscriber<bool>(IsDisabledByUserGate);
+            return _isDisabledByUser.InvokeFunc();
+        }
+        catch
+        {
+            return false;
         }
     }
 }

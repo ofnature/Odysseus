@@ -1117,6 +1117,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public bool InCombat => _condition[ConditionFlag.InCombat];
 
+    public bool DaedalusDisabledByUser => _daedalus.IsDisabledByUser();
+
     public bool IsReady
         => _objectTable.LocalPlayer is not null
            && !_condition[ConditionFlag.BetweenAreas]

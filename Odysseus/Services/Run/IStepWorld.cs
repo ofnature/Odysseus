@@ -323,6 +323,13 @@ public interface IStepWorld
 
     bool InCombat { get; }
 
+    /// <summary>
+    /// Daedalus has been switched off by the user and will not fight. A combat step does not pull
+    /// while this holds: the pull re-targets every tick, and with no one fighting it would never stop
+    /// taking the player's target.
+    /// </summary>
+    bool DaedalusDisabledByUser { get; }
+
     /// <summary>Not occupied, casting, zoning or otherwise mid-something.</summary>
     bool IsReady { get; }
 

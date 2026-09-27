@@ -109,6 +109,7 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public IReadOnlyList<string> SelectIconStringEntries() => VisibleAddons.Contains("SelectIconString") ? IconEntries : [];
     public void SelectIconStringIndex(int index) => Calls.Add($"IconSelect {index}");
     public bool InCombat { get; set; }
+    public bool DaedalusDisabledByUser { get; set; }
     public bool IsReady { get; set; } = true;
     private bool _occupied;
     private DateTime _talkingUntil;

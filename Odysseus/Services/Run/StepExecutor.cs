@@ -450,6 +450,8 @@ public sealed class StepExecutor
             _phaseStart = now;
     }
 
+    private bool _daedalusOffSaid;
+
     private void CommandAi(bool on)
     {
         if (_aiCommanded == on)
@@ -554,6 +556,7 @@ public sealed class StepExecutor
         _craftAsked = 0;
         _craftHeldAtAsk = 0;
         _stepStart = _world.UtcNow;
+        _daedalusOffSaid = false;
         _moveRetries = 0;
         _sawOccupied = false;
         _interactRetries = 0;
@@ -3575,6 +3578,22 @@ public sealed class StepExecutor
             return; // Daedalus is fighting; our only job is to not walk away.
         }
         _inFight = false;
+
+        // Daedalus switched off: no one is going to fight, so do not pull. The pull re-targets every
+        // tick, and with nothing ever entering combat it took the player's target for good — a
+        // disabled healer could not target anything (reported 2026-09-26). The clock holds with it,
+        // the way a gearset build holds a move, so turning Daedalus back on carries straight on.
+        if (_world.DaedalusDisabledByUser)
+        {
+            _stepStart = now;
+            if (!_daedalusOffSaid)
+            {
+                _daedalusOffSaid = true;
+                _world.Log("Daedalus is switched off — not pulling. Enable it to carry on.");
+            }
+            return;
+        }
+        _daedalusOffSaid = false;
 
         if (now - _stepStart > CombatMax)
         {

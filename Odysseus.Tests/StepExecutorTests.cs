@@ -676,6 +676,31 @@ public class StepExecutorTests
         Assert.Contains("Attack", world.Calls);
     }
 
+    /// <summary>
+    /// Daedalus switched off: no one will fight, and every pull re-targets, so a disabled healer could
+    /// not keep anything targeted (2026-09-26). The step holds without pulling — well past the combat
+    /// time limit, without failing — says so once, and pulls again the moment Daedalus is back on.
+    /// </summary>
+    [Fact]
+    public void Combat_does_not_pull_while_Daedalus_is_switched_off()
+    {
+        var world = new FakeStepWorld { PlayerPosition = Vector3.Zero, DaedalusDisabledByUser = true };
+        world.AttackResults.Enqueue(true);
+        var ex = new StepExecutor(world);
+        var step = Step(StepKind.Combat, Vector3.Zero);
+        step.EnemySpawnType = EnemySpawnType.OverworldEnemies;
+        ex.Begin(step);
+
+        Run(ex, world, maxTicks: 800); // 400s, past the 5-minute combat limit
+        Assert.DoesNotContain("Attack", world.Calls);
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.Single(world.Calls, c => c.Contains("Daedalus is switched off"));
+
+        world.DaedalusDisabledByUser = false;
+        Run(ex, world, maxTicks: 3);
+        Assert.Contains("Attack", world.Calls);
+    }
+
     [Fact]
     public void Combat_with_nothing_to_fight_gives_up_waiting_and_is_done()
     {
