@@ -7,8 +7,9 @@ namespace Odysseus.Services.Gathering;
 
 /// <summary>Where to go, as what, to gather one item.</summary>
 /// <param name="Spawns">Every spot the node appears at, in the order they should be tried.</param>
+/// <param name="Timed">An unspoiled or ephemeral node: one node, up only in its window, gone once worked.</param>
 public sealed record GatheringTarget(
-    uint ItemId, uint NodeId, uint TerritoryId, uint ClassJobId, ushort Level, IReadOnlyList<Vector3> Spawns);
+    uint ItemId, uint NodeId, uint TerritoryId, uint ClassJobId, ushort Level, IReadOnlyList<Vector3> Spawns, bool Timed = false);
 
 /// <summary>
 /// Turns "I need this item" into "stand here, as this class".
@@ -32,7 +33,15 @@ public static class GatheringPlan
     /// leaves quest-hidden points unplaced (the Qitari opener's three all read territory 0), and
     /// with a hint those still become targets; without one they are dropped as before.
     /// </param>
-    public static IReadOnlyList<GatheringTarget> All(uint itemId, IGatheringSource source, NodeAtlas atlas, uint territoryHint = 0)
+    /// <summary>Time a timed node must have left in its window to be worth going to.</summary>
+    public static readonly System.TimeSpan TimedMinLeft = System.TimeSpan.FromSeconds(60);
+
+    /// <param name="now">
+    /// When given, a timed point (unspoiled, ephemeral) is included while its window is up with
+    /// <see cref="TimedMinLeft"/> to go. Without it they are left out, as they always were — a
+    /// caller that cannot wait for a window must not be sent to one.
+    /// </param>
+    public static IReadOnlyList<GatheringTarget> All(uint itemId, IGatheringSource source, NodeAtlas atlas, uint territoryHint = 0, System.DateTime? now = null)
     {
         var targets = new List<GatheringTarget>();
         foreach (var point in source.PointsFor(itemId))
@@ -40,12 +49,12 @@ public static class GatheringPlan
             var territory = point.HasZone ? point.TerritoryId : territoryHint;
             if (territory <= 1)
                 continue; // the sheet leaves a placeholder behind; there is nowhere to send anyone
-            if (point.Timed)
+            if (point.Timed && (now is not { } at || EorzeaClock.UntilGatherable(point.Windows, at, TimedMinLeft) != System.TimeSpan.Zero))
                 continue; // unspoiled or ephemeral: there is nothing there outside its window
             var spawns = atlas.SpawnsOf(point.NodeId);
             if (spawns.Count == 0)
                 continue;
-            targets.Add(new GatheringTarget(itemId, point.NodeId, territory, point.ClassJobId, point.Level, spawns));
+            targets.Add(new GatheringTarget(itemId, point.NodeId, territory, point.ClassJobId, point.Level, spawns, point.Timed));
         }
 
         return targets

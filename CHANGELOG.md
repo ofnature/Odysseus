@@ -1,6 +1,37 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.11 — unreleased
+
+### Crafting
+- Settings → Handoffs → "Crafting" picks who makes items for Craft steps and deliveries: Artisan (as before) or Hephaestus. The switch is immediate; a craft already under way finishes with the crafter that started it, and every status line and stop names whichever is in use
+
+### Crafting (quests)
+- A Craft step that names no item makes what the quest hands in instead of stopping with "Craft step names no item": the quest's own hand-in items that have a recipe, each one not already in the bag, in turn, as many of each as the path's own note says (To Be the Wood takes three shields, Supplies for the Sick twelve lumber; the path library is rebuilt as format 6 to carry the note). Ten upstream quests have such a step — My First Saw (205, Maple Lumber), To Be the Wood (139), A Carpenter in Need (141, a harpoon and a shortbow), and the Ishgard culinarian quests among them
+- A craft the quest takes only at high quality is held to it: the path's note marks those items HQ (56 quests — A Crisis of Confidence's Walnut Lumber, Might Made Right's Hi-Potions of Strength, the Ishgard culinarian dishes), only HQ copies count toward the target, and a normal-quality result is crafted again. Two normal-quality results in a row stop the step with a reason rather than burn more materials
+- A craft the quest takes only with materia melded in is melded: the path's note names the materia ("Crab Bow HQ with 1x Savage Aim Materia III", "any Materia", "any grade I"), and once the item is made Odysseus opens Materia Melding, picks the item and a materia from the bags that fits — the lowest grade that does, so "any Materia" spends the cheapest — and presses Meld only when the confirmation names that item and that materia (The Lance's Lesson, Saving Captain Gairhard and fourteen others). No fitting materia, melding not yet learned, or a confirmation that names anything else stops the step with the reason and melds nothing
+- A Craft step's "already in the bag" skip counts only what the quest will take — HQ when the note says HQ, melded when it asks for materia — so an unmelded or normal-quality copy no longer skips the craft, the check or the meld
+- `/od record <Window>` writes to the log what a window sends the game when you click in it; again to stop
+- A craft that stopped with its materials all there says which crafter to check instead of printing its name placeholder
+
+### Getting there
+- An aethernet hop asked for with no shard in view walks toward the nearest shard the city map shows, then to the shard itself once it loads, then hops. Blood Ties (2617) ended a step at the far end of Limsa's Upper Decks and asked for the hop from there; Lifestream went nowhere and the step faulted after 90 seconds
+
+### Gather lists
+- An item only timed nodes yield shows when it is up, counted down in real time beside its name: "up · 4:12 left" in green, "in 12:34" in yellow — from the node's own window in the game's data (Grade 3 Shroud Topsoil: 06:00 for three Eorzean hours)
+- A run gathers timed items too: the rest of the list first, then "Waiting for … — its node is up in 12:34", and off the moment it opens (with a minute of the window left, at least). A window that closes mid-gather puts the item back for the next one, three windows at most. The gathering gate other plugins call still promises only always-there nodes
+- A timed node opening while an ordinary item is being gathered: the node in hand is finished, the timed one gathered while it is up, then the ordinary item is taken up again
+- A timed item worked this window waits for the next one, even after Stop and Gather again — it no longer chains round its empty spots — and a timed node not up at any of its spots is looked for once round, not twice
+- When the item wanted is gone from a node, the rest of the node goes on Dark Matter Cluster if it offers one — an unspoiled node gives its item and keeps its attempts
+- "Gather" runs the list on screen and nothing else; "All enabled" runs every list with Enabled ticked, as "Gather" used to. A crystals list left enabled was gathered alongside a list that only asked for yew branches
+
+### Materials
+- A crafted item the FC chest already holds is fetched, not made: its ingredients leave the materials list, so "Grab from FC" takes the item instead of the item and everything to craft it. Only what the chest cannot cover is still expanded into ingredients
+
+### Dialogue
+- An NPC's chat menu that the path names no answer for is no longer asked about forever: the first line is still tried once, and when the same menu comes back the last line ("Nothing.") ends the talk. Straight after a hand-in Severian answered Might Made Right (648) with his chat menu, and Odysseus asked "What do you do here?" every three seconds for minutes; now it leaves the conversation and asks him again, which is when he offers the quest
+<!-- LATEST-END -->
+
 ## v0.2.10 — 2026-09-27
 
 Dives stop sinking, area crossings answer their own travel question, and item fights hold Daedalus from the start of the step.
@@ -12,7 +43,6 @@ Dives stop sinking, area crossings answer their own travel question, and item fi
 ### Quest fights
 - A fight that wants the mob kept alive under a health line holds Daedalus from the start of the step, not from the start of the fight: a mob that aggroed on the approach was Daedalus's to kill before the item could go on (Are They Ill-tempered, 2883)
 - The log follows the mob's health on the way down, says when Daedalus did not take the hold, and says where the mob was last seen when a fight ends without the item
-<!-- LATEST-END -->
 
 ## v0.2.9 — 2026-09-26
 

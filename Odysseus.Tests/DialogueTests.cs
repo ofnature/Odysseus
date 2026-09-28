@@ -386,6 +386,36 @@ public class DialogueTests
         Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("could not be resolved"));
     }
 
+    /// <summary>
+    /// Might Made Right (648): straight after a hand-in, Severian answered with his chat menu, which
+    /// reopens after every topic until "Nothing." is picked. Taking the first line again and again
+    /// asked "What do you do here?" every three seconds for minutes. The first time is a guess; when
+    /// the same menu comes back, the last line ends the talk.
+    /// </summary>
+    [Fact]
+    public void A_chat_menu_that_comes_back_is_left_with_its_last_line()
+    {
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w, new Texts());
+        ex.Begin(new QuestStep { Kind = StepKind.AcceptQuest, KindName = "AcceptQuest", DataId = 7, TerritoryId = 400, Position = Vector3.Zero }, questId: 648);
+        Ticks(ex, w, 3);
+
+        w.IsOccupied = true;
+        w.ListEntries.AddRange(["What do you do here?", "What does an alchemist do?", "Nothing."]);
+        for (var round = 0; round < 2; round++)
+        {
+            w.VisibleAddons.Add("SelectString");
+            Ticks(ex, w, 12);                       // past the grace
+            w.VisibleAddons.Remove("SelectString"); // the NPC answers, then the menu reopens
+            Ticks(ex, w, 2);
+        }
+
+        Assert.Equal(1, w.Calls.Count(c => c == "Select 0"));   // guessed once
+        Assert.Equal(1, w.Calls.Count(c => c == "Select 2"));   // then left
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("leaving the conversation with \"Nothing.\""));
+    }
+
     [Fact]
     public void A_list_the_step_never_named_is_answered_after_a_grace()
     {

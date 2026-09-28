@@ -127,6 +127,7 @@ public class DeliveryRunnerTests
 
     private sealed class Crafter : ICrafter
     {
+        public string Name => "Artisan";
         public bool Available { get; set; } = true;
         public bool IsCrafting { get; set; }
         public List<(uint Recipe, int Amount)> Asked { get; } = [];

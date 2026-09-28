@@ -250,6 +250,10 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Dictionary<uint, Vector3> AethernetAccess { get; } = new();
     public Vector3? NearestAethernetAccess(uint territoryId, Vector3 near)
         => AethernetAccess.TryGetValue(territoryId, out var p) ? p : null;
+    /// <summary>Territory → the shard its map shows, for when none is loaded around the player.</summary>
+    public Dictionary<uint, (string Name, Vector3 At)> MappedAccess { get; } = new();
+    public (string Name, Vector3 At)? MappedAethernetAccess(uint territoryId, Vector3 near)
+        => MappedAccess.TryGetValue(territoryId, out var m) ? m : null;
     public bool AethernetTeleport(string destination, bool byNameOnly = false)
     {
         Calls.Add($"Aethernet {destination}{(byNameOnly ? " byname" : "")}");
@@ -323,6 +327,54 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
 
     // ── Making things ──
     public bool CrafterReady { get; set; } = true;
+    public string CrafterName { get; set; } = "Artisan";
+    public Dictionary<ushort, List<(uint ItemId, int Count, bool HighQuality)>> HandIns { get; } = new();
+    public IReadOnlyList<(uint ItemId, int Count, bool HighQuality)> QuestHandInCrafts(ushort questId, string? note)
+        => HandIns.TryGetValue(questId, out var items) ? items : [];
+    /// <summary>Items the path's note marks HQ.</summary>
+    public HashSet<uint> NoteHq { get; } = [];
+    public bool NoteWantsHighQuality(uint itemId, string? note) => NoteHq.Contains(itemId);
+    /// <summary>Item → the materia the path's note wants melded into it.</summary>
+    public Dictionary<uint, CraftNote.Meld> NoteMeld { get; } = new();
+    public CraftNote.Meld? NoteWantsMeld(uint itemId, string? note) => NoteMeld.TryGetValue(itemId, out var m) ? m : null;
+    /// <summary>Items a melded copy of is held.</summary>
+    public HashSet<uint> Melded { get; } = [];
+    public bool HoldsMelded(uint itemId, CraftNote.Meld meld) => Melded.Contains(itemId);
+    public bool HoldsForCraft(uint itemId, int count, string? note)
+        => (NoteHq.Contains(itemId) ? ItemCountHq(itemId) : ItemCount(itemId)) >= count
+           && (!NoteMeld.ContainsKey(itemId) || Melded.Contains(itemId));
+    public bool MeldingUnlocked { get; set; } = true;
+    public bool MeldingOpen { get; set; }
+    /// <summary>The window's lists, by item id and by materia name.</summary>
+    public List<uint> MeldItems { get; } = [];
+    public List<string> MeldMaterias { get; } = [];
+    private int _meldPickedItem = -1;
+    /// <summary>The confirmation: the item and materia it names, when up.</summary>
+    public (uint Item, string Materia)? MeldDialog { get; set; }
+    public void OpenMelding() { Calls.Add("OpenMelding"); MeldingOpen = true; }
+    public int MeldItemIndex(uint itemId) => MeldingOpen ? MeldItems.IndexOf(itemId) : -1;
+    public int MeldMateriaIndex(CraftNote.Meld meld) => MeldingOpen ? CraftNote.Pick(MeldMaterias, meld) : -1;
+    public void MeldSelectItem(int index) { Calls.Add($"MeldItem {index}"); _meldPickedItem = index; }
+    public void MeldSelectMateria(int index)
+    {
+        Calls.Add($"MeldMateria {index}");
+        if (_meldPickedItem >= 0) MeldDialog = (MeldItems[_meldPickedItem], MeldMaterias[index]);
+    }
+    public bool? MeldDialogIsFor(uint itemId, CraftNote.Meld meld)
+        => MeldDialog is { } d ? d.Item == itemId && CraftNote.Fits(d.Materia, meld) : null;
+    public void ConfirmMeld()
+    {
+        Calls.Add("ConfirmMeld");
+        if (MeldDialog is { } d) Melded.Add(d.Item);
+        MeldDialog = null;
+    }
+    public void CloseMelding() { if (MeldingOpen) Calls.Add("CloseMelding"); MeldingOpen = false; MeldDialog = null; }
+    /// <summary>High-quality copies in the bag — a part of <see cref="Bag"/>, never more.</summary>
+    public Dictionary<uint, int> BagHq { get; } = new();
+    public int ItemCountHq(uint itemId) => Math.Min(BagHq.GetValueOrDefault(itemId), ItemCount(itemId));
+    /// <summary>Whether a craft comes out HQ; each craft takes the next answer, then the last one repeats.</summary>
+    public Queue<bool> CraftsHq { get; } = new();
+    private bool _lastCraftHq = true;
     public bool IsCrafting { get; set; }
     /// <summary>How many a craft actually delivers before Artisan stops; the default makes the whole order.</summary>
     public int CraftDelivers { get; set; } = int.MaxValue;
@@ -369,7 +421,10 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
         if (made > 0)
         {
             if (MadeFrom.ContainsKey(itemId)) Bag[ingredient] = ItemCount(ingredient) - made * PerCraft;
-            Bag[itemId] = Bag.GetValueOrDefault(itemId) + Math.Min(CraftDelivers, made);
+            var delivered = Math.Min(CraftDelivers, made);
+            Bag[itemId] = Bag.GetValueOrDefault(itemId) + delivered;
+            if (CraftsHq.TryDequeue(out var hq)) _lastCraftHq = hq;
+            if (_lastCraftHq) BagHq[itemId] = BagHq.GetValueOrDefault(itemId) + delivered;
         }
         IsCrafting = CraftKeepsRunning;
         return CraftJob;

@@ -28,7 +28,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
     private readonly IDeliveryState _state;
     private readonly IDeliveryBonus _bonus;
     private readonly ScripLedger _scrips;
-    private readonly ArtisanIpc _artisan;
+    private readonly CrafterChoice _artisan;
     private readonly UnlockPlanner _unlock;
     private readonly DeliveryRunner _runner;
     private readonly IDeliveryRequests _requests;
@@ -57,7 +57,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
     private const string BlockedPopup = "Turn-in stopped###OdysseusDeliveryBlocked";
 
     public DeliveriesWindow(DeliveryCatalog catalog, IDeliveryState state, IDeliveryBonus bonus, ScripLedger scrips,
-        ArtisanIpc artisan, UnlockPlanner unlock, DeliveryRunner runner, IDeliveryRequests requests,
+        CrafterChoice artisan, UnlockPlanner unlock, DeliveryRunner runner, IDeliveryRequests requests,
         OdysseusConfig config, Action save, IGatherer gatherer, IScripShop shop, SpendPlanner spending, SpendRunner spender)
         : base("Odysseus Deliveries##OdysseusDeliveries")
     {
@@ -137,20 +137,21 @@ public sealed class DeliveriesWindow : OdysseusWindow
                                  : "Nothing more can be turned in until the reset."));
 
         ImGui.SameLine(0f, 8f);
+        var crafter = _artisan.Name;
         if (_artisan.Available)
-            OdysseusTheme.StateChip("Artisan ready");
+            OdysseusTheme.StateChip($"{crafter} ready");
         else
         {
             var why = _artisan.Unavailable;
-            var loaded = why.StartsWith("Artisan is loaded", StringComparison.Ordinal);
-            OdysseusTheme.Chip(loaded ? "Artisan not answering" : "Artisan missing",
+            var loaded = why.StartsWith($"{crafter} is loaded", StringComparison.Ordinal);
+            OdysseusTheme.Chip(loaded ? $"{crafter} not answering" : $"{crafter} missing",
                 OdysseusTheme.YellowDark, OdysseusTheme.TextPrimary);
             if (ImGui.IsItemHovered())
                 ImGui.SetTooltip(why.Length == 0
-                    ? "Artisan is not available."
+                    ? $"{crafter} is not available."
                     : why + '\u000A' + (loaded
                         ? "Nothing to install — the handoff itself is at fault."
-                        : "Install or enable Artisan, then reopen this window."));
+                        : $"Install or enable {crafter}, or pick the other crafter in Settings, then reopen this window."));
         }
 
         ImGui.SameLine(0f, 6f);
@@ -212,7 +213,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
             ImGui.EndCombo();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Which job crafts delivery items. Artisan switches the character to the\n" +
+            ImGui.SetTooltip("Which job crafts delivery items. The crafter switches the character to the\n" +
                              "recipe's job, so this decides what you get pulled onto.\n" +
                              "\"Current job\" keeps you where you are whenever that job can make it.");
         ImGui.Separator();
@@ -424,7 +425,7 @@ public sealed class DeliveriesWindow : OdysseusWindow
             ? "Cannot read this week's request yet."
             : $"Wants {wanted.ItemName} (collectability {wanted.CollectabilityHigh}).";
         var sourcing = route == DeliveryRoute.Craft
-            ? "Buys ingredients from the merchant nearby, then crafts through Artisan."
+            ? $"Buys ingredients from the merchant nearby, then crafts through {_artisan.Name}."
             : $"Odysseus does not {(route == DeliveryRoute.Fish ? "fish" : "gather")} yet — have them in the bag and it\n" +
               "handles the travel and the turn-in, or it stops and says where to find them.";
 

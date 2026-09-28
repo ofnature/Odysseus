@@ -76,6 +76,13 @@ public interface IStepWorld
     Vector3? NearestReachablePoint(Vector3 near, float within);
 
     /// <summary>
+    /// The nearest aethernet shard in a zone as the city map places it — for when none is loaded
+    /// around the player. The map has no heights, so the point is on the mesh near it where one
+    /// can be found, else at the player's own height. Null when the map shows no shard.
+    /// </summary>
+    (string Name, Vector3 At)? MappedAethernetAccess(uint territoryId, Vector3 near);
+
+    /// <summary>
     /// Rebuild the zone's navmesh from live collision. For the contradiction where both ends sit
     /// on the mesh and the pathfinder still gives nothing: a cache built before the world changed
     /// shape. False when the rebuild could not be asked for.
@@ -399,8 +406,65 @@ public interface IStepWorld
     // the bag; a Gather step switches GatherBuddy on and watches the bag. Same handoff doctrine as
     // Theseus above: we say what we want, wait, and stop with a reason if it does not arrive.
 
-    /// <summary>Artisan is loaded and answering.</summary>
+    /// <summary>The crafter Settings names (Artisan or Hephaestus) is loaded and answering.</summary>
     bool CrafterReady { get; }
+
+    /// <summary>That crafter's name, for what the run says.</summary>
+    string CrafterName { get; }
+
+    /// <summary>
+    /// What a quest hands in that can be crafted — its <c>RITEM</c> script parameters that have a
+    /// recipe — for a Craft step that names no item, with how many: the count the path's note gives
+    /// for that item by name (<see cref="CraftNote"/>), else one, and whether the note marks it HQ.
+    /// Empty when there are none.
+    /// </summary>
+    System.Collections.Generic.IReadOnlyList<(uint ItemId, int Count, bool HighQuality)> QuestHandInCrafts(ushort questId, string? note);
+
+    /// <summary>The path's note marks this item HQ — the quest will take only a high-quality one.</summary>
+    bool NoteWantsHighQuality(uint itemId, string? note);
+
+    /// <summary>The materia the path's note wants melded into this item, or null when it asks for none.</summary>
+    CraftNote.Meld? NoteWantsMeld(uint itemId, string? note);
+
+    /// <summary>A copy of the item in the bags or armoury carries the materia asked for.</summary>
+    bool HoldsMelded(uint itemId, CraftNote.Meld meld);
+
+    // ── Materia melding (the MateriaAttach window, driven by the values the game's own clicks send) ──
+
+    /// <summary>Materia Melding has been learned.</summary>
+    bool MeldingUnlocked { get; }
+
+    /// <summary>The melding window is up.</summary>
+    bool MeldingOpen { get; }
+
+    /// <summary>Open the melding window — the "Materia Melding" general action.</summary>
+    void OpenMelding();
+
+    /// <summary>Where the item sits in the window's item list, or -1.</summary>
+    int MeldItemIndex(uint itemId);
+
+    /// <summary>The materia in the window's list to meld — the lowest grade the requirement takes — or -1.</summary>
+    int MeldMateriaIndex(CraftNote.Meld meld);
+
+    void MeldSelectItem(int index);
+
+    /// <summary>Picking a materia opens the confirmation.</summary>
+    void MeldSelectMateria(int index);
+
+    /// <summary>
+    /// The confirmation is up: true when it names this item and a materia the requirement takes,
+    /// false when it names anything else, null when it is not up.
+    /// </summary>
+    bool? MeldDialogIsFor(uint itemId, CraftNote.Meld meld);
+
+    /// <summary>Press Meld in the confirmation.</summary>
+    void ConfirmMeld();
+
+    /// <summary>Close the melding window (and its confirmation) if up.</summary>
+    void CloseMelding();
+
+    /// <summary>High-quality copies only, in the bags.</summary>
+    int ItemCountHq(uint itemId);
 
     /// <summary>Artisan's endurance loop is running.</summary>
     bool IsCrafting { get; }

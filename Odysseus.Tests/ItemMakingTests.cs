@@ -43,6 +43,7 @@ public class ItemMakingTests
 
     private sealed class Crafter : ICrafter
     {
+        public string Name => "Artisan";
         public bool Available => true;
         public bool IsCrafting => false;
         public bool CraftItem(uint recipeId, int amount) => true;

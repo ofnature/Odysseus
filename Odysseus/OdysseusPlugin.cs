@@ -132,7 +132,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // the shop half for PurchaseItem steps and hands Craft/Gather steps to the same Artisan and
         // GatherBuddy the deliveries use, so all of it has to exist first.
         var deliveryWorld = new Services.Deliveries.GameDeliveryWorld(DataManager, message => Warn(message));
-        var artisan = new ArtisanIpc(PluginInterface, message => Warn(message));
+        // Artisan or Hephaestus, as Settings says — read on every call, so a switch is immediate.
+        var artisan = new CrafterChoice(
+            new ArtisanIpc(PluginInterface, message => Warn(message)),
+            new HephaestusIpc(PluginInterface, message => Warn(message)),
+            () => _config.CraftProvider);
         var gatherBuddy = new GatherBuddyIpc(PluginInterface, message => Warn(message));
         var recipes = new Services.Deliveries.RecipeLookup(DataManager, message => Warn(message));
         var ingredients = new Services.Deliveries.IngredientSource(DataManager, message => Warn(message));
@@ -482,8 +486,12 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         catch { /* a log line is never worth a fault */ }
     }
 
+    /// <summary>The click recorder, made the first time a recording is asked for.</summary>
+    private CallbackRecorder? _clickRecorder;
+
     public void Dispose()
     {
+        _clickRecorder?.Dispose();
         _ownLog?.Dispose();
         CommandManager.RemoveHandler(CommandMain);
         CommandManager.RemoveHandler(CommandShort);
@@ -742,6 +750,15 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         if (trimmed.StartsWith("values ", StringComparison.OrdinalIgnoreCase))
         {
             Say(_world.DescribeAddonValues(trimmed[7..].Trim()));
+            return;
+        }
+
+        // "/od record MateriaAttach" — what a window sends when you click in it, for automating a
+        // click from the game's own values rather than a guess. Again to stop.
+        if (trimmed.StartsWith("record ", StringComparison.OrdinalIgnoreCase))
+        {
+            _clickRecorder ??= new CallbackRecorder(GameInterop, message => Say(message));
+            Say(_clickRecorder.Toggle(trimmed[7..].Trim()));
             return;
         }
 

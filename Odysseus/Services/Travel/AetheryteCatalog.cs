@@ -47,6 +47,9 @@ public sealed class AetheryteCatalog
     public sealed record Shard(uint Id, string Name, uint PlaceNameId, uint TerritoryId, byte Group, System.Numerics.Vector3? Position);
 
     private readonly List<Shard> _shards = [];
+
+    /// <summary>Territory → its shards as the map draws them: name and world X/Z (a map has no heights).</summary>
+    private readonly Dictionary<uint, List<(string Name, System.Numerics.Vector2 At)>> _mappedShards = new();
     /// <summary>Every aethernet stop by name — shards and city aetherytes alike.</summary>
     private readonly Dictionary<string, Shard> _stopsByName = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Aethernet group → the city aetheryte you can actually teleport to.</summary>
@@ -99,6 +102,56 @@ public sealed class AetheryteCatalog
         {
             log($"Aetheryte catalog failed to load: {ex.GetType().Name}: {ex.Message}");
         }
+
+        try
+        {
+            LoadMappedShards(data);
+        }
+        catch (Exception ex)
+        {
+            log($"Aethernet shard map markers unavailable: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Where each shard is, from the city map's own markers — the one place the game records it.
+    /// The Aetheryte rows carry no Level for shards, and the object table only holds the ones in
+    /// view, so a step ending at the far end of Limsa's Upper Decks saw none and hopped from
+    /// nowhere (Blood Ties, 2617). A marker's X/Y is in map pixels; the map's scale and offset turn
+    /// it into world X/Z.
+    /// </summary>
+    private void LoadMappedShards(IDataManager data)
+    {
+        var territories = data.GetExcelSheet<TerritoryType>();
+        var markers = data.GetSubrowExcelSheet<MapMarker>();
+        foreach (var byTerritory in _shards.GroupBy(s => s.TerritoryId))
+        {
+            if (territories.GetRowOrDefault(byTerritory.Key)?.Map.ValueNullable is not { } map || map.SizeFactor == 0)
+                continue;
+            if (!markers.TryGetRow(map.MapMarkerRange, out var rows))
+                continue;
+            var scale = map.SizeFactor / 100f;
+            foreach (var marker in rows)
+            {
+                if (marker.DataType != 4) continue;   // 4: an aetheryte or shard, keyed by its PlaceName
+                if (byTerritory.FirstOrDefault(s => s.PlaceNameId == marker.DataKey.RowId) is not { } shard) continue;
+                var at = new System.Numerics.Vector2(
+                    (marker.X - 1024f) / scale - map.OffsetX,
+                    (marker.Y - 1024f) / scale - map.OffsetY);
+                if (!_mappedShards.TryGetValue(byTerritory.Key, out var list))
+                    _mappedShards[byTerritory.Key] = list = [];
+                list.Add((shard.Name, at));
+            }
+        }
+    }
+
+    /// <summary>The nearest shard in a zone as the map places it (X/Z only), or null when the map shows none.</summary>
+    public (string Name, System.Numerics.Vector2 At)? MappedShardNear(uint territoryId, System.Numerics.Vector3 near)
+    {
+        if (!_mappedShards.TryGetValue(territoryId, out var list) || list.Count == 0)
+            return null;
+        var from = new System.Numerics.Vector2(near.X, near.Z);
+        return list.MinBy(s => System.Numerics.Vector2.Distance(s.At, from));
     }
 
     private static System.Numerics.Vector3? LevelPosition(Aetheryte a)

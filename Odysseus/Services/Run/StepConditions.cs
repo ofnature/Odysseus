@@ -17,6 +17,12 @@ public interface IConditionWorld
 
     /// <summary>How many of an item are held, both qualities — HQ counts, the game accepts it.</summary>
     int ItemCount(uint itemId);
+
+    /// <summary>
+    /// A Craft step's item is held the way the quest takes it: <paramref name="count"/> of it, HQ
+    /// when the path's note marks it HQ, and a copy carrying the materia the note asks for.
+    /// </summary>
+    bool HoldsForCraft(uint itemId, int count, string? note);
 }
 
 /// <summary>
@@ -38,6 +44,7 @@ public sealed class GroundedWorld(IConditionWorld inner) : IConditionWorld
     public bool IsQuestComplete(ushort questId) => inner.IsQuestComplete(questId);
     public bool IsQuestAccepted(ushort questId) => inner.IsQuestAccepted(questId);
     public int ItemCount(uint itemId) => inner.ItemCount(itemId);
+    public bool HoldsForCraft(uint itemId, int count, string? note) => inner.HoldsForCraft(itemId, count, note);
 }
 
 /// <summary>Evaluates <see cref="StepCondition"/> against live state. Pure; the only inputs are the interface and the snapshot.</summary>
@@ -70,7 +77,12 @@ public static class StepConditions
         {
             // The clause is about the step's own item, so without a step there is nothing to ask.
             if (step?.ItemId is not { } itemId) return false;
-            var held = world.ItemCount(itemId) >= (step.ItemCount ?? 1);
+            // A crafted item held the wrong way — normal quality, or unmelded — is not "in the
+            // inventory" for the quest: Saving Captain Gairhard's bow sat in the bag unmelded, the
+            // Craft step was skipped for it, and the hand-in could never take it.
+            var held = step.Kind == StepKind.Craft
+                ? world.HoldsForCraft(itemId, step.ItemCount ?? 1, step.Comment)
+                : world.ItemCount(itemId) >= (step.ItemCount ?? 1);
             if (held == item.NotInInventory) return false;
         }
 

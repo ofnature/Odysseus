@@ -38,6 +38,8 @@ public sealed class ArtisanIpc : Deliveries.ICrafter
         _log = log;
     }
 
+    public string Name => "Artisan";
+
     /// <summary>
     /// Why Artisan cannot be used, or empty when it can. Worth telling apart: "not installed" is
     /// something you fix in the plugin installer, "loaded but its gate refused" is something we

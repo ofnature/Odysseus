@@ -35,6 +35,254 @@ public class CraftGatherStepTests
         Kind = StepKind.Gather, KindName = "Gather", TerritoryId = 400, GatherItems = [.. targets],
     };
 
+    // ── A Craft step that names no item ──
+
+    /// <summary>
+    /// My First Saw (205) and nine others: upstream's Craft step names no item. The quest's own
+    /// hand-in items say what to make — every one of them not already in the bag, in turn.
+    /// </summary>
+    [Fact]
+    public void A_craft_step_naming_no_item_makes_what_the_quest_hands_in()
+    {
+        var world = new FakeStepWorld();
+        world.HandIns[2045] = [(12849, 1, false), (12862, 1, false), (12855, 1, false)];   // Kaiser Roll, Beet Soup, Grilled Sweetfish
+        world.Craftable.UnionWith([12849u, 12862u, 12855u]);
+        world.Bag[12862] = 1;                           // one already made
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Craft, KindName = "Craft", TerritoryId = 400 }, questId: 2045);
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Contains("Craft 1 x 12849", world.Calls);
+        Assert.Contains("Craft 1 x 12855", world.Calls);
+        Assert.DoesNotContain("Craft 1 x 12862", world.Calls);
+    }
+
+    /// <summary>To Be the Wood (139) takes three shields: making one left the turn-in at 2/3.</summary>
+    [Fact]
+    public void A_craft_step_naming_no_item_makes_as_many_as_the_quest_takes()
+    {
+        var world = new FakeStepWorld();
+        world.HandIns[139] = [(2219, 3, false)];
+        world.Craftable.Add(2219);
+        world.Bag[2219] = 2;
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Craft, KindName = "Craft", TerritoryId = 400 }, questId: 139);
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Contains("Craft 1 x 2219", world.Calls);
+        Assert.Equal(3, world.Bag[2219]);
+    }
+
+    [Theory]
+    [InlineData("Crafted Item:\n 3x Square Maple Shield\nAutocraft requires:\n 3x Maple Lumber,\n 6x Bronze Rivets", "Square Maple Shield", 3)]
+    [InlineData("Crafted Item:\n 12x Ash Lumber\nAutocraft requires:\n 36x Ash Log", "Ash Lumber", 12)]
+    [InlineData("Crafted Item:\n 1x Walnut Lumber HQ\nAutocraft requires:\n 3x Walnut Log", "Walnut Lumber", 1)]
+    [InlineData("Crafted Item:\n1x Beet Soup HQ\n1x Kaiser Roll HQ\n1x Grilled Sweetfish HQ\nAutocrafting requires:\n1x Abalathian Rock Salt", "Kaiser Roll", 1)]
+    [InlineData("!!Requires Manual Melding!!\nCrafts: 1x Iron Lance\nRequires: 1x * Materia I (not II+)", "Iron Lance", 1)]
+    public void The_path_note_says_how_many_the_quest_takes(string note, string item, int count)
+    {
+        var counts = CraftNote.Read(note);
+        Assert.Equal(count, counts[item].Count);
+        Assert.DoesNotContain("Maple Lumber", counts.Keys);   // materials are not what the quest takes
+        Assert.DoesNotContain("Ash Log", counts.Keys);
+    }
+
+    [Theory]
+    [InlineData("Crafted Item:\n 1x Walnut Lumber HQ\nAutocraft requires:\n 3x Walnut Log", "Walnut Lumber", true)]
+    [InlineData("Crafted Item:\n1x Sohm Al tart\n1x Ishgardian tea HQ\nAutocrafting requires:", "Sohm Al tart", false)]
+    [InlineData("Crafted Item:\n1x Sohm Al tart\n1x Ishgardian tea HQ\nAutocrafting requires:", "Ishgardian tea", true)]
+    [InlineData("Crafted Item:\n 3x Hi-Potion of Strength HQ// Autocraft requires:\n 1x Rock Salt,", "Hi-Potion of Strength", true)]
+    [InlineData("Crafted Item:\n 3x Square Maple Shield\nAutocraft requires:\n 3x Maple Lumber", "Square Maple Shield", false)]
+    public void The_path_note_says_which_items_must_be_HQ(string note, string item, bool hq)
+        => Assert.Equal(hq, CraftNote.Read(note)[item].HighQuality);
+
+    /// <summary>
+    /// A Crisis of Confidence takes an HQ Walnut Lumber. A normal-quality result does not count: the
+    /// crafter is asked again, and the step ends only once an HQ one is in the bag.
+    /// </summary>
+    [Fact]
+    public void An_HQ_craft_asks_again_when_one_comes_out_normal_quality()
+    {
+        var world = new FakeStepWorld();
+        world.Craftable.Add(5371);
+        world.NoteHq.Add(5371);
+        world.CraftsHq.Enqueue(false);
+        world.CraftsHq.Enqueue(true);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(5371, 1), questId: 168);
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Equal(2, world.Calls.Count(c => c.StartsWith("Craft 1 x 5371")));
+        Assert.Equal(1, world.ItemCountHq(5371));
+        Assert.Contains(world.Calls, c => c.StartsWith("Log") && c.Contains("normal quality"));
+    }
+
+    [Fact]
+    public void An_HQ_craft_that_keeps_coming_out_normal_quality_stops_rather_than_burn_materials()
+    {
+        var world = new FakeStepWorld();
+        world.Craftable.Add(5371);
+        world.NoteHq.Add(5371);
+        world.CraftsHq.Enqueue(false);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(5371, 1), questId: 168);
+
+        Assert.Equal(StepStatus.Failed, Run(ex, world));
+        Assert.Contains("takes only HQ", ex.FailReason);
+        Assert.Equal(MaxHqAsks, world.Calls.Count(c => c.StartsWith("Craft 1 x 5371")));
+    }
+
+    private const int MaxHqAsks = 2;
+
+    [Fact]
+    public void A_craft_the_quest_takes_at_any_quality_is_not_held_to_HQ()
+    {
+        var world = new FakeStepWorld();
+        world.Craftable.Add(5361);
+        world.CraftsHq.Enqueue(false);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(5361, 1), questId: 205);
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Single(world.Calls, c => c.StartsWith("Craft 1 x 5361"));
+    }
+
+    [Theory]
+    [InlineData("!!Requires Manual Melding!!\nCrafted Item:\n 1x Crab Bow HQ with 1x Savage Aim Materia III,\n 1x Rosewood Lumber HQ\nAutocraft requires:", "Crab Bow", true, "Savage Aim Materia III", null)]
+    [InlineData("!!Requires Manual Melding!!\nCrafted Item:\n 1x Staghorn Staff with any Materia\nAutocraft requires:", "Staghorn Staff", false, null, null)]
+    [InlineData("!!Requires Manual Melding!!\nCrafts: 1x Iron Lance\nRequires: 1x * Materia I (not II+)\nAutocraft requires:\n 1x Elm Lumber,", "Iron Lance", false, null, 1)]
+    [InlineData("!!Requires Manual Melding!!\nCrafted Item:\n 1x Goatskin Leggings with any Materia// Autocraft requires:\n 2x Aldgoat Leather,", "Goatskin Leggings", false, null, null)]
+    [InlineData("!!Requires Manual Melding!! Crafted Item:\n 1x Crab Bow HQ with 1x Savage Aim Materia III,\n 1x Rosewood Lumber HQ\nAutocraft requires:\n 1x Oak Composite Bow,", "Crab Bow", true, "Savage Aim Materia III", null)]
+    public void The_path_note_says_what_materia_the_quest_wants_melded(string note, string item, bool hq, string? materia, int? grade)
+    {
+        var entry = CraftNote.Read(note)[item];
+        Assert.Equal(hq, entry.HighQuality);
+        Assert.NotNull(entry.Melded);
+        Assert.Equal(materia, entry.Melded!.Materia);
+        Assert.Equal(grade, entry.Melded.Grade);
+        Assert.Equal(1, entry.Melded.Count);
+    }
+
+    [Fact]
+    public void A_second_item_in_the_same_note_carries_no_materia_of_the_first()
+    {
+        var entries = CraftNote.Read("Crafted Item:\n 1x Crab Bow HQ with 1x Savage Aim Materia III,\n 1x Rosewood Lumber HQ\nAutocraft requires:");
+        Assert.Null(entries["Rosewood Lumber"].Melded);
+        Assert.True(entries["Rosewood Lumber"].HighQuality);
+    }
+
+    /// <summary>
+    /// The Lance's Lesson: the lance is made, but the quest takes it only with a grade I materia in
+    /// it. The meld is done the way the recorded clicks do it: open, the lance, a grade I materia —
+    /// not the Savage Might III sitting first in the list — then Meld once the confirmation agrees.
+    /// </summary>
+    [Fact]
+    public void A_craft_the_quest_takes_melded_is_melded_with_a_materia_that_fits()
+    {
+        var world = new FakeStepWorld();
+        world.Craftable.Add(1827);
+        world.NoteMeld[1827] = new CraftNote.Meld(null, 1, 1);
+        world.MeldItems.AddRange([6112u, 1827u]);                       // Rainbow Cap, Iron Lance
+        world.MeldMaterias.AddRange(["Savage Might Materia III", "Savage Aim Materia I"]);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(1827, 1), questId: 142);
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.Contains("OpenMelding", world.Calls);
+        Assert.Contains("MeldItem 1", world.Calls);
+        Assert.Contains("MeldMateria 1", world.Calls);                  // the grade I, not the III
+        Assert.Single(world.Calls, c => c == "ConfirmMeld");
+        Assert.Contains(1827u, world.Melded);
+        Assert.False(world.MeldingOpen);                                 // closed after
+    }
+
+    [Fact]
+    public void With_no_materia_that_fits_it_says_which_to_get_and_melds_nothing()
+    {
+        var world = new FakeStepWorld();
+        world.Craftable.Add(4543);
+        world.NoteMeld[4543] = new CraftNote.Meld("Savage Aim Materia III", null, 1);
+        world.MeldItems.Add(4543);
+        world.MeldMaterias.Add("Savage Aim Materia I");
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(4543, 1), questId: 539);
+
+        Assert.Equal(StepStatus.Failed, Run(ex, world));
+        Assert.Contains("no Savage Aim Materia III in the bags", ex.FailReason);
+        Assert.DoesNotContain("ConfirmMeld", world.Calls);
+    }
+
+    [Fact]
+    public void Melding_not_yet_learned_is_said_rather_than_waited_on()
+    {
+        var world = new FakeStepWorld { MeldingUnlocked = false };
+        world.Craftable.Add(1827);
+        world.NoteMeld[1827] = new CraftNote.Meld(null, 1, 1);
+        var ex = new StepExecutor(world);
+        ex.Begin(Craft(1827, 1), questId: 142);
+
+        Assert.Equal(StepStatus.Failed, Run(ex, world));
+        Assert.Contains("Materia Melding is not learned", ex.FailReason);
+    }
+
+    /// <summary>"Any Materia" takes the cheapest on offer, not whatever the window lists first.</summary>
+    [Fact]
+    public void Any_materia_melds_the_lowest_grade_on_offer()
+    {
+        string[] offered = ["Savage Might Materia III", "Piety Materia II", "Savage Aim Materia I", "Heavens' Eye Materia I"];
+        Assert.Equal(2, CraftNote.Pick(offered, new CraftNote.Meld(null, null, 1)));
+        Assert.Equal(0, CraftNote.Pick(offered, new CraftNote.Meld("Savage Might Materia III", null, 1)));
+        Assert.Equal(1, CraftNote.Pick(offered, new CraftNote.Meld(null, 2, 1)));
+        Assert.Equal(-1, CraftNote.Pick(offered, new CraftNote.Meld(null, 4, 1)));
+    }
+
+    [Theory]
+    [InlineData("Savage Aim Materia I", null, 1, true)]
+    [InlineData("Savage Might Materia III", null, 1, false)]
+    [InlineData("Savage Might Materia III", "Savage Might Materia III", null, true)]
+    [InlineData("Savage Aim Materia III", "Savage Might Materia III", null, false)]
+    [InlineData("Piety Materia II", null, null, true)]
+    public void A_materia_fits_the_requirement_by_name_or_grade(string materia, string? wanted, int? grade, bool fits)
+        => Assert.Equal(fits, CraftNote.Fits(materia, new CraftNote.Meld(wanted, grade, 1)));
+
+    [Fact]
+    public void The_converter_hands_the_path_note_to_a_craft_step_that_names_no_item()
+    {
+        const string json = """
+            { "Comment": "Crafted Item:\n 3x Square Maple Shield", "QuestSequence": [ { "Sequence": 255, "Steps": [
+              { "TerritoryId": 132, "InteractionType": "Craft" },
+              { "TerritoryId": 132, "InteractionType": "Craft", "ItemId": 5056, "$": "The recipe makes 3 items." } ] } ] }
+            """;
+        var path = QuestionableImporter.Parse("139_x.json", "QuestPaths/x", json, out _)!;
+        Assert.Contains("3x Square Maple Shield", path.Block(255)!.Steps[0].Comment);
+        Assert.Contains("3x Square Maple Shield", path.Block(255)!.Steps[1].Comment);   // a named one still needs it for the quality
+        Assert.Contains("The recipe makes 3 items.", path.Block(255)!.Steps[1].Comment); // beside its own
+    }
+
+    [Fact]
+    public void A_craft_step_naming_no_item_with_everything_in_the_bag_is_done()
+    {
+        var world = new FakeStepWorld();
+        world.HandIns[205] = [(5361, 1, false)];
+        world.Bag[5361] = 1;
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Craft, KindName = "Craft", TerritoryId = 400 }, questId: 205);
+
+        Assert.Equal(StepStatus.Done, Run(ex, world));
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Craft "));
+    }
+
+    [Fact]
+    public void A_craft_step_naming_no_item_for_a_quest_that_hands_in_nothing_craftable_stops()
+    {
+        var world = new FakeStepWorld();
+        var ex = new StepExecutor(world);
+        ex.Begin(new QuestStep { Kind = StepKind.Craft, KindName = "Craft", TerritoryId = 400 }, questId: 9);
+
+        Assert.Equal(StepStatus.Failed, Run(ex, world));
+        Assert.Contains("hands in nothing that can be crafted", ex.FailReason);
+    }
+
     // ── Importer ──
 
     [Fact]
@@ -578,6 +826,30 @@ public class CraftGatherStepTests
         var shard = bill.Single(n => n.ItemId == 9001);
         Assert.Equal(4, shard.Needed);
         Assert.Equal(MaterialSource.Ingredient, shard.Source);
+    }
+
+    /// <summary>
+    /// The finished item in the FC chest is fetched, not made: its ingredients leave the bill, so
+    /// the Grab button stops taking both. Only what the chest cannot cover is still expanded.
+    /// </summary>
+    [Fact]
+    public void A_craft_the_chest_holds_is_fetched_and_its_ingredients_are_not_wanted()
+    {
+        var asked = new List<(uint, int)>();
+        ChainMaterials.ExpandCraft expand = (item, count) =>
+        {
+            asked.Add((item, count));
+            return [(9001u, "Fire Shard", count * 2)];
+        };
+
+        var covered = Bill([], chest: new Dictionary<uint, int> { [Ingot] = 3 }, expand: expand);
+        Assert.True(covered.Single(n => n.ItemId == Ingot).CoveredByChest);
+        Assert.DoesNotContain(covered, n => n.ItemId == 9001);
+        Assert.Empty(asked);
+
+        var partly = Bill([], chest: new Dictionary<uint, int> { [Ingot] = 1 }, expand: expand);
+        Assert.Equal([(Ingot, 2)], asked);                     // the two the chest cannot give
+        Assert.Equal(4, partly.Single(n => n.ItemId == 9001).Needed);
     }
 
     /// <summary>Counts are target totals, so the same requirement in two quests is not doubled.</summary>

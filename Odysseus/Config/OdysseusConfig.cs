@@ -93,6 +93,9 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>Which plugin paths and moves the character: "vnavmesh" (default) or "Ariadne".</summary>
     public string PathingProvider { get; set; } = Services.Ipc.VnavIpc.VnavmeshProvider;
 
+    /// <summary>Which plugin crafts for Craft steps and deliveries: "Artisan" (default) or "Hephaestus".</summary>
+    public string CraftProvider { get; set; } = Services.Ipc.CrafterChoice.ArtisanProvider;
+
     /// <summary>Which plugin fights a solo duty: "BossMod Reborn" (default) or "Minerva".</summary>
     public string DutyAiProvider { get; set; } = Services.Ipc.PluginPresence.BossModRebornProvider;
 

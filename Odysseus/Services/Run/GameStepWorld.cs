@@ -133,6 +133,152 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
+    /// <summary>GeneralAction 12, "Materia Melding", learned with unlock link 11 (read off the sheet 2026-09-27).</summary>
+    private const uint MeldingGeneralAction = 12;
+    private const uint MeldingUnlockLink = 11;
+
+    public bool MeldingUnlocked
+    {
+        get
+        {
+            try
+            {
+                var state = UIState.Instance();
+                return state == null || state->IsUnlockLinkUnlocked(MeldingUnlockLink);
+            }
+            catch
+            {
+                return true; // unreadable is not evidence it is locked — the window not opening will say
+            }
+        }
+    }
+
+    public bool MeldingOpen => IsAddonVisible("MateriaAttach");
+
+    public void OpenMelding()
+    {
+        try
+        {
+            var manager = ActionManager.Instance();
+            if (manager != null)
+                manager->UseAction(ActionType.GeneralAction, MeldingGeneralAction);
+        }
+        catch (Exception ex)
+        {
+            _log($"Opening Materia Melding failed: {ex.Message}");
+        }
+    }
+
+    // What the window carries (/od values MateriaAttach, 2026-09-27): item names from value 147,
+    // materia names from value 429, each list running until the first value that is not a string.
+    // What its clicks send (/od record MateriaAttach): [1, item, 1, 0] selects an item,
+    // [2, materia, 1, 0] selects a materia and opens the confirmation, [-1] closes. The
+    // confirmation shows the materia at value 9 and the item at 16; [0, 0, 0] is Meld.
+    private const int MeldItemNames = 147;
+    private const int MeldMateriaNames = 429;
+    private const int MeldListMax = 140;
+
+    private List<string> MeldList(int start)
+    {
+        var names = new List<string>();
+        var unit = (AtkUnitBase*)_gameGui.GetAddonByName("MateriaAttach").Address;
+        if (unit == null || !unit->IsVisible) return names;
+        for (var i = start; i < start + MeldListMax && i < unit->AtkValuesCount; i++)
+        {
+            var value = unit->AtkValues[i];
+            if (value.String.Value == null || value.Type is AtkValueType.Int or AtkValueType.UInt or AtkValueType.Bool or AtkValueType.Undefined)
+                break;
+            var text = Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue;
+            if (text.Length == 0) break;
+            names.Add(PlainName(text));
+        }
+        return names;
+    }
+
+    /// <summary>A list entry's name without the trailing space and HQ glyph the window adds.</summary>
+    private static string PlainName(string text)
+    {
+        var end = text.Length;
+        while (end > 0 && !char.IsLetterOrDigit(text[end - 1]) && text[end - 1] != ')') end--;
+        return text[..end].Trim();
+    }
+
+    private string ItemName(uint itemId) => _data.GetExcelSheet<Item>().GetRowOrDefault(itemId)?.Name.ExtractText() ?? string.Empty;
+
+    public int MeldItemIndex(uint itemId)
+    {
+        try
+        {
+            var wanted = ItemName(itemId);
+            var names = MeldList(MeldItemNames);
+            return wanted.Length == 0 ? -1 : names.FindIndex(n => string.Equals(n, wanted, StringComparison.OrdinalIgnoreCase));
+        }
+        catch (Exception ex)
+        {
+            _log($"Reading the melding item list failed: {ex.Message}");
+            return -1;
+        }
+    }
+
+    public int MeldMateriaIndex(CraftNote.Meld meld)
+    {
+        try
+        {
+            return CraftNote.Pick(MeldList(MeldMateriaNames), meld);
+        }
+        catch (Exception ex)
+        {
+            _log($"Reading the melding materia list failed: {ex.Message}");
+            return -1;
+        }
+    }
+
+    public void MeldSelectItem(int index) => MeldCallback("MateriaAttach", 1, index, 1, 0);
+
+    public void MeldSelectMateria(int index) => MeldCallback("MateriaAttach", 2, index, 1, 0);
+
+    public bool? MeldDialogIsFor(uint itemId, CraftNote.Meld meld)
+    {
+        try
+        {
+            var unit = (AtkUnitBase*)_gameGui.GetAddonByName("MateriaAttachDialog").Address;
+            if (unit == null || !unit->IsVisible || unit->AtkValuesCount <= 16) return null;
+            string Read(int i) => unit->AtkValues[i].String.Value == null
+                ? string.Empty
+                : PlainName(Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)unit->AtkValues[i].String.Value).TextValue);
+            var materia = Read(9);
+            var item = Read(16);
+            return string.Equals(item, ItemName(itemId), StringComparison.OrdinalIgnoreCase) && CraftNote.Fits(materia, meld);
+        }
+        catch (Exception ex)
+        {
+            _log($"Reading the melding confirmation failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public void ConfirmMeld() => MeldCallback("MateriaAttachDialog", 0, 0, 0);
+
+    public void CloseMelding()
+    {
+        if (IsAddonVisible("MateriaAttach"))
+            MeldCallback("MateriaAttach", -1);
+    }
+
+    private void MeldCallback(string addonName, params int[] values)
+    {
+        try
+        {
+            var unit = (AtkUnitBase*)_gameGui.GetAddonByName(addonName).Address;
+            if (unit == null || !unit->IsVisible) return;
+            FireCallback(unit, true, values);   // the game's own clicks pass true here too
+        }
+        catch (Exception ex)
+        {
+            _log($"{addonName} callback failed: {ex.Message}");
+        }
+    }
+
     /// <summary>GeneralAction 23, "Dismount" (read off the sheet 2026-08-20).</summary>
     private const uint DismountGeneralAction = 23;
 
@@ -397,6 +543,27 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// fires nothing and presses nothing.
     /// </para>
     /// </summary>
+    /// <summary>One AtkValue as the log shows it — shared by the values dump and the click recorder.</summary>
+    internal static string DescribeValue(FFXIVClientStructs.FFXIV.Component.GUI.AtkValue value)
+    {
+        var type = value.Type;
+        if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int)
+            return $"Int {value.Int}";
+        if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
+            return $"UInt {value.UInt}";
+        if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Bool)
+            return $"Bool {value.Byte != 0}";
+        if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Float)
+            return $"Float {value.Float}";
+        if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Undefined)
+            return "Undefined";
+        // Every string flavour the client uses — String, String8, ManagedString — reads the same
+        // way, so they are told apart by having a pointer rather than by name.
+        if (value.String.Value != null)
+            return $"{type} \"{Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue}\"";
+        return $"{type} (raw {value.UInt})";
+    }
+
     public string DescribeAddonValues(string addonName)
     {
         try
@@ -411,26 +578,9 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
             for (var i = 0; i < count; i++)
             {
                 var value = unit->AtkValues[i];
-                var type = value.Type;
-                string shown;
-                if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Undefined)
+                if (value.Type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Undefined)
                     continue;   // empty slots are the bulk of any window and say nothing
-                if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Int)
-                    shown = $"Int {value.Int}";
-                else if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.UInt)
-                    shown = $"UInt {value.UInt}";
-                else if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Bool)
-                    shown = $"Bool {value.Byte != 0}";
-                else if (type == FFXIVClientStructs.FFXIV.Component.GUI.AtkValueType.Float)
-                    shown = $"Float {value.Float}";
-                else if (value.String.Value != null)
-                    // Every string flavour the client uses — String, String8, ManagedString — reads
-                    // the same way, so they are told apart by having a pointer rather than by name.
-                    shown = $"{type} \"{Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue}\"";
-                else
-                    shown = $"{type} (raw {value.UInt})";
-
-                _log($"  #{i} {shown}");
+                _log($"  #{i} {DescribeValue(value)}");
                 written++;
             }
             return $"{addonName}: {written} of {count} values written to the log.";
@@ -746,6 +896,14 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
             _log($"Aethernet access lookup failed: {ex.Message}");
             return null;
         }
+    }
+
+    public (string Name, Vector3 At)? MappedAethernetAccess(uint territoryId, Vector3 near)
+    {
+        if (_aetherytes.MappedShardNear(territoryId, near) is not { } shard)
+            return null;
+        var flat = new Vector3(shard.At.X, near.Y, shard.At.Y);
+        return (shard.Name, NearestReachablePoint(flat, 40f) ?? flat);
     }
 
     public bool AethernetTeleport(string destination, bool byNameOnly = false)
@@ -1532,6 +1690,122 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     // missing) lives in ItemMaking, and the waiting lives in the executor.
 
     public bool CrafterReady => _making.CrafterReady;
+
+    public string CrafterName => _making.CrafterName;
+
+    private HashSet<uint>? _craftable;
+
+    public IReadOnlyList<(uint ItemId, int Count, bool HighQuality)> QuestHandInCrafts(ushort questId, string? note)
+    {
+        var entries = CraftNote.Read(note);
+        var items = new List<(uint, int, bool)>();
+        foreach (var id in HandInCraftIds(questId))
+            items.Add(NoteEntry(id, entries) is { } e ? (id, e.Count, e.HighQuality) : (id, 1, false));
+        return items;
+    }
+
+    public bool NoteWantsHighQuality(uint itemId, string? note)
+        => NoteEntry(itemId, CraftNote.Read(note))?.HighQuality == true;
+
+    public CraftNote.Meld? NoteWantsMeld(uint itemId, string? note)
+        => NoteEntry(itemId, CraftNote.Read(note))?.Melded;
+
+    public bool HoldsForCraft(uint itemId, int count, string? note)
+    {
+        var entry = NoteEntry(itemId, CraftNote.Read(note));
+        var have = entry?.HighQuality == true ? ItemCountHq(itemId) : ItemCount(itemId);
+        return have >= count && (entry?.Melded is not { } meld || HoldsMelded(itemId, meld));
+    }
+
+    /// <summary>
+    /// A slot's materia is a Materia row and a grade; the row's item for that grade carries the name
+    /// the note writes ("Savage Aim Materia III"). HQ copies share the base item id.
+    /// </summary>
+    public unsafe bool HoldsMelded(uint itemId, CraftNote.Meld meld)
+    {
+        try
+        {
+            var manager = InventoryManager.Instance();
+            if (manager == null) return false;
+            var materia = _data.GetExcelSheet<Materia>();
+            foreach (var type in EquipSources)
+            {
+                var container = manager->GetInventoryContainer(type);
+                if (container == null) continue;
+                for (var slot = 0; slot < container->Size; slot++)
+                {
+                    var item = container->GetInventorySlot(slot);
+                    if (item == null || item->ItemId != itemId) continue;
+                    var matching = 0;
+                    for (var i = 0; i < item->Materia.Length; i++)
+                    {
+                        var row = item->Materia[i];
+                        if (row == 0) continue;
+                        var grade = item->MateriaGrades[i];
+                        if (meld.Grade is { } wantedGrade && grade + 1 != wantedGrade) continue;
+                        if (meld.Materia is { } wanted)
+                        {
+                            var name = materia.GetRowOrDefault(row) is { } m && grade < m.Item.Count
+                                ? m.Item[grade].ValueNullable?.Name.ExtractText() ?? string.Empty
+                                : string.Empty;
+                            if (!string.Equals(name, wanted, StringComparison.OrdinalIgnoreCase)) continue;
+                        }
+                        matching++;
+                    }
+                    if (matching >= meld.Count) return true;
+                }
+            }
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _log($"Reading the materia on item {itemId} failed: {ex.Message}");
+            return true; // unreadable is not evidence it is missing — the hand-in will say if it is
+        }
+    }
+
+    private CraftNote.Entry? NoteEntry(uint itemId, IReadOnlyDictionary<string, CraftNote.Entry> entries)
+    {
+        var name = _data.GetExcelSheet<Item>().GetRowOrDefault(itemId)?.Name.ExtractText() ?? string.Empty;
+        return name.Length > 0 && entries.TryGetValue(name, out var e) ? e : null;
+    }
+
+    public unsafe int ItemCountHq(uint itemId)
+    {
+        try
+        {
+            var manager = FFXIVClientStructs.FFXIV.Client.Game.InventoryManager.Instance();
+            return manager == null ? 0 : manager->GetInventoryItemCount(itemId, isHq: true);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private IReadOnlyList<uint> HandInCraftIds(ushort questId)
+    {
+        try
+        {
+            _craftable ??= _data.GetExcelSheet<Recipe>()
+                .Where(r => r.ItemResult.RowId != 0)
+                .Select(r => r.ItemResult.RowId)
+                .ToHashSet();
+            if (_data.GetExcelSheet<Lumina.Excel.Sheets.Quest>().GetRowOrDefault(65536u + questId) is not { } quest)
+                return [];
+            var items = new List<uint>();
+            foreach (var param in quest.QuestParams)
+                if (param.ScriptInstruction.ExtractText().StartsWith("RITEM", StringComparison.Ordinal)
+                    && _craftable.Contains(param.ScriptArg) && !items.Contains(param.ScriptArg))
+                    items.Add(param.ScriptArg);
+            return items;
+        }
+        catch (Exception ex)
+        {
+            _log($"Reading quest {questId}'s hand-in items failed: {ex.Message}");
+            return [];
+        }
+    }
 
     public bool IsCrafting => _making.IsCrafting;
 

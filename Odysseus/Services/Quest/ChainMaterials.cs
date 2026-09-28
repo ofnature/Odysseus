@@ -119,12 +119,14 @@ public static class ChainMaterials
         }
 
         // Ingredients of everything crafted, on top of what the steps named directly. Only the
-        // shortfall is expanded: ingredients for something already in the bag are not needed.
+        // shortfall is expanded: ingredients for something already in the bag are not needed —
+        // nor for what the FC chest already holds of the finished item. That one is fetched, not
+        // made, so its materials are not on the bill and the Grab button does not take them too.
         if (expand is not null)
         {
             foreach (var (itemId, count) in crafts)
             {
-                var stillToMake = count - held(itemId);
+                var stillToMake = count - held(itemId) - inChest(itemId);
                 if (stillToMake <= 0) continue;
                 foreach (var (ingredient, ingredientName, needed) in expand(itemId, stillToMake))
                 {

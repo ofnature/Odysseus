@@ -229,6 +229,31 @@ public sealed class GatherRunner
     /// </summary>
     public int Gathered => Held - _baseline;
 
+    /// <summary>
+    /// What a node's remaining attempts go on once the item wanted is gone from it: Dark Matter
+    /// Cluster. An unspoiled node gives up its one item and keeps its integrity; walking away from
+    /// it left a 100% cluster behind every window.
+    /// </summary>
+    private static readonly uint[] Fallbacks = [10335];
+
+    /// <summary>The fallback being gathered on this node, once the item wanted ran out on it.</summary>
+    private uint? _fallback;
+
+    /// <summary>Only timed nodes: one node, somewhere among its spots, and gone once worked.</summary>
+    private bool _timedOnly;
+
+    private bool TryFallback()
+    {
+        foreach (var item in Fallbacks)
+        {
+            if (item == _itemId || !_world.SelectSlotFor(item)) continue;
+            _fallback = item;
+            _world.Log($"Item {_itemId} is gone from node {_currentNode} — spending the rest of it on item {item} (Dark Matter Cluster).");
+            return true;
+        }
+        return false;
+    }
+
     /// <summary>Work one node's spots. Kept for a caller that has already chosen.</summary>
     public void Begin(GatheringTarget target, int count, int minimumCollectability)
         => Begin([target], count, minimumCollectability);
@@ -260,6 +285,8 @@ public sealed class GatherRunner
         _target = target;
         _itemId = target.ItemId;
         _wanted = count;
+        _fallback = null;
+        _timedOnly = System.Linq.Enumerable.All(targets, t => t.Timed);
         _collectability = minimumCollectability;
         _spawn = 0;
         _visited = 0;
@@ -405,6 +432,7 @@ public sealed class GatherRunner
                 _revisit = false;
                 _spentAt = default;
                 _world.ForgetSlotAttempts();
+                _fallback = null;
                 Enter(GatherRunState.Opening);
                 return;
             }
@@ -585,6 +613,7 @@ public sealed class GatherRunner
                 _plainPressed = false;
                 _plainPressTook = false;
                 _world.ForgetSlotAttempts();
+                _fallback = null;
                 Enter(GatherRunState.Opening);
                 return;
             }
@@ -650,7 +679,7 @@ public sealed class GatherRunner
         // ever open. Keep pressing while the list stands and the count is short; the node
         // closes itself when its attempts are spent, and the outer check closes up when the
         // bag holds enough.
-        if (_collectability <= 0)
+        if (_collectability <= 0 || _fallback is not null)
         {
             // The gathering action playing is the proof a press took — a successful or a
             // failed roll both play it. The world's once-per-item guard on the row exists for
@@ -669,15 +698,22 @@ public sealed class GatherRunner
                 _world.ForgetSlotAttempts();
             _lastAction = _world.UtcNow;
             _plainPressTook = false;
-            if (_world.SelectSlotFor(_itemId))
+            if (_world.SelectSlotFor(_fallback ?? _itemId))
             {
                 _plainPressed = true;
-                Status = $"Node {_currentNode}: {Gathered} of {_wanted} gathered.";
+                Status = _fallback is { } spare
+                    ? $"Node {_currentNode}: item {_itemId} is gone — gathering item {spare} with what is left."
+                    : $"Node {_currentNode}: {Gathered} of {_wanted} gathered.";
+            }
+            else if (_fallback is null && TryFallback())
+            {
+                _plainPressed = true;
+                Status = $"Node {_currentNode}: item {_itemId} is gone — gathering item {_fallback} with what is left.";
             }
             else
             {
                 _world.CloseNode();
-                NextSpot($"has no item {_itemId} to gather");
+                NextSpot($"has no item {_fallback ?? _itemId} to gather");
             }
             return;
         }
@@ -703,6 +739,11 @@ public sealed class GatherRunner
         _lastAction = _world.UtcNow;
         if (_world.SelectSlotFor(_itemId))
             _slotChosenAt = _world.UtcNow;
+        else if (TryFallback())
+        {
+            _plainPressed = true;
+            _plainPressTook = false;
+        }
         else
         {
             _world.CloseNode();
@@ -752,6 +793,14 @@ public sealed class GatherRunner
         _spawn++;
         _visited++;
         _world.Log($"Node {was.NodeId}, stop {index}: {why}; trying the next of {_stops.Count}.");
+
+        // A timed node is one node at one of its spots, and it does not come back once worked: after
+        // looking at each spot once, walking the circuit again only chains the same empty spots.
+        if (_timedOnly && _visited >= _stops.Count)
+        {
+            Fault($"the timed node for item {_itemId} was not up at any of its {_stops.Count} spots — worked already this window");
+            return;
+        }
 
         // Twice round every stop with nothing to show is not something more walking will fix.
         if (_visited > _stops.Count * 2)

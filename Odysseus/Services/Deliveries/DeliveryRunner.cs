@@ -19,9 +19,11 @@ public interface IGatherer
     void Stop();
 }
 
-/// <summary>The crafting handoff. <c>ArtisanIpc</c> satisfies this as it stands.</summary>
+/// <summary>The crafting handoff — Artisan or Hephaestus, whichever Settings names (<c>CrafterChoice</c>).</summary>
 public interface ICrafter
 {
+    /// <summary>Who is crafting, as the status line and the log name it.</summary>
+    string Name { get; }
     bool Available { get; }
     bool CraftItem(uint recipeId, int amount);
     bool IsCrafting { get; }
@@ -336,7 +338,7 @@ public sealed class DeliveryRunner
 
         if (_crafter.IsCrafting)
         {
-            StatusLine = $"{client.Name}: Artisan is crafting {request.ItemName} ({short_} to go)";
+            StatusLine = $"{client.Name}: {_crafter.Name} is crafting {request.ItemName} ({short_} to go)";
             _phaseStart = _world.UtcNow; // it is making progress; don't time it out
             return;
         }
@@ -352,7 +354,7 @@ public sealed class DeliveryRunner
                 ? " Still short: " + string.Join(", ", short2.Select(n => $"{n.Missing} × {n.Name}")) + "."
                 : string.Empty;
             Block(DeliveryStop.Materials,
-                  $"{client.Name}: Artisan stopped with {short_} × {request.ItemName} still needed.{missing} " +
+                  $"{client.Name}: {_crafter.Name} stopped with {short_} × {request.ItemName} still needed.{missing} " +
                   "Nothing nearby sells the rest, so stock up and start it again.");
             return;
         }
@@ -360,8 +362,8 @@ public sealed class DeliveryRunner
         if (!_crafter.Available)
         {
             Block(DeliveryStop.Materials,
-                  $"{client.Name}: {short_} × {request.ItemName} needed and Artisan is not installed. " +
-                  "Craft them yourself, or install Artisan and start it again.");
+                  $"{client.Name}: {short_} × {request.ItemName} needed and {_crafter.Name} is not installed. " +
+                  $"Craft them yourself, or install {_crafter.Name} and start it again.");
             return;
         }
 
@@ -373,14 +375,14 @@ public sealed class DeliveryRunner
 
         if (!_crafter.CraftItem(recipe.RecipeId, short_))
         {
-            Block(DeliveryStop.Materials, $"{client.Name}: Artisan would not take the craft for {request.ItemName}.");
+            Block(DeliveryStop.Materials, $"{client.Name}: {_crafter.Name} would not take the craft for {request.ItemName}.");
             return;
         }
         _craftStarted = true;
-        StatusLine = $"{client.Name}: asked Artisan for {short_} × {request.ItemName} as {recipe.JobName}";
+        StatusLine = $"{client.Name}: asked {_crafter.Name} for {short_} × {request.ItemName} as {recipe.JobName}";
 
         if (_world.UtcNow - _phaseStart > CraftStall)
-            Fault($"{client.Name}: Artisan never started crafting.");
+            Fault($"{client.Name}: {_crafter.Name} never started crafting.");
     }
 
     private void TickTravel()
@@ -536,7 +538,7 @@ public sealed class DeliveryRunner
             var stuck = needs.Where(n => n.Missing > 0).ToList();
             _game.CloseShop();
             if (stuck.Count > 0)
-                _log($"{client.Name}: no nearby vendor for {string.Join(", ", stuck.Select(n => $"{n.Missing} × {n.Name}"))} — leaving it to Artisan.");
+                _log($"{client.Name}: no nearby vendor for {string.Join(", ", stuck.Select(n => $"{n.Missing} × {n.Name}"))} — leaving it to {_crafter.Name}.");
             Enter(DeliveryRunState.Craft);
             return;
         }

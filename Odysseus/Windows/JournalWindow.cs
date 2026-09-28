@@ -341,7 +341,7 @@ public sealed class JournalWindow : OdysseusWindow
     private static string Describe(MaterialSource source) => source switch
     {
         MaterialSource.Vendor => "vendor",
-        MaterialSource.Crafted => "Artisan",
+        MaterialSource.Crafted => "crafted",
         MaterialSource.Ingredient => "ingredient",
         MaterialSource.Gathered => "GatherBuddy",
         _ => "quest only",

@@ -31,11 +31,40 @@ public sealed class GatherListRunner
     private readonly GearRepair? _repair;
     private readonly Func<int> _repairAt;
     private readonly Func<int> _freeSlots;
+    private readonly Func<DateTime> _now;
     private bool _repairing;
 
-    public GatherListRunner(IOwnGatherer gatherer, Func<uint, int> held, Func<uint, string> nameOf, Action<string> log,
-        GearRepair? repair = null, Func<int>? repairAt = null, Func<int>? freeSlots = null)
+    /// <summary>Windows a timed item is tried in before the run gives up on it.</summary>
+    private const int MaxTimedWindows = 3;
+    private readonly Dictionary<uint, int> _timedTries = new();
+
+    /// <summary>The item in hand is one of the timed ones.</summary>
+    private bool _currentTimed;
+
+    /// <summary>
+    /// Timed items already worked in their current window, until it ends. Kept across runs: a node
+    /// gathered, then Stop and Gather again in the same window, chained round all three empty spots.
+    /// </summary>
+    private readonly Dictionary<uint, DateTime> _workedUntil = new();
+
+    /// <summary>The wait before a timed item can be gathered — its window, and not the one already worked.</summary>
+    private TimeSpan? WaitOf(uint item, DateTime now)
     {
+        if (_workedUntil.TryGetValue(item, out var until) && until > now)
+        {
+            var after = until.AddSeconds(1);
+            return _gatherer.WaitFor(item, after) is { } next ? after - now + next : null;
+        }
+        return _gatherer.WaitFor(item, now);
+    }
+
+    /// <summary>A timed node came up mid-item: the node in hand is being finished before going.</summary>
+    private bool _yielding;
+
+    public GatherListRunner(IOwnGatherer gatherer, Func<uint, int> held, Func<uint, string> nameOf, Action<string> log,
+        GearRepair? repair = null, Func<int>? repairAt = null, Func<int>? freeSlots = null, Func<DateTime>? now = null)
+    {
+        _now = now ?? (() => DateTime.UtcNow);
         _gatherer = gatherer;
         _held = held;
         _nameOf = nameOf;
@@ -74,6 +103,7 @@ public sealed class GatherListRunner
 
         _queue.Clear();
         _outcomes.Clear();
+        _timedTries.Clear();
         _current = null;
         // Zone order, unknown zones last; stable within a zone so the list's own order holds.
         foreach (var kv in shortItems.OrderBy(kv => _gatherer.ZoneOf(kv.Key) ?? uint.MaxValue))
@@ -140,17 +170,69 @@ public sealed class GatherListRunner
 
         _gatherer.Tick();
         var (item, target) = _current.Value;
-        if (_gatherer.Faulted)
+
+        // A timed node has opened while an ordinary item is in hand: finish the node being worked,
+        // go for the timed one while it is up, then come back — the ordinary node will still be there.
+        if (!_currentTimed && _gatherer.Busy && !_gatherer.Faulted && ReadyTimed() is { } timed)
         {
-            Finish(item, target, $"gave up: {_gatherer.Status}");
-            return;
+            if (!_yielding)
+            {
+                _yielding = true;
+                _log($"{_nameOf(timed)}'s node is up — {(_gatherer.AtNode ? "finishing this node, then " : string.Empty)}going for it.");
+            }
+            if (!_gatherer.AtNode)
+            {
+                _gatherer.Stop();
+                _yielding = false;
+                _current = null;
+                PutFirst(timed, then: (item, target));
+                Status = $"{_nameOf(timed)}'s node is up — going for it; back to {_nameOf(item)} after.";
+                return;
+            }
         }
-        if (!_gatherer.Busy)
+        else
         {
-            Finish(item, target, _held(item) >= target ? "done" : "the nodes ran out short");
+            _yielding = false;
+        }
+        if (_gatherer.Faulted || !_gatherer.Busy)
+        {
+            var short_ = _held(item) < target;
+            // This window's node is spent, whatever came of it.
+            if (_currentTimed && _gatherer.UpFor(item, _now()) is { } left)
+                _workedUntil[item] = _now() + left;
+            // A timed node's window can close mid-run; the next one is another chance, a few times.
+            if (short_ && WaitOf(item, _now()) is not null
+                && _timedTries.GetValueOrDefault(item) < MaxTimedWindows)
+            {
+                _log($"{_nameOf(item)}: {_held(item)}/{target} when its window ended — back in the queue for the next one.");
+                _queue.Enqueue((item, target));
+                _current = null;
+                return;
+            }
+            Finish(item, target, _gatherer.Faulted ? $"gave up: {_gatherer.Status}" : short_ ? "the nodes ran out short" : "done");
             return;
         }
         Status = $"{_nameOf(item)} {_held(item)}/{target} — {_gatherer.Status}";
+    }
+
+    /// <summary>A queued timed item whose node can be gathered right now, or null.</summary>
+    private uint? ReadyTimed()
+    {
+        var now = _now();
+        foreach (var (queued, _) in _queue)
+            if (WaitOf(queued, now) == TimeSpan.Zero)
+                return queued;
+        return null;
+    }
+
+    /// <summary>Reorder the queue: the timed item first, the interrupted one straight after it, the rest as they were.</summary>
+    private void PutFirst(uint timed, (uint ItemId, int Target) then)
+    {
+        var rest = _queue.ToList();
+        _queue.Clear();
+        foreach (var entry in rest.Where(e => e.ItemId == timed)) _queue.Enqueue(entry);
+        _queue.Enqueue(then);
+        foreach (var entry in rest.Where(e => e.ItemId != timed)) _queue.Enqueue(entry);
     }
 
     private void StartNext()
@@ -164,6 +246,18 @@ public sealed class GatherListRunner
             return;
         }
 
+        // Timed items whose node is not up yet: set aside while the rest is gathered, then waited on.
+        var waiting = new List<(uint ItemId, int Target, TimeSpan Wait)>();
+        var now = _now();
+
+        // One that is up goes first, whatever its place in the queue: its window will not wait.
+        if (ReadyTimed() is { } ready && _queue.Peek().ItemId != ready)
+        {
+            var rest = _queue.ToList();
+            _queue.Clear();
+            foreach (var entry in rest.Where(e => e.ItemId == ready)) _queue.Enqueue(entry);
+            foreach (var entry in rest.Where(e => e.ItemId != ready)) _queue.Enqueue(entry);
+        }
         while (_queue.Count > 0)
         {
             var (item, target) = _queue.Dequeue();
@@ -174,11 +268,20 @@ public sealed class GatherListRunner
                 Record(item, target, held, "already held");
                 continue;
             }
-            if (!_gatherer.CanGather(item))
+            var wait = WaitOf(item, now);
+            if (wait is { } w && w > TimeSpan.Zero)
+            {
+                waiting.Add((item, target, w));
+                continue;
+            }
+            if (wait is null && !_gatherer.CanGather(item))
             {
                 Record(item, target, held, $"skipped: {_gatherer.WhyNot(item)}");
                 continue;
             }
+            if (wait is not null)
+                _timedTries[item] = _timedTries.GetValueOrDefault(item) + 1;
+            _currentTimed = wait is not null;
             if (!_gatherer.Start(item, target - held, 0))
             {
                 Record(item, target, held, "skipped: the gatherer would not start");
@@ -186,7 +289,18 @@ public sealed class GatherListRunner
             }
             _current = (item, target);
             Status = $"{name} {held}/{target}";
-            _log($"Gathering {target - held} × {name} ({held}/{target}).");
+            _log($"Gathering {target - held} × {name} ({held}/{target}){(wait is not null ? " — its timed node is up" : string.Empty)}.");
+            foreach (var (waitItem, waitTarget, _) in waiting) _queue.Enqueue((waitItem, waitTarget));
+            return;
+        }
+
+        if (waiting.Count > 0)
+        {
+            foreach (var (waitItem, waitTarget, _) in waiting) _queue.Enqueue((waitItem, waitTarget));
+            var soonest = waiting.MinBy(x => x.Wait);
+            var span = soonest.Wait;
+            Status = $"Waiting for {_nameOf(soonest.ItemId)} — its node is up in " +
+                     (span.TotalHours >= 1 ? $"{(int)span.TotalHours}:{span.Minutes:00}:{span.Seconds:00}" : $"{span.Minutes}:{span.Seconds:00}");
             return;
         }
 

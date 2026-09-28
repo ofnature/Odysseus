@@ -131,6 +131,27 @@ public class ItemSkipConditionTests
     public void The_count_is_whatever_the_world_reports_regardless_of_quality()
         => Assert.True(Skip(Craft(1), held: 1));
 
+    /// <summary>
+    /// Saving Captain Gairhard: the bow was in the bag unmelded, the Craft step was skipped for it,
+    /// and the hand-in could never take it. Held the wrong way is not held.
+    /// </summary>
+    [Fact]
+    public void A_craft_held_without_its_materia_or_quality_is_not_skipped()
+    {
+        var world = new FakeStepWorld { TerritoryId = 154 };
+        world.Bag[Item] = 1;
+        world.NoteMeld[Item] = new Odysseus.Services.Run.CraftNote.Meld("Savage Aim Materia III", null, 1);
+        Assert.False(StepConditions.ShouldSkipStep(Craft(1), world, QuestSnapshot.Unavailable));
+
+        world.Melded.Add(Item);
+        Assert.True(StepConditions.ShouldSkipStep(Craft(1), world, QuestSnapshot.Unavailable));
+
+        var hq = new FakeStepWorld { TerritoryId = 154 };
+        hq.Bag[Item] = 1;                          // normal quality only
+        hq.NoteHq.Add(Item);
+        Assert.False(StepConditions.ShouldSkipStep(Craft(1), hq, QuestSnapshot.Unavailable));
+    }
+
     [Fact]
     public void The_clause_inverts_when_the_bundle_asks_it_to()
     {

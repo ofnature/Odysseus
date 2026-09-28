@@ -674,6 +674,22 @@ public sealed class ConfigWindow : OdysseusWindow
                     + "refused and said so in the log, never guessed at.");
         }
 
+        ImGui.SetNextItemWidth(160f);
+        if (ImGui.BeginCombo("Crafting", _config.CraftProvider))
+        {
+            foreach (var provider in CrafterChoice.Providers)
+                if (ImGui.Selectable(provider, provider == _config.CraftProvider))
+                {
+                    _config.CraftProvider = provider;
+                    _save();
+                }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Which plugin crafts when a quest's Craft step or a delivery needs an item made. "
+                + "Odysseus asks it for the recipe and watches the bag; a craft already under way finishes "
+                + "with the one that started it. Switching takes effect immediately.");
+
         var duties = _config.HandOffDutiesToTheseus;
         if (ImGui.Checkbox("Dungeons and trials → Theseus", ref duties))
         {

@@ -36,6 +36,21 @@ public interface IOwnGatherer
     /// <summary>Where the item is found, for people: "Yak T'el — Miner Lv 90". Empty when the sheets do not say.</summary>
     string Where(uint itemId);
 
+    /// <summary>"up · 4:12 left" or "in 12:34" for an item only timed nodes yield; empty otherwise.</summary>
+    string Timer(uint itemId, DateTime utc) => string.Empty;
+
+    /// <summary>
+    /// For an item only timed nodes yield: zero when it can be gathered now, else the wait until it
+    /// can. Null when the item is not timed-only — the ordinary <see cref="CanGather"/> applies.
+    /// </summary>
+    TimeSpan? WaitFor(uint itemId, DateTime utc) => null;
+
+    /// <summary>At a node — opening it, working it, or closing its window. Stopping now would waste it.</summary>
+    bool AtNode => false;
+
+    /// <summary>For a timed-only item whose window is up: how long it stays up. Null otherwise.</summary>
+    TimeSpan? UpFor(uint itemId, DateTime utc) => null;
+
     /// <summary>Go and get <paramref name="count"/> of it at <paramref name="collectability"/> or better.</summary>
     bool Start(uint itemId, int count, int collectability, uint territoryHint = 0);
 
@@ -90,6 +105,19 @@ public sealed class OwnGatherer : IOwnGatherer
 
     public string Where(uint itemId) => _source.For(itemId)?.Describe() ?? string.Empty;
 
+    public string Timer(uint itemId, DateTime utc) => EorzeaClock.Describe(_source.WindowsFor(itemId), utc);
+
+    public TimeSpan? WaitFor(uint itemId, DateTime utc)
+    {
+        if (!Enabled) return null;
+        var windows = _source.WindowsFor(itemId);
+        if (windows.Count == 0) return null;
+        // A timed node the atlas cannot place is no use in or out of its window.
+        if (!_source.PointsFor(itemId).Any(p => p.Timed && p.HasZone && _atlas.SpawnsOf(p.NodeId).Count > 0))
+            return null;
+        return EorzeaClock.UntilGatherable(windows, utc, GatheringPlan.TimedMinLeft);
+    }
+
     public string WhyNot(uint itemId, uint territoryHint = 0)
     {
         var points = _source.PointsFor(itemId);
@@ -108,7 +136,7 @@ public sealed class OwnGatherer : IOwnGatherer
         if (!Enabled)
             return false;
 
-        var targets = GatheringPlan.All(itemId, _source, _atlas, territoryHint);
+        var targets = GatheringPlan.All(itemId, _source, _atlas, territoryHint, DateTime.UtcNow);
         if (targets.Count == 0)
         {
             _log($"Nothing in the node atlas yields item {itemId}.");
@@ -133,6 +161,11 @@ public sealed class OwnGatherer : IOwnGatherer
     public bool Busy => _runner.State is not (GatherRunState.Idle or GatherRunState.Done or GatherRunState.Faulted);
 
     public bool Faulted => _runner.State == GatherRunState.Faulted;
+
+    public bool AtNode => _runner.State is GatherRunState.Opening or GatherRunState.Working or GatherRunState.Closing;
+
+    public TimeSpan? UpFor(uint itemId, DateTime utc)
+        => EorzeaClock.Next(_source.WindowsFor(itemId), utc) is { Up: true } now ? now.Change : null;
 
     public string Status => _runner.State == GatherRunState.Faulted ? _runner.FailReason : _runner.Status;
 

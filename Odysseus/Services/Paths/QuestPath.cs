@@ -354,7 +354,12 @@ public sealed class QuestPath
     /// 4 → 5 (2026-09-26): <c>CombatItemUse</c> on Combat steps. Without it a "weaken it, then use the
     /// item" step simply killed the mob.
     /// </para>
-    public const int CurrentFormatVersion = 5;
+    ///
+    /// <para>
+    /// 5 → 6 (2026-09-27): a Craft step that names no item carries the path's own comment, where the
+    /// authors write "Crafted Item: 3x Square Maple Shield" — the only place the count is written down.
+    /// </para>
+    public const int CurrentFormatVersion = 6;
 
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     public ushort QuestId { get; set; }

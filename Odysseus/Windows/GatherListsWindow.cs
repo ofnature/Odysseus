@@ -143,6 +143,14 @@ public sealed class GatherListsWindow : OdysseusWindow
                 ImGui.TextColored(done ? OdysseusTheme.StatusGreen : OdysseusTheme.TextDisabled, "●");
                 ImGui.SameLine(0f, 6f);
                 ImGui.TextColored(done ? OdysseusTheme.TextDisabled : OdysseusTheme.TextPrimary, _gatherables.NameOf(item.ItemId));
+                // Timed nodes: when it is up, counted down in real time.
+                if (!done && _gatherer.Timer(item.ItemId, DateTime.UtcNow) is { Length: > 0 } timer)
+                {
+                    ImGui.SameLine(0f, 8f);
+                    ImGui.TextColored(timer.StartsWith("up", StringComparison.Ordinal) ? OdysseusTheme.StatusGreen : OdysseusTheme.StatusYellow, timer);
+                    if (ImGui.IsItemHovered())
+                        ImGui.SetTooltip("A timed node: it is only there in its window, counted down here in real time.");
+                }
 
                 ImGui.TableNextColumn();
                 ImGui.TextColored(done ? OdysseusTheme.StatusGreen : OdysseusTheme.TextPrimary, $"{held} /");
@@ -211,14 +219,28 @@ public sealed class GatherListsWindow : OdysseusWindow
         }
         else
         {
-            var canRun = _config.Enabled && _config.OwnGathering && !_runActive() && lists.Any(l => l.Enabled && l.Items.Count > 0);
-            using (ImRaii.Disabled(!canRun))
+            // "Gather" is the list on screen — a crystals list left enabled was gathered alongside
+            // the yew branches it was never asked about. The enabled lists together stay one click away.
+            var shown = _gatherListIndex < lists.Count ? lists[_gatherListIndex] : null;
+            var canGather = _config.Enabled && _config.OwnGathering && !_runActive();
+            var canRunShown = canGather && shown is { Items.Count: > 0 };
+            using (ImRaii.Disabled(!canRunShown))
             {
-                if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Play, "Gather", OdysseusTheme.GreenDark, "Gather everything short on the enabled lists, zone by zone.") && canRun)
+                if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Play, "Gather", OdysseusTheme.GreenDark,
+                        $"Gather everything short on \"{shown?.Name}\", zone by zone — this list only.") && canRunShown)
+                    runner.Begin([new GatherList { Name = shown!.Name, Enabled = true, Items = shown.Items }]);
+            }
+            if (ImGui.IsItemHovered() && !canRunShown)
+                ImGui.SetTooltip(!_config.OwnGathering ? "Own gathering is off in Settings." : _runActive() ? "A run is active." : "Nothing on this list.");
+
+            ImGui.SameLine();
+            var canRunAll = canGather && lists.Any(l => l.Enabled && l.Items.Count > 0);
+            using (ImRaii.Disabled(!canRunAll))
+            {
+                if (OdysseusTheme.IconTextButton(FontAwesomeIcon.LayerGroup, "All enabled", OdysseusTheme.GreenDark,
+                        "Gather everything short on every list with Enabled ticked, together, zone by zone.") && canRunAll)
                     runner.Begin(lists);
             }
-            if (ImGui.IsItemHovered() && !canRun)
-                ImGui.SetTooltip(!_config.OwnGathering ? "Own gathering is off in Settings." : _runActive() ? "A run is active." : "Nothing on an enabled list.");
             if (runner.Status.Length > 0)
             {
                 ImGui.SameLine();

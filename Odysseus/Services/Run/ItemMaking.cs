@@ -43,6 +43,8 @@ public sealed class ItemMaking
 
     public bool CrafterReady => _crafter.Available;
 
+    public string CrafterName => _crafter.Name;
+
     public bool IsCrafting => _crafter.IsCrafting;
 
     /// <summary>

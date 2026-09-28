@@ -39,6 +39,9 @@ public sealed record GatheringPointRef(uint NodeId, uint TerritoryId, uint Gathe
     /// </summary>
     public bool Timed { get; init; }
 
+    /// <summary>When a timed point is up, in Eorzea time. Empty for a point that is always there.</summary>
+    public IReadOnlyList<Gathering.NodeWindow> Windows { get; init; } = [];
+
     /// <summary>The sheet leaves a placeholder row behind for points it does not place.</summary>
     public bool HasZone => TerritoryId > 1;
 
@@ -64,6 +67,18 @@ public interface IGatheringSource
     /// interacted with.
     /// </summary>
     IReadOnlyList<GatheringPointRef> PointsFor(uint itemId);
+
+    /// <summary>
+    /// When an item that only grows on timed nodes can be gathered, in Eorzea time. Empty when an
+    /// always-there node yields it too — then there is nothing to wait for.
+    /// </summary>
+    IReadOnlyList<Gathering.NodeWindow> WindowsFor(uint itemId)
+    {
+        var points = PointsFor(itemId);
+        if (points.Count == 0 || points.Any(p => !p.Timed && p.HasZone))
+            return [];
+        return points.SelectMany(p => p.Windows).Distinct().ToList();
+    }
 }
 
 /// <summary>
@@ -101,6 +116,36 @@ public sealed class GatheringSource : IGatheringSource
         catch
         {
             return false; // a sheet we cannot read is not grounds for calling a node timed
+        }
+    }
+
+    /// <summary>
+    /// The windows of a timed point, read the way <see cref="IsTimed"/> tells them apart: a rare-pop
+    /// table's start times and durations, or an ephemeral point's start and end. All HHMM.
+    /// </summary>
+    private IReadOnlyList<Gathering.NodeWindow> WindowsOf(uint pointRowId)
+    {
+        try
+        {
+            if (_data.GetExcelSheet<GatheringPointTransient>().GetRowOrDefault(pointRowId) is not { } transient)
+                return [];
+            var windows = new List<Gathering.NodeWindow>();
+            if (transient.GatheringRarePopTimeTable.ValueNullable is { } table)
+                for (var i = 0; i < table.StartTime.Count && i < table.Duration.Count; i++)
+                    if (table.Duration[i] != 0)
+                        windows.Add(new Gathering.NodeWindow(
+                            Gathering.NodeWindow.FromHhmm(table.StartTime[i]), Gathering.NodeWindow.FromHhmm(table.Duration[i])));
+            if (transient.EphemeralStartTime != NoWindow)
+            {
+                var start = Gathering.NodeWindow.FromHhmm(transient.EphemeralStartTime);
+                var end = Gathering.NodeWindow.FromHhmm(transient.EphemeralEndTime);
+                windows.Add(new Gathering.NodeWindow(start, (end - start + 1440) % 1440));
+            }
+            return windows;
+        }
+        catch
+        {
+            return [];
         }
     }
 
@@ -193,7 +238,7 @@ public sealed class GatheringSource : IGatheringSource
                     var b = p.GatheringPointBase.ValueNullable;
                     points.Add(new GatheringPointRef(
                         p.RowId, p.TerritoryType.RowId, b?.GatheringType.RowId ?? 99, (ushort)(b?.GatheringLevel ?? 0))
-                        { Timed = IsTimed(p.RowId) });
+                        { Timed = IsTimed(p.RowId), Windows = WindowsOf(p.RowId) });
                 }
 
             // Quest-hidden items are not in the base's item slots at all — GatheringItemPoint is
@@ -213,7 +258,7 @@ public sealed class GatheringSource : IGatheringSource
                         var b = point.GatheringPointBase.ValueNullable;
                         points.Add(new GatheringPointRef(
                             point.RowId, point.TerritoryType.RowId, b?.GatheringType.RowId ?? 99, (ushort)(b?.GatheringLevel ?? 0))
-                            { Timed = IsTimed(point.RowId) });
+                            { Timed = IsTimed(point.RowId), Windows = WindowsOf(point.RowId) });
                     }
                 }
             }

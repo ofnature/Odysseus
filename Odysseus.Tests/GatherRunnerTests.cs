@@ -111,15 +111,21 @@ public class GatherRunnerTests
         private readonly HashSet<uint> _fired = [];
         public int Forgets { get; private set; }
 
+        /// <summary>What the node offers; null means whatever is asked for.</summary>
+        public HashSet<uint>? Offers { get; set; }
+        public List<uint> Pressed { get; } = [];
+
         public bool SelectSlotFor(uint itemId)
         {
             if (!ItemListOpen) return false;
+            if (Offers is { } offers && !offers.Contains(itemId)) return false;
             // The real window's guard: one press per item until the runner forgets it.
             if (!_fired.Add(itemId)) return false;
             SlotPicks++;
+            Pressed.Add(itemId);
             if (PlainNode)
             {
-                Held++;
+                if (Offers is null || itemId == 44850) Held++;
                 Integrity--;
                 _actionLeft = 2;   // the gathering action plays through the next tick
                 if (Integrity <= 0) { NodeOpen = false; Spawned.Clear(); }
@@ -234,6 +240,46 @@ public class GatherRunnerTests
         Assert.Empty(world.Actions);   // no rotation on a plain node
         Assert.DoesNotContain(world.Log, m => m.Contains("collectable window did not open"));
         Assert.DoesNotContain(world.Log, m => m.Contains("has no item"));   // the Cedarwood loop: refused press read as an empty node
+    }
+
+    /// <summary>
+    /// Grade 3 Shroud Topsoil's unspoiled node: one topsoil, then the row is gone and the node
+    /// still holds five attempts and a Dark Matter Cluster at 100%. Those go on the cluster rather
+    /// than being walked away from.
+    /// </summary>
+    [Fact]
+    public void When_the_item_runs_out_the_rest_of_the_node_goes_on_dark_matter_clusters()
+    {
+        var target = Target(new Vector3(10, 0, 10));
+        var (runner, world) = Ready(target);
+        world.PlainNode = true;
+        world.Integrity = 6;
+        world.Offers = [44850, 10335];
+        runner.Begin(target, count: 10, minimumCollectability: 0);
+
+        for (var i = 0; i < 12 && world.Pressed.Count < 1; i++) { runner.Tick(); world.Advance(1.5); }
+        world.Offers = [10335];                                         // the item row is spent
+        for (var i = 0; i < 40 && world.NodeOpen; i++) { runner.Tick(); world.Advance(1.5); }
+
+        Assert.Equal(44850u, world.Pressed[0]);
+        Assert.Equal(5, world.Pressed.Count(p => p == 10335));        // the node's other five attempts
+        Assert.Contains(world.Log, m => m.Contains("spending the rest of it on item 10335"));
+    }
+
+    /// <summary>A timed node's spots are looked at once: nothing up at any of them means it was worked this window.</summary>
+    [Fact]
+    public void A_timed_node_that_is_not_up_is_looked_for_once_round_not_twice()
+    {
+        var spots = new[] { new Vector3(10, 0, 10), new Vector3(200, 0, 10), new Vector3(10, 0, 200) };
+        var target = Target(spots) with { Timed = true };
+        var (runner, world) = Ready(target);
+        world.Up.Clear();                                               // spent
+        runner.Begin([target], count: 5, minimumCollectability: 0);
+        Run(runner, world, 400);
+
+        Assert.Equal(GatherRunState.Faulted, runner.State);
+        Assert.Contains("worked already this window", runner.FailReason);
+        Assert.Equal(3, world.Log.Count(m => m.Contains("nothing up here") || m.Contains("could not be reached") || m.Contains("took too long")));
     }
 
     [Fact]

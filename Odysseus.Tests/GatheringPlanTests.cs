@@ -48,6 +48,24 @@ public class GatheringPlanTests : IDisposable
         static int SlotValueIndex(int slot) => 6 + 11 * slot;
     }
 
+    /// <summary>
+    /// Grade 3 Shroud Topsoil's unspoiled node: in the plan while its window is up, out of it
+    /// otherwise — and never for a caller that gives no time and so cannot wait for one.
+    /// </summary>
+    [Fact]
+    public void A_timed_node_is_a_target_only_while_its_window_is_up()
+    {
+        var source = new Source();
+        source.Points.Add(new GatheringPointRef(31034, 153, 0, 25)
+            { Timed = true, Windows = [new NodeWindow(NodeWindow.FromHhmm(600), NodeWindow.FromHhmm(300))] });
+        var atlas = Atlas("""{ "31034": [ {"X": -310.4, "Y": 0.9, "Z": 382.6} ] }""");
+        static DateTime At(int hour) => DateTime.UnixEpoch.AddSeconds(((20_000 * 24 + hour) * 60) * 175.0 / 60.0);
+
+        Assert.Single(GatheringPlan.All(7763, source, atlas, now: At(7)));
+        Assert.Empty(GatheringPlan.All(7763, source, atlas, now: At(12)));
+        Assert.Empty(GatheringPlan.All(7763, source, atlas));
+    }
+
     [Fact]
     public void An_unplaced_point_becomes_a_target_only_with_the_callers_zone_hint()
     {

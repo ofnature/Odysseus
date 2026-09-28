@@ -368,6 +368,39 @@ public class TravelExecutorTests
     }
 
     /// <summary>
+    /// Blood Ties (2617): the step before ended at the far end of Limsa's Upper Decks, with no shard
+    /// in view, and the hop was asked for from there — Lifestream never went anywhere and the step
+    /// faulted after 90s. The map places every shard: walk toward the nearest, look again once it is
+    /// in view, walk the rest, then hop.
+    /// </summary>
+    [Fact]
+    public void With_no_shard_in_view_it_walks_toward_the_one_the_map_shows()
+    {
+        var w = World();
+        w.TerritoryId = 128;
+        w.PlayerPosition = new Vector3(-185, 41, 185);
+        w.MappedAccess[128] = ("The Aftcastle", new Vector3(16, 41, 72));
+        w.AethernetTerritories["[Limsa Lominsa] Fishermen's Guild"] = 129;
+        w.ArriveOnMove = true;
+        var ex = new StepExecutor(w);
+        var step = Interact(129, new Vector3(-189, 4, 178));
+        step.AethernetShortcut = ["[Limsa Lominsa] The Aftcastle", "[Limsa Lominsa] Fishermen's Guild"];
+        ex.Begin(step);
+
+        for (var i = 0; i < 6 && !w.Calls.Contains("Move 16,41,72 fly=False"); i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains(w.Calls, c => c.StartsWith("Log") && c.Contains("No aethernet shard in view"));
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Aethernet"));   // not from out here
+
+        w.AethernetAccess[128] = new Vector3(30, 40, 90);                 // now loaded: the real one, off the marker
+        for (var i = 0; i < 20 && !w.Calls.Any(c => c.StartsWith("Aethernet")); i++) { ex.Tick(); w.Advance(0.5); }
+
+        var exact = w.Calls.FindIndex(c => c.StartsWith("Move 30,40,90"));
+        var hopped = w.Calls.FindIndex(c => c.StartsWith("Aethernet [Limsa Lominsa] Fishermen's Guild"));
+        Assert.True(hopped >= 0, "never hopped");
+        Assert.True(exact >= 0 && exact < hopped, "hopped before reaching the shard itself");
+    }
+
+    /// <summary>
     /// The navmesh does not extend under a solid object, so a path to a shard ends a few yalms
     /// short and stays there — which is why jumping made a stalled approach complete. The last
     /// stretch is walked straight instead, because Lifestream has to interact with the shard and

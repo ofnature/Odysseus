@@ -163,6 +163,15 @@ public static class QuestionableImporter
             }
         }
 
+        // The path's own comment is where its authors write what the quest takes: "Crafted Item:
+        // 3x Square Maple Shield", "1x Walnut Lumber HQ". Ten Craft steps name no item and have
+        // nothing else to go on for the count, and any Craft step needs it for the quality.
+        if (Str(root, "Comment") is { Length: > 0 } note)
+            foreach (var block in path.Sequences)
+            foreach (var step in block.Steps)
+                if (step.Kind == StepKind.Craft)
+                    step.Comment = step.Comment is null ? note : $"{step.Comment}\n{note}";
+
         return path;
     }
 

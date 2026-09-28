@@ -34,7 +34,12 @@ public sealed class StepExecutor
         None, Delay,
         /// <summary>The game is still moving the character — a cutscene, a zone load, a conversation. Travel waits for it to finish.</summary>
         Settle,
-        Teleport, TeleportWait, Aethernet, AethernetWait, Mount, Move, WaitReady, Interact, Dialogue,
+        Teleport, TeleportWait, Aethernet, AethernetWait,
+        /// <summary>Walked toward a shard the map places; look again now it should be in view.</summary>
+        AethernetApproach,
+        /// <summary>The crafted item needs materia melded before the quest will take it.</summary>
+        Meld,
+        Mount, Move, WaitReady, Interact, Dialogue,
         CombatWait, Combat,
         /// <summary>Solo instance: interacted, waiting to be inside.</summary>
         SoloDutyEnter,
@@ -297,6 +302,9 @@ public sealed class StepExecutor
     private QuestStep? _step;
     private ushort _questId;
     private bool _listAnswered;
+
+    /// <summary>The unnamed list this step already took the first option of — its entries, joined.</summary>
+    private string? _unnamedListTaken;
     private DateTime _listOpenedAt;
     private DateTime _yesNoOpenedAt;
     private bool _yesNoReported;
@@ -391,6 +399,12 @@ public sealed class StepExecutor
     private int _frozenStops;
     /// <summary>This detour ends at an aethernet stop, so the game can say when it is done.</summary>
     private bool _detourNeedsShard;
+
+    /// <summary>This step already walked toward a shard from the map — a second look does not walk again.</summary>
+    private bool _shardApproached;
+
+    /// <summary>Close enough to a mapped shard for the object itself to be loaded and found.</summary>
+    private const float ShardSightDistance = 40f;
     private DateTime _lastBuy;
     private DateTime _lastShopOpen;
     /// <summary>The ClassJob a SwitchClass step is waiting to land on.</summary>
@@ -549,6 +563,7 @@ public sealed class StepExecutor
         _step = step;
         _questId = questId;
         _listAnswered = false;
+        _unnamedListTaken = null;
         _listOpenedAt = default;
         _yesNoOpenedAt = default;
         _yesNoReported = false;
@@ -578,6 +593,7 @@ public sealed class StepExecutor
         _stepStart = _world.UtcNow;
         _daedalusOffSaid = false;
         _moveRetries = 0;
+        _shardApproached = false;
         _sawOccupied = false;
         _interactRetries = 0;
         _dismountAsked = false;
@@ -849,6 +865,10 @@ public sealed class StepExecutor
                 }
                 _aethernetTerritory = _world.AethernetTerritoryOf(hop) ?? 0;
                 Enter(Phase.AethernetWait);
+                break;
+
+            case Phase.AethernetApproach:
+                Enter(BeginAethernet());
                 break;
 
             case Phase.AethernetWait:
@@ -1192,6 +1212,10 @@ public sealed class StepExecutor
                 TickCraft(step, now);
                 break;
 
+            case Phase.Meld:
+                TickMeld(now);
+                break;
+
             case Phase.Gather:
                 TickGather(step, now);
                 break;
@@ -1406,7 +1430,22 @@ public sealed class StepExecutor
             return Phase.Aethernet; // the game says we are at one; nothing to walk
 
         if (_world.NearestAethernetAccess(_world.TerritoryId, _world.PlayerPosition) is not { } access)
+        {
+            // None in view. The map knows where they are: walk toward the nearest until it loads,
+            // then look again (Blood Ties, 2617 — the step ended at the far end of the Upper
+            // Decks, and the hop asked from there never went anywhere).
+            if (!_shardApproached && _world.MappedAethernetAccess(_world.TerritoryId, _world.PlayerPosition) is { } mapped)
+            {
+                _shardApproached = true;
+                _world.Log($"No aethernet shard in view — walking toward {mapped.Name} at {Fmt(mapped.At)} before hopping to {AethernetDestination}.");
+                _detourTo = mapped.At;
+                _detourThen = Phase.AethernetApproach;
+                _detourTolerance = ShardSightDistance;
+                _detourNeedsShard = true;
+                return Phase.Move;
+            }
             return Phase.Aethernet; // nothing placed in this zone; let the hop try anyway
+        }
 
         if (Vector3.Distance(_world.PlayerPosition, access) <= AethernetReachDistance)
             return Phase.Aethernet;
@@ -1644,11 +1683,27 @@ public sealed class StepExecutor
                 return BeginPurchase(step);
 
             case StepKind.Craft:
-                if (step.ItemId is null)
+                _hqMisses = 0;
+                if (step.ItemId is { } named)
                 {
-                    Fail("Craft step names no item");
+                    _craftItem = named;
+                    _craftWant = Math.Max(1, step.ItemCount ?? 1);
+                    _craftHq = _world.NoteWantsHighQuality(named, step.Comment);
+                    if (_craftHq)
+                        _world.Log($"The path marks item {named} HQ — only high-quality ones count.");
+                    return Phase.Craft;
+                }
+                // Ten upstream Craft steps name no item — My First Saw (205) among them — and leave
+                // it to the player to know. The quest itself says what it takes: its hand-in items.
+                if (NextHandInCraft(step) is not { } handIn)
+                {
+                    if (_world.QuestHandInCrafts(_questId, step.Comment).Count > 0)
+                        return Phase.Finish; // everything the quest takes is already in the bag
+                    Fail("Craft step names no item, and the quest hands in nothing that can be crafted");
                     return Phase.None;
                 }
+                (_craftItem, _craftWant, _craftHq) = handIn;
+                _world.Log($"The Craft step names no item; quest {_questId} hands in {_craftWant} × item {_craftItem}{(_craftHq ? " HQ" : "")} — making that.");
                 return Phase.Craft;
 
             case StepKind.EquipItem:
@@ -2591,15 +2646,163 @@ public sealed class StepExecutor
     /// to work it out from an empty crafting log.
     /// </para>
     /// </summary>
+    /// <summary>The item this Craft step is making: the one it names, else the quest's hand-in in hand.</summary>
+    private uint _craftItem;
+    private int _craftWant = 1;
+
+    /// <summary>The quest takes only high-quality ones: normal-quality copies do not count toward <see cref="_craftWant"/>.</summary>
+    private bool _craftHq;
+
+    /// <summary>HQ copies held when the last ask went in, to tell "it made one" from "it made a normal one".</summary>
+    private int _hqAtAsk;
+
+    /// <summary>Crafts in a row that came out normal quality when HQ was wanted.</summary>
+    private int _hqMisses;
+
+    /// <summary>Normal-quality results in a row before the step stops rather than burn more materials.</summary>
+    private const int MaxHqMisses = 2;
+
+    private CraftNote.Meld? _meld;
+    private uint _meldItem;
+    /// <summary>0: the item is next to pick; 1: the materia is.</summary>
+    private int _meldStage;
+    private DateTime _meldBeat;
+
+    /// <summary>One click a beat — each one changes the window, and the next is read off the change.</summary>
+    private static readonly TimeSpan MeldBeat = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan MeldMax = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// Meld the materia the quest wants into the item just made — the clicks the game's own window
+    /// sends (recorded 2026-09-27): open Materia Melding, pick the item by name, pick a materia the
+    /// requirement takes, and press Meld only when the confirmation names that item and that materia.
+    /// Done when the item carries it; back to the craft step, which moves on from there.
+    /// </summary>
+    private void TickMeld(DateTime now)
+    {
+        var meld = _meld!;
+        var item = _meldItem;
+
+        if (_world.HoldsMelded(item, meld))
+        {
+            _world.CloseMelding();
+            _world.Log($"Item {item} now carries {DescribeMeld(meld)}.");
+            Enter(Phase.Craft);
+            return;
+        }
+        if (now - _phaseStart > MeldMax)
+        {
+            _world.CloseMelding();
+            Fail($"melding {DescribeMeld(meld)} into item {item} did not finish in {MeldMax.TotalSeconds:F0}s — meld it yourself, then Retry");
+            return;
+        }
+        if (_meldBeat != default && now - _meldBeat < MeldBeat)
+            return;
+        _meldBeat = now;
+
+        switch (_world.MeldDialogIsFor(item, meld))
+        {
+            case true:
+                _world.ConfirmMeld();
+                return;
+            case false:
+                _world.CloseMelding();
+                Fail($"the melding confirmation named something other than {DescribeMeld(meld)} into item {item} — nothing was melded; meld it yourself, then Retry");
+                return;
+        }
+
+        if (!_world.MeldingOpen)
+        {
+            if (!_world.MeldingUnlocked)
+            {
+                Fail($"the quest takes item {item} with {DescribeMeld(meld)} melded, and Materia Melding is not learned yet — " +
+                     "learn it (the quest \"Forging the Spirit\"), then Retry");
+                return;
+            }
+            _world.OpenMelding();
+            _meldStage = 0;
+            return;
+        }
+
+        if (_meldStage == 0)
+        {
+            var itemIndex = _world.MeldItemIndex(item);
+            if (itemIndex < 0)
+            {
+                _world.CloseMelding();
+                Fail($"item {item} is not in the melding window's list — move it to the bags, then Retry");
+                return;
+            }
+            _world.MeldSelectItem(itemIndex);
+            _meldStage = 1;
+            return;
+        }
+
+        var materiaIndex = _world.MeldMateriaIndex(meld);
+        if (materiaIndex < 0)
+        {
+            _world.CloseMelding();
+            Fail($"no {DescribeMeld(meld)} in the bags to meld into item {item} — get one, then Retry");
+            return;
+        }
+        _world.MeldSelectMateria(materiaIndex);
+        _meldStage = 0;   // after a meld the window is back at its lists; pick again if more are wanted
+    }
+
+    private static string DescribeMeld(CraftNote.Meld meld)
+    {
+        var what = meld.Materia ?? (meld.Grade is { } g ? $"materia of grade {g} (no higher)" : "any materia");
+        return meld.Count > 1 ? $"{meld.Count} × {what}" : what;
+    }
+
+    /// <summary>What counts toward the target: HQ copies only, when that is what the quest takes.</summary>
+    private int CraftHave(uint item, bool hq) => hq ? _world.ItemCountHq(item) : _world.ItemCount(item);
+
+    /// <summary>The quest's craftable hand-in items not yet all in the bag, in the quest's own order — the first of them.</summary>
+    private (uint ItemId, int Count, bool HighQuality)? NextHandInCraft(QuestStep step)
+    {
+        foreach (var (item, count, hq) in _world.QuestHandInCrafts(_questId, step.Comment))
+            if (CraftHave(item, hq) < count)
+                return (item, count, hq);
+        return null;
+    }
+
     private void TickCraft(QuestStep step, DateTime now)
     {
-        var item = step.ItemId!.Value;
-        var want = Math.Max(1, step.ItemCount ?? 1);
+        var item = _craftItem;
+        var want = _craftWant;
+        var have = CraftHave(item, _craftHq);
+        // The bag total to reach: normal-quality copies already held do not count, so they are
+        // added on top — asking the crafter for "want" in total would stop at the NQ ones.
+        var target = want + (_world.ItemCount(item) - have);
 
-        if (_world.ItemCount(item) >= want)
+        if (have >= want)
         {
             if (_craftAsked != 0 && _world.IsCrafting)
                 _world.StopCrafting();
+            // Made — but some quests take it only with materia melded in (The Lance's Lesson, Saving
+            // Captain Gairhard). Carrying it over unmelded ends at a hand-in that never fills.
+            if (_world.NoteWantsMeld(item, step.Comment) is { } meld && !_world.HoldsMelded(item, meld))
+            {
+                _meld = meld;
+                _meldItem = item;
+                _meldStage = 0;
+                _meldBeat = default;
+                _world.Log($"Item {item} is made; the quest takes it only with {DescribeMeld(meld)} melded — melding it.");
+                Enter(Phase.Meld);
+                return;
+            }
+            // A step with no item of its own makes every hand-in the quest wants, one after another.
+            if (step.ItemId is null && NextHandInCraft(step) is { } following)
+            {
+                (_craftItem, _craftWant, _craftHq) = following;
+                _hqMisses = 0;
+                _craftAsked = 0;
+                _craftHeldAtAsk = 0;
+                _phaseStart = now;
+                _world.Log($"Item {item} made; quest {_questId} also hands in {_craftWant} × item {_craftItem} — making that.");
+                return;
+            }
             Enter(Phase.Finish);
             return;
         }
@@ -2612,7 +2815,7 @@ public sealed class StepExecutor
 
         if (!_world.CrafterReady)
         {
-            Fail($"{want - _world.ItemCount(item)} × item {item} needs crafting and Artisan is not loaded — " +
+            Fail($"{want - have} × item {item}{(_craftHq ? " HQ" : "")} needs crafting and {_world.CrafterName} is not loaded — " +
                  "make them yourself, then Retry");
             return;
         }
@@ -2627,18 +2830,18 @@ public sealed class StepExecutor
             // Artisan produced nothing, so the materials ran out. A character new to the class has
             // none of them, which is the ordinary case rather than the exceptional one — so if a
             // merchant here sells what is missing, go and buy it instead of stopping.
-            if (TryBuyMaterials(item, want))
+            if (TryBuyMaterials(item, target))
                 return;
 
-            var short_ = want - _world.ItemCount(item);
+            var short_ = want - have;
             var missing = _world.CraftShortfall(item, short_);
             // No shortfall means the materials are all there and something else stopped it — the
             // recipe's level, or Artisan not being able to reach the log. Saying "stock up" there
             // would send you looking for materials you already have.
-            Fail($"Artisan stopped with {short_} × item {item} still to make" +
+            Fail($"{_world.CrafterName} stopped with {short_} × item {item} still to make" +
                  (missing.Count > 0
                      ? $" — short of {Describe(missing)}. Get those, then Retry"
-                     : ", and the materials are all there — check the recipe's level and that Artisan can craft it"));
+                     : $", and the materials are all there — check the recipe's level and that {_world.CrafterName} can craft it"));
             return;
         }
 
@@ -2648,11 +2851,25 @@ public sealed class StepExecutor
         if (_craftAsked != 0 && now - _phaseStart <= CraftStartGrace)
             return;
 
-        if (_world.NextCraft(item, want) is not { } next)
+        // The last ask for this item came back, and not as HQ. Try again — a craft is a roll — but
+        // not forever: every miss spends a full set of materials.
+        if (_craftHq && _craftAsked == item && _world.ItemCount(item) > _craftHeldAtAsk && have <= _hqAtAsk)
         {
-            if (TryBuyMaterials(item, want))
+            _craftAsked = 0;
+            if (++_hqMisses >= MaxHqMisses)
+            {
+                Fail($"{_world.CrafterName} made item {item} at normal quality {_hqMisses} times, and this quest takes only HQ — " +
+                     "better gear or food, or make one HQ yourself, then Retry");
                 return;
-            var missing = _world.CraftShortfall(item, want - _world.ItemCount(item));
+            }
+            _world.Log($"Item {item} came out normal quality and the quest takes only HQ — crafting again ({_hqMisses}/{MaxHqMisses}).");
+        }
+
+        if (_world.NextCraft(item, target) is not { } next)
+        {
+            if (TryBuyMaterials(item, target))
+                return;
+            var missing = _world.CraftShortfall(item, want - have);
             Fail($"no recipe for item {item}, or its materials cannot be crafted" +
                  (missing.Count > 0 ? $" — short of {Describe(missing)}" : "") + ". Buy or gather the rest, then Retry");
             return;
@@ -2663,15 +2880,16 @@ public sealed class StepExecutor
         var heldBefore = _world.ItemCount(next.ItemId);
         if (_world.StartCraft(next.ItemId, next.Count) is not { } job)
         {
-            Fail($"no recipe for item {next.ItemId}, or Artisan would not take the craft");
+            Fail($"no recipe for item {next.ItemId}, or {_world.CrafterName} would not take the craft");
             return;
         }
         _craftAsked = next.ItemId;
         _craftHeldAtAsk = heldBefore;
+        _hqAtAsk = have;
         _phaseStart = now;
         _world.Log(next.ItemId == item
-            ? $"Asked Artisan for {next.Count} × item {item} as {job}."
-            : $"Asked Artisan for {next.Count} × item {next.ItemId} first — item {item} is made from it.");
+            ? $"Asked {_world.CrafterName} for {next.Count} × item {item} as {job}."
+            : $"Asked {_world.CrafterName} for {next.Count} × item {next.ItemId} first — item {item} is made from it.");
     }
 
     /// <summary>
@@ -3587,9 +3805,23 @@ public sealed class StepExecutor
         {
             if (now - _listOpenedAt < UndeclaredListGrace)
                 return;
-            _world.Log($"A list choice is open that quest {_questId} does not name — [{string.Join(" | ", entries)}]; taking the first option.");
+            // The same menu back again: it is the NPC's chat menu, which reopens after every topic
+            // until the last line ("Nothing.") is picked. Might Made Right (648) asked Severian
+            // "What do you do here?" every three seconds for minutes — straight after a hand-in he
+            // answers with chat, and offers the next quest a moment later. So leave the talk; the
+            // run asks again, and the replay limit stops it with a reason if nothing ever comes.
+            var shown = string.Join(" | ", entries);
+            if (_unnamedListTaken == shown)
+            {
+                _world.Log($"The same menu came back — leaving the conversation with \"{entries[^1]}\".");
+                _world.SelectStringIndex(entries.Count - 1);
+                _listAnswered = true;
+                return;
+            }
+            _world.Log($"A list choice is open that quest {_questId} does not name — [{shown}]; taking the first option.");
             _world.SelectStringIndex(0);
             _listAnswered = true;
+            _unnamedListTaken = shown;
             return;
         }
 
