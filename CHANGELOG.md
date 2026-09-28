@@ -1,7 +1,9 @@
 # Changelog
 
 <!-- LATEST-START -->
-## v0.2.11 — unreleased
+## v0.2.11 — 2026-09-27
+
+Hephaestus can do the crafting, quests that want HQ or melded items get them, and gather lists handle timed nodes.
 
 ### Crafting
 - Settings → Handoffs → "Crafting" picks who makes items for Craft steps and deliveries: Artisan (as before) or Hephaestus. The switch is immediate; a craft already under way finishes with the crafter that started it, and every status line and stop names whichever is in use
