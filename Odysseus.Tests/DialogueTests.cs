@@ -77,6 +77,24 @@ public class DialogueTests
         Assert.DoesNotContain(w.Calls, c => c.StartsWith("Notify"));
     }
 
+    /// <summary>
+    /// The door's question while the step is still walking up: answered, not left on screen. And
+    /// a step the path does not mark as a crossing still takes the way into its own zone.
+    /// </summary>
+    [Fact]
+    public void A_travel_question_into_the_steps_own_zone_is_answered_mid_walk()
+    {
+        var w = new FakeStepWorld { TerritoryId = 628, YesNoPromptText = "Enter the Ruby Bazaar offices?", ArriveOnMove = false, IsMoving = true };
+        w.Warps[639] = ["Enter the Ruby Bazaar offices?"];
+        w.VisibleAddons.Add("SelectYesno");
+        var ex = new StepExecutor(w);
+        w.PlayerPosition = new Vector3(100, 15, 100);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 7, TerritoryId = 628, TargetTerritoryId = 639, Position = new Vector3(151, 15, 96) });
+
+        Ticks(ex, w, 3);
+        Assert.Contains("YesNo True", w.Calls);
+    }
+
     /// <summary>Only the travel questions into the step's destination: anything else still waits for the player.</summary>
     [Theory]
     [InlineData(400u, "Do you wish to abandon this quest?")]   // not a travel question
@@ -366,6 +384,27 @@ public class DialogueTests
         ex.Tick(); w.Advance(0.5);
         ex.Tick();
         Assert.Equal(1, w.Calls.Count(c => c == "Select 1")); // answered once, not every tick
+    }
+
+    /// <summary>Ul'dah's lift attendant asks in the icon menu, not the plain one — the List choice answers it.</summary>
+    [Fact]
+    public void A_list_choice_answers_the_lift_attendants_icon_menu()
+    {
+        var texts = new Texts();
+        texts.Map[(1, "A")] = "Ride Lift to the Ruby Road Exchange";
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w, texts);
+        var step = Interact(7);
+        step.DialogueChoices = [new DialogueChoice("List", "Q", "A", null)];
+        ex.Begin(step, questId: 1);
+        Ticks(ex, w, 3);
+
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectIconString");
+        w.IconEntries.AddRange(["Ride Lift to the Airship Landing", "Ride Lift to the Ruby Road Exchange", "Nothing"]);
+        ex.Tick();
+        Assert.Contains("IconSelect 1", w.Calls);
     }
 
     [Fact]

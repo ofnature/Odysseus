@@ -192,6 +192,7 @@ public static class QuestionableImporter
             DisableNavmesh = Bool(e, "DisableNavmesh") ?? false,
             AetheryteShortcut = Str(e, "AetheryteShortcut"),
             AetherCurrentId = U32(e, "AetherCurrentId"),
+            AttuneName = Str(e, "AethernetShard") ?? Str(e, "Aetheryte"),
             ItemCount = (int?)U32(e, "ItemCount"),
             ItemId = U32(e, "ItemId"),
             Emote = Str(e, "Emote"),

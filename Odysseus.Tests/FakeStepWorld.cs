@@ -227,6 +227,21 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Dictionary<uint, uint> AttunedByTerritory { get; } = new();
     /// <summary>Territory → the aethernet hop that reaches it, for a zone with no aetheryte of its own.</summary>
     public Dictionary<uint, (uint? Aetheryte, string Hop, uint Lands)> AethernetByTerritory { get; } = new();
+    /// <summary>Battlehorn (1–3) → the pet on it.</summary>
+    public Dictionary<int, string> BattlehornPets { get; } = new();
+    public bool BattlehornLands { get; set; } = true;
+    public string? BattlehornPet(int slot) => BattlehornPets.GetValueOrDefault(slot);
+    public string AssignBattlehorn(int slot, string pet)
+    {
+        Calls.Add($"Battlehorn {slot} {pet}");
+        if (BattlehornLands) BattlehornPets[slot] = pet;
+        return BattlehornLands ? "assigned" : "did not land";
+    }
+    public bool BattlehornBusy => false;
+    public string BattlehornMessage => BattlehornLands ? "assigned" : "did not land";
+    /// <summary>Territory → the door into it.</summary>
+    public Dictionary<uint, Odysseus.Services.Travel.Doorways.Door> Doors { get; } = new();
+    public Odysseus.Services.Travel.Doorways.Door? DoorInto(uint territoryId) => Doors.GetValueOrDefault(territoryId);
     public TravelRoute? RouteTo(uint territoryId, Vector3? near)
     {
         if (AttunedByTerritory.TryGetValue(territoryId, out var id))
@@ -334,6 +349,47 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     /// <summary>Items the path's note marks HQ.</summary>
     public HashSet<uint> NoteHq { get; } = [];
     public bool NoteWantsHighQuality(uint itemId, string? note) => NoteHq.Contains(itemId);
+    /// <summary>Aetherytes and shards by id: name, where, and whether attuned.</summary>
+    public Dictionary<uint, (string Name, Vector3 At)> Attunables { get; } = new();
+    public HashSet<uint> AttunedIds { get; } = [];
+    /// <summary>Interacting at an aetheryte attunes it, as the game does.</summary>
+    public bool InteractAttunes { get; set; } = true;
+    public uint? AttunableId(string name) => Attunables.FirstOrDefault(kv => kv.Value.Name == name).Key is var k && k != 0 ? k : null;
+    public bool IsAttuned(uint aetheryteId) => !Attunables.ContainsKey(aetheryteId) || AttunedIds.Contains(aetheryteId);
+    /// <summary>Id → the height the map marker gets guessed at, when it differs from the object's.</summary>
+    public Dictionary<uint, float> MarkerHeight { get; } = new();
+    public (string Name, uint TerritoryId, Vector3 At)? AttunableAt(uint aetheryteId)
+        => Attunables.TryGetValue(aetheryteId, out var a)
+            ? (a.Name, TerritoryId, MarkerHeight.TryGetValue(aetheryteId, out var y) ? a.At with { Y = y } : a.At)
+            : null;
+    public (uint Id, string Name, Vector3 At)? UnattunedNear(Vector3 near, float within)
+    {
+        foreach (var (id, a) in Attunables)
+            if (!AttunedIds.Contains(id) && Vector3.Distance(near, a.At) <= within) return (id, a.Name, a.At);
+        return null;
+    }
+    public IReadOnlyList<(uint Id, string Name, bool IsShard)> UnattunedHere()
+        => Attunables.Where(kv => !AttunedIds.Contains(kv.Key)).Select(kv => (kv.Key, kv.Value.Name, false)).ToList();
+    public Vector3? NearestAttuneObject(Vector3 near, float within)
+        => Attunables.Values.Select(a => (Vector3?)a.At)
+            .FirstOrDefault(a => Vector2.Distance(new Vector2(a!.Value.X, a.Value.Z), new Vector2(near.X, near.Z)) <= within);
+    public bool InteractAttuneObject(Vector3 at)
+    {
+        Calls.Add("InteractAetheryte");
+        foreach (var (id, a) in Attunables)
+            if (Vector3.Distance(a.At, at) < 2f && InteractAttunes) AttunedIds.Add(id);
+        return true;
+    }
+    public void CloseTravelMenus() => Calls.Add("CloseMenus");
+    public HashSet<string> UnattunedHops { get; } = [];
+    public bool AethernetAttuned(string destination) => !UnattunedHops.Contains(destination);
+    public int Sprints { get; private set; }
+    public bool Sprint() { Sprints++; Calls.Add("Sprint"); return true; }
+    /// <summary>What a city hop would answer.</summary>
+    public string? CityHopTo { get; set; }
+    public string? CityHop(uint territoryId, Vector3 from, Vector3 to) => CityHopTo;
+    public bool? AutoSnipeEnabled { get; set; }
+    public void SetAutoSnipe(bool on) { Calls.Add($"AutoSnipe {on}"); AutoSnipeEnabled = on; }
     /// <summary>Item → the materia the path's note wants melded into it.</summary>
     public Dictionary<uint, CraftNote.Meld> NoteMeld { get; } = new();
     public CraftNote.Meld? NoteWantsMeld(uint itemId, string? note) => NoteMeld.TryGetValue(itemId, out var m) ? m : null;

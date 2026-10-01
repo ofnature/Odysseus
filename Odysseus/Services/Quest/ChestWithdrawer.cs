@@ -26,28 +26,44 @@ public interface IChestWorld
     /// <summary>Move a whole stack into the bags. False when there was nowhere to put it.</summary>
     bool Withdraw(ChestStack stack);
 
-    /// <summary>The stack has left the slot it was in — the only success signal worth trusting.</summary>
-    bool HasLeft(ChestStack stack);
+    /// <summary>
+    /// Start moving part of a stack — the game's click-the-stack, click-a-bag-slot move, which
+    /// asks how many in its number prompt. False when there was nowhere to put it.
+    /// </summary>
+    bool WithdrawSome(ChestStack stack, int amount);
+
+    /// <summary>The "how many?" prompt (<c>InputNumeric</c>) is up.</summary>
+    bool QuantityPromptOpen { get; }
+
+    /// <summary>Answer the prompt: OK with this many.</summary>
+    void AnswerQuantity(int amount);
+
+    /// <summary>
+    /// How many of the stack's item are still in its slot — 0 once it has left. The only success
+    /// signal worth trusting.
+    /// </summary>
+    int QuantityAt(ChestStack stack);
 
     void Log(string message);
 }
 
 /// <summary>What one withdrawal run did.</summary>
-public sealed record WithdrawReport(int Moved, int Covered, int Short);
+public sealed record WithdrawReport(int Moved, int Covered, int Short, int Items = 0);
 
 /// <summary>
 /// Pulls what a quest line is missing out of the Free Company chest.
 ///
 /// <para>
-/// <b>Whole stacks only.</b> <c>MoveItemSlot</c> has no quantity parameter, so a withdrawal is a
-/// stack or nothing — asking for 6 Copper Ingot out of a stack of 99 brings all 99. That is
-/// deliberately not worked around: the unit-accurate route means withdrawing everything, splitting
-/// in the bags and moving a seed back, which is three server round trips to avoid carrying items
-/// you own anyway. So it takes whole stacks until the need is covered and says what it brought.
+/// <b>Exactly what is short.</b> A stack that holds more than the shortfall is split the way the
+/// game splits it by hand: click the stack, click a bag slot, and the "how many?" prompt
+/// (<c>InputNumeric</c>; OK sends the number, Cancel <c>-1</c> — recorded 2026-09-30) is answered
+/// with the shortfall. Six Copper Ingot out of a stack of 99 brings six, and the 93 stay for the
+/// rest of the fleet. Stacks that do not cover it alone are taken whole, by <c>MoveItemSlot</c>,
+/// which asks nothing.
 /// </para>
 ///
 /// <para>
-/// <b>Verified by the slot emptying, never by the return code.</b> Charon established the hard way
+/// <b>Verified by the slot emptying (or shrinking), never by the return code.</b> Charon established the hard way
 /// that <c>MoveItemSlot</c> returns 6 on moves that demonstrably succeeded, and that the slot
 /// clears noticeably later than the call — it is a server round trip. So each move is submitted,
 /// then watched, one at a time.
@@ -69,6 +85,10 @@ public sealed class ChestWithdrawer
 
     private readonly Queue<(uint ItemId, int Wanted)> _queue = new();
     private ChestStack? _inFlight;
+    /// <summary>How many of <see cref="_inFlight"/> were asked for — less than its quantity for a split.</summary>
+    private int _inFlightAmount;
+    private bool _promptAnswered;
+    private int _items;
     private DateTime _lastMove;
     private DateTime _inFlightSince;
     private int _moved;
@@ -95,13 +115,17 @@ public sealed class ChestWithdrawer
 
         _queue.Clear();
         _moved = 0;
+        _items = 0;
         _covered = 0;
         _short = 0;
         Last = null;
 
+        // Queued as how many to hold when done: what is in the bags now plus the shortfall. The
+        // shortfall alone, compared with the bags, fetched too few whenever some were already held
+        // (2 held, 3 short: it stopped at 3 held) — hidden while whole stacks overshot.
         foreach (var (itemId, missing) in needs)
             if (missing > 0)
-                _queue.Enqueue((itemId, missing));
+                _queue.Enqueue((itemId, _world.Held(itemId) + missing));
 
         if (_queue.Count == 0)
         {
@@ -117,7 +141,7 @@ public sealed class ChestWithdrawer
             return 0;
         }
 
-        Status = $"{_queue.Count} item(s) to fetch";
+        Status = $"{_queue.Count} {(_queue.Count == 1 ? "kind" : "kinds")} of item to fetch";
         return _queue.Count;
     }
 
@@ -153,7 +177,26 @@ public sealed class ChestWithdrawer
     {
         if (_inFlight is { } flying)
         {
-            if (!_world.HasLeft(flying))
+            // A split waits on the game's "how many?" prompt before anything moves.
+            if (_inFlightAmount < flying.Quantity && !_promptAnswered)
+            {
+                if (_world.QuantityPromptOpen)
+                {
+                    _world.AnswerQuantity(_inFlightAmount);
+                    _promptAnswered = true;
+                    _inFlightSince = now;
+                    return;
+                }
+                if (now - _inFlightSince <= MoveTimeout)
+                    return;
+                _world.Log($"Item {flying.ItemId}: the chest never asked how many — giving up on that stack.");
+                _short++;
+                _queue.Dequeue();
+                _inFlight = null;
+                return;
+            }
+
+            if (_world.QuantityAt(flying) > flying.Quantity - _inFlightAmount)
             {
                 if (now - _inFlightSince <= MoveTimeout)
                     return; // still settling — a chest move is a server round trip
@@ -164,6 +207,7 @@ public sealed class ChestWithdrawer
                 return;
             }
             _moved++;
+            _items += _inFlightAmount;
             _inFlight = null;
             return;
         }
@@ -190,8 +234,8 @@ public sealed class ChestWithdrawer
             return;
         }
 
-        // Smallest stack that still covers the shortfall, else the largest available — bring back
-        // as little excess as whole-stack moves allow.
+        // Smallest stack that still covers the shortfall (split down to exactly that), else the
+        // largest available, taken whole.
         ChestStack? pick = null;
         var missing = wanted - _world.Held(itemId);
         foreach (var stack in stacks)
@@ -207,7 +251,8 @@ public sealed class ChestWithdrawer
             }
         }
 
-        if (pick is null || !_world.Withdraw(pick))
+        var amount = pick is null ? 0 : Math.Min(pick.Quantity, missing);
+        if (pick is null || !(amount < pick.Quantity ? _world.WithdrawSome(pick, amount) : _world.Withdraw(pick)))
         {
             _queue.Dequeue();
             _short++;
@@ -215,18 +260,20 @@ public sealed class ChestWithdrawer
             return;
         }
 
-        Status = $"fetching {pick.Quantity} × item {itemId}";
+        Status = $"fetching {amount} × item {itemId}";
         _inFlight = pick;
+        _inFlightAmount = amount;
+        _promptAnswered = false;
         _inFlightSince = now;
     }
 
     /// <param name="abandoned">Why it stopped early, or null when it simply finished.</param>
     private void Finish(string? abandoned)
     {
-        Last = new WithdrawReport(_moved, _covered, _short);
+        Last = new WithdrawReport(_moved, _covered, _short, _items);
         Status = abandoned ?? (_short > 0
-            ? $"brought {_moved} stack(s); {_short} not found on a loaded page"
-            : $"brought {_moved} stack(s)");
+            ? $"brought {_items} item(s); {_short} kind(s) not found on a loaded page"
+            : $"brought {_items} item(s)");
         _inFlight = null;
     }
 }

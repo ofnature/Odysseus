@@ -239,6 +239,24 @@ public interface IStepWorld
     /// </summary>
     TravelRoute? RouteTo(uint territoryId, Vector3? near);
 
+    /// <summary>
+    /// A door into a territory with no aetheryte of its own (the Rising Stones, from Mor Dhona) —
+    /// one in the zone the character stands in first. Null when no path in the library uses one.
+    /// </summary>
+    Travel.Doorways.Door? DoorInto(uint territoryId);
+
+    /// <summary>The Beastmaster pet on a battlehorn (1–3), by name; null when empty.</summary>
+    string? BattlehornPet(int slot);
+
+    /// <summary>Start putting a pet on a battlehorn (opens the Master's Bestiary if needed). Returns what it said.</summary>
+    string AssignBattlehorn(int slot, string pet);
+
+    /// <summary>An assignment is still going.</summary>
+    bool BattlehornBusy { get; }
+
+    /// <summary>What the last assignment ended with, for a failure to quote.</summary>
+    string BattlehornMessage { get; }
+
     /// <summary>Start a teleport. False when refused outright (no Lifestream, unknown/locked aetheryte).</summary>
     bool Teleport(uint aetheryteId);
 
@@ -419,6 +437,50 @@ public interface IStepWorld
     /// Empty when there are none.
     /// </summary>
     System.Collections.Generic.IReadOnlyList<(uint ItemId, int Count, bool HighQuality)> QuestHandInCrafts(ushort questId, string? note);
+
+    // ── Attuning aetherytes and shards ──
+
+    /// <summary>The Aetheryte row an attune step names ("Doman Enclave", "[Gridania] Archers' Guild"), or null.</summary>
+    uint? AttunableId(string name);
+
+    bool IsAttuned(uint aetheryteId);
+
+    /// <summary>Its name, zone and where it stands — the map's X/Z at the height the mesh finds there. Null when no map places it.</summary>
+    (string Name, uint TerritoryId, Vector3 At)? AttunableAt(uint aetheryteId);
+
+    /// <summary>The nearest aetheryte or shard in this zone not yet attuned, within reach, or null.</summary>
+    (uint Id, string Name, Vector3 At)? UnattunedNear(Vector3 near, float within);
+
+    /// <summary>Every aetheryte and shard in this zone not yet attuned.</summary>
+    System.Collections.Generic.IReadOnlyList<(uint Id, string Name, bool IsShard)> UnattunedHere();
+
+    /// <summary>The aetheryte or shard object loaded nearest a spot, within reach of it, or null.</summary>
+    /// <remarks>Distance across the ground: the asked point's height is a guess from a map marker.</remarks>
+    Vector3? NearestAttuneObject(Vector3 near, float within);
+
+    /// <summary>Interact with the aetheryte or shard object standing at a spot.</summary>
+    bool InteractAttuneObject(Vector3 at);
+
+    /// <summary>Shut the aetheryte's menu or the aethernet list that attuning leaves open.</summary>
+    void CloseTravelMenus();
+
+    /// <summary>The aethernet destination is attuned (or unknown, which is left to Lifestream).</summary>
+    bool AethernetAttuned(string destination);
+
+    /// <summary>Sprint, when it is not already running and is ready. False when the game would not have it.</summary>
+    bool Sprint();
+
+    /// <summary>
+    /// In a city, the aethernet shard to hop to on the way to <paramref name="to"/> when a hop beats
+    /// walking by a clear margin: an attuned shard nearer the goal than the one nearest here. Null
+    /// when walking is as good.
+    /// </summary>
+    string? CityHop(uint territoryId, Vector3 from, Vector3 to);
+
+    /// <summary>The sniping-section skip (ported from CBT's "Sniper no sniping"): on, off, or null when this patch moved it.</summary>
+    bool? AutoSnipeEnabled { get; }
+
+    void SetAutoSnipe(bool on);
 
     /// <summary>The path's note marks this item HQ — the quest will take only a high-quality one.</summary>
     bool NoteWantsHighQuality(uint itemId, string? note);

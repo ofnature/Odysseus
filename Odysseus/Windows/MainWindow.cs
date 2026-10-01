@@ -42,7 +42,9 @@ public sealed record MainWindowDeps(
     Func<uint> Territory,
     Func<string> JobAbbreviation,
     Action ToggleGather,
-    Func<IReadOnlyList<Services.Quest.TrackedObjectives>> Objectives);
+    Func<IReadOnlyList<Services.Quest.TrackedObjectives>> Objectives,
+    Services.Travel.AttuneRunner Attuner,
+    Action OpenFlight);
 
 /// <summary>
 /// The main window: a compact vertical panel in the QST style — state chip in the title, quest
@@ -372,7 +374,43 @@ public sealed class MainWindow : OdysseusWindow
         ImGui.SameLine();
         if (OdysseusTheme.IconButton("journal", FontAwesomeIcon.Book,
                 "Journal — find a quest line and queue its chain.", sq)) _d.OpenJournal();
+
+        // Attune this zone: every aetheryte and shard here not yet attuned. It owns the frame while
+        // it runs, so not during a quest run. The count reads the game's unlock state for each one
+        // in the zone — once a second is plenty.
+        if (DateTime.UtcNow - _attuneCountedAt > TimeSpan.FromSeconds(1))
+        {
+            _attuneCountedAt = DateTime.UtcNow;
+            _attuneMissing = _d.Attuner.MissingHere;
+        }
+        ImGui.SameLine();
+        if (_d.Attuner.Running)
+        {
+            if (OdysseusTheme.IconButton("attune", FontAwesomeIcon.Stop, $"Stop attuning — {_d.Attuner.StatusLine}", sq))
+                _d.Attuner.Stop();
+        }
+        else
+        {
+            var tip = _attuneMissing > 0
+                ? $"Attune this zone — {_attuneMissing} aetheryte(s) or shard(s) here not attuned yet.{(Running ? " Stop the quest run first." : "")}"
+                : "Attune this zone — everything here is attuned.";
+            var disabled = _attuneMissing <= 0 || Running;
+            using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(disabled))
+            {
+                if (OdysseusTheme.IconButton("attune", FontAwesomeIcon.Gem, tip, sq))
+                    _d.Attuner.Start();
+            }
+            // A disabled button's tooltip needs this to show at all.
+            if (disabled && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                ImGui.SetTooltip(tip);
+        }
+        ImGui.SameLine();
+        if (OdysseusTheme.IconButton("flight", FontAwesomeIcon.Plane,
+                "Flight — aether currents and flying per zone.", sq)) _d.OpenFlight();
     }
+
+    private int _attuneMissing = -1;
+    private DateTime _attuneCountedAt;
 
     // ── sections ──
 
@@ -521,6 +559,9 @@ public sealed class MainWindow : OdysseusWindow
         if (ImGui.Button("Debug##qa", h)) _d.OpenDebug();
         ImGui.SameLine();
         if (ImGui.Button("Paths##qa", h)) _d.OpenEditor(_selectedQuest);
+        ImGui.SameLine();
+        if (ImGui.Button("Flight##qa", h)) _d.OpenFlight();
+        if (ImGui.IsItemHovered()) ImGui.SetTooltip("Aether currents and flying per zone, and attuning a zone's aetherytes.");
 
         // Other accepted quests, for reference (and selectable when idle, if they have a path).
         var others = _d.Quests.ReadAccepted().Where(q => _d.Catalog.ById(q.QuestId)?.IsMainScenario != true).ToList();

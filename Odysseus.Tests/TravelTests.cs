@@ -779,6 +779,29 @@ public class ZoneCrossingTests
         Assert.Equal(string.Empty, ex.FailReason);
     }
 
+    /// <summary>
+    /// Gosetsu and Tsuyu (3070): Kugane's guard into the Ruby Bazaar offices, with the character
+    /// already in the offices from the quest before. Nothing to hop to, nothing to talk to — done.
+    /// </summary>
+    [Fact]
+    public void A_door_step_with_the_character_already_through_it_is_done()
+    {
+        var step = new QuestStep
+        {
+            Kind = StepKind.Interact, KindName = "Interact", DataId = 1019070, Position = new Vector3(151, 15, 96),
+            TerritoryId = 628, TargetTerritoryId = 639,
+            AethernetShortcut = ["[Kugane] Aetheryte Plaza", "[Kugane] The Ruby Bazaar"],
+        };
+        var world = new FakeStepWorld { TerritoryId = 639 };
+        world.AethernetTerritories["[Kugane] The Ruby Bazaar"] = 628;
+        var ex = new StepExecutor(world);
+        ex.Begin(step);
+        for (var i = 0; i < 6 && ex.Status == StepStatus.Running; i++) { ex.Tick(); world.Advance(0.5); }
+
+        Assert.Equal(StepStatus.Done, ex.Status);
+        Assert.DoesNotContain(world.Calls, c => c.StartsWith("Aethernet") || c.StartsWith("Teleport"));
+    }
+
     [Fact]
     public void Somewhere_else_entirely_still_says_so()
     {
@@ -840,6 +863,103 @@ public class StallJumpTests
         }
         Assert.DoesNotContain(w.Calls, c => c.Contains("Jump"));
     }
+
+    /// <summary>
+    /// A route round a building: walking steadily, the straight-line distance does not shrink for
+    /// seconds on end. That is walking, not a snag — it used to be a hop at every such bend.
+    /// </summary>
+    [Fact]
+    public void Walking_round_a_bend_is_not_a_stall()
+    {
+        var w = new FakeStepWorld { TerritoryId = 137, ArriveOnMove = false, IsMoving = true };
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        var ex = new StepExecutor(w);
+        ex.Begin(WalkTo(new Vector3(0, 0, 60)));
+
+        for (var i = 0; i < 20; i++)
+        {
+            ex.Tick();
+            w.Advance(0.5);
+            w.PlayerPosition = w.PlayerPosition with { X = w.PlayerPosition.X + 1f };   // sideways: no closer
+        }
+        Assert.DoesNotContain(w.Calls, c => c.Contains("Jump"));
+    }
+
+    /// <summary>No mount allowed: Sprint is the fastest thing going on a long leg.</summary>
+    [Fact]
+    public void On_foot_where_no_mount_is_allowed_a_long_leg_sprints()
+    {
+        var w = new FakeStepWorld { TerritoryId = 137, ArriveOnMove = false, IsMoving = true, CanMountHere = false };
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        var ex = new StepExecutor(w);
+        ex.Begin(WalkTo(new Vector3(0, 0, 80)));
+        for (var i = 0; i < 6; i++) { ex.Tick(); w.Advance(0.5); w.PlayerPosition += new Vector3(0, 0, 3); }
+        Assert.True(w.Sprints >= 1);
+    }
+
+    /// <summary>
+    /// Ul'dah end to end with no shard named: the aethernet, when the hop wins by a clear margin.
+    /// The Disciple of the Hand quests walked it one way and hopped back.
+    /// </summary>
+    [Fact]
+    public void Across_a_city_with_no_shortcut_named_it_hops_the_aethernet()
+    {
+        var w = new FakeStepWorld { TerritoryId = 131, ArriveOnMove = true, CanMountHere = false };
+        w.PlayerPosition = new Vector3(-120, 40, 120);
+        w.AethernetAccess[131] = new Vector3(-118, 40, 118);
+        w.CityHopTo = "Sapphire Avenue Exchange";
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 131, Position = new Vector3(130, 5, -30) });
+        for (var i = 0; i < 6; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains(w.Calls, c => c.StartsWith("Aethernet Sapphire Avenue Exchange"));
+    }
+
+    /// <summary>
+    /// Ul'dah's top level: the NPC 80 yalms up, 120 across, the Airship Landing shard named in the
+    /// path. Close as the crow flies, but the hop is the way up — not the lift.
+    /// </summary>
+    [Fact]
+    public void A_mark_on_another_level_takes_the_recorded_hop()
+    {
+        var w = new FakeStepWorld { TerritoryId = 130, ArriveOnMove = true, CanMountHere = false };
+        w.PlayerPosition = new Vector3(-100, 4, -100);
+        w.AethernetAccess[130] = new Vector3(-98, 4, -98);
+        w.AethernetTerritories["[Ul'dah] Airship Landing"] = 130;
+        var ex = new StepExecutor(w);
+        var step = new QuestStep
+        {
+            Kind = StepKind.Interact, KindName = "Interact", DataId = 1004433, TerritoryId = 130, Position = new Vector3(-24, 83, -2),
+            AethernetShortcut = ["[Ul'dah] Aetheryte Plaza", "[Ul'dah] Airship Landing"],
+        };
+        ex.Begin(step);
+        for (var i = 0; i < 6; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains(w.Calls, c => c.StartsWith("Aethernet [Ul'dah] Airship Landing"));
+    }
+
+    /// <summary>Mounted where flying is unlocked, a leg the path does not mark flies anyway.</summary>
+    [Fact]
+    public void Mounted_where_flying_is_unlocked_every_leg_flies()
+    {
+        var w = new FakeStepWorld { TerritoryId = 137, ArriveOnMove = false, IsMounted = true, CanFlyHere = true };
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        var ex = new StepExecutor(w);
+        ex.Begin(WalkTo(new Vector3(0, 0, 60)));
+        for (var i = 0; i < 4; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains(w.Calls, c => c.StartsWith("Move 0,0,60 fly=True"));
+    }
+
+    /// <summary>The cities allow no mount, and nothing in them wants a hop.</summary>
+    [Fact]
+    public void Nothing_jumps_in_a_zone_that_allows_no_mount()
+    {
+        var w = new FakeStepWorld { TerritoryId = 137, ArriveOnMove = false, IsMoving = true, CanMountHere = false };
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        var ex = new StepExecutor(w);
+        ex.Begin(WalkTo(new Vector3(0, 0, 30)));
+
+        for (var i = 0; i < 20; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.DoesNotContain(w.Calls, c => c.Contains("Jump"));
+    }
 }
 public class StepDismountTests
 {
@@ -860,5 +980,46 @@ public class StepDismountTests
         var moved = w.Calls.FindIndex(c => c.StartsWith("Move"));
         Assert.True(off >= 0 && moved > off, string.Join(" | ", w.Calls));
         Assert.DoesNotContain("Mount", w.Calls);
+    }
+
+    /// <summary>
+    /// The Rising Stones (351) has no aetheryte: it is entered by a door in Mor Dhona. Prelude in
+    /// Violet (3149) faulted "no aetheryte there" with Saar standing in Mor Dhona.
+    /// </summary>
+    [Fact]
+    public void A_zone_with_no_aetheryte_is_entered_by_its_door()
+    {
+        var w = new FakeStepWorld { TerritoryId = 156, ArriveOnMove = true };
+        w.PlayerPosition = new Vector3(15, 22, -600);
+        w.Spawned.Add(2002881);
+        w.Spawned.Add(1025549);
+        w.Doors[351] = new Odysseus.Services.Travel.Doorways.Door(156, 351, 2002881, new Vector3(21.1f, 22.3f, -631.3f));
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 1025549, TerritoryId = 351, Position = new Vector3(1, 0, -12) });
+
+        for (var i = 0; i < 120 && ex.Status == StepStatus.Running; i++)
+        {
+            ex.Tick(); w.Advance(0.5);
+            if (w.TerritoryId == 156 && w.Calls.Contains("Interact 2002881"))
+            {
+                w.TerritoryId = 351;
+                w.PlayerPosition = new Vector3(0, 0, 20);
+            }
+        }
+        Assert.Contains("Interact 2002881", w.Calls);
+        Assert.Contains("Interact 1025549", w.Calls);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Teleport"));
+    }
+
+    [Fact]
+    public void Starting_elsewhere_teleports_to_the_doors_zone_first()
+    {
+        var w = new FakeStepWorld { TerritoryId = 130 };
+        w.AttunedByTerritory[156] = 24;
+        w.Doors[351] = new Odysseus.Services.Travel.Doorways.Door(156, 351, 2002881, new Vector3(21.1f, 22.3f, -631.3f));
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 1025549, TerritoryId = 351, Position = new Vector3(1, 0, -12) });
+        for (var i = 0; i < 10 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains("Teleport 24", w.Calls);
     }
 }

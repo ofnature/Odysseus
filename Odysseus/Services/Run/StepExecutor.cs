@@ -39,6 +39,14 @@ public sealed class StepExecutor
         AethernetApproach,
         /// <summary>The crafted item needs materia melded before the quest will take it.</summary>
         Meld,
+        /// <summary>At an aetheryte or shard, interacting until the game says it is attuned.</summary>
+        Attune,
+        /// <summary>At a city lift attendant, riding to the level the step is on.</summary>
+        Lift,
+        /// <summary>At the door into a zone with no aetheryte (the Rising Stones), going through it.</summary>
+        Door,
+        /// <summary>Beastmaster: the pet onto its battlehorn and summoned, before the interact.</summary>
+        Battlehorn,
         Mount, Move, WaitReady, Interact, Dialogue,
         CombatWait, Combat,
         /// <summary>Solo instance: interacted, waiting to be inside.</summary>
@@ -175,6 +183,14 @@ public sealed class StepExecutor
 
     /// <summary>Distances past this are worth a mount.</summary>
     public const float MountWorthDistance = 30f;
+
+    /// <summary>Fly every mounted leg where flying is unlocked (Settings). On by default.</summary>
+    public bool FlyByDefault { get; set; } = true;
+
+    /// <summary>On foot where no mount is allowed, a leg this long is worth a Sprint.</summary>
+    private const float SprintWorthDistance = 25f;
+    private static readonly TimeSpan SprintRetry = TimeSpan.FromSeconds(3);
+    private DateTime _lastSprintTry;
     /// <summary>Overworld enemies farther than this are not "ours".</summary>
     public const float CombatSearchRadius = 30f;
 
@@ -458,6 +474,12 @@ public sealed class StepExecutor
     private bool _wedgeMemoryUsed;
     private int _stallJumps;
 
+    /// <summary>Where the character stood when the stall clock last started — moving off it is progress too.</summary>
+    private Vector3 _stallAnchor;
+
+    /// <summary>Moving this far in the stall window is not a stall, whatever the straight-line distance does.</summary>
+    private const float StallMoveProgress = 2.5f;
+
     private (uint, int, int, int) WedgeKey(Vector3 target)
         => (_world.TerritoryId, (int)MathF.Round(target.X / 8f), (int)MathF.Round(target.Y / 8f), (int)MathF.Round(target.Z / 8f));
 
@@ -558,6 +580,46 @@ public sealed class StepExecutor
         _combatHoldRefusedSaid = false;
         _lastTravelYes = default;
         _combatItemLoggedHealth = -1;
+        // A sniping section (Securing the Saltery and 31 others): interacting with the rifle starts
+        // it, and it is shot from inside the event. The snipe skip (CBT's "Sniper no sniping",
+        // ported) answers "hit" for it, switched on for the step and back off after; if a patch has
+        // moved it the player takes the shots and the step waits for them. Run as the interact it
+        // is, the stored path left alone.
+        // Beastmaster: "Assign Cu Sith to first battlehorn, summon, then interact with J'yhuh Tia"
+        // (The Wilds Call, 5491) is a manual step in the data. Run as the interact it ends in, with
+        // the pet assigned and summoned first.
+        _battlehorn = null;
+        if (step.Kind == StepKind.WaitForManualProgress && step.DataId is not null && BattlehornAsk(step.Comment) is { } ask)
+        {
+            _battlehorn = ask;
+            _battlehornAsked = false;
+            _battlehornReady = false;
+            _battlehornSummonedAt = default;
+            _lastBattlehornTry = default;
+            step = step.As(StepKind.Interact);
+        }
+
+        ReleaseAutoSnipe();
+        _sniping = step.Kind == StepKind.Snipe;
+        if (_sniping)
+        {
+            step = step.As(StepKind.Interact);
+            switch (_world.AutoSnipeEnabled)
+            {
+                case false:
+                    _world.SetAutoSnipe(true);
+                    _autoSnipeSwitched = true;
+                    _world.Log("Sniping section: skipping the shots.");
+                    break;
+                case true:
+                    _world.Log("Sniping section: the shots are skipped already.");
+                    break;
+                default:
+                    _world.Log("Sniping section and the snipe skip is unavailable this patch — take the shots yourself; the run carries on after.");
+                    _world.Notify("Odysseus: a sniping section — take the shots yourself.");
+                    break;
+            }
+        }
         _soloProgressAtStart = step.Kind == StepKind.SinglePlayerDuty ? _world.QuestState(questId) : default;
         _groundOnly = groundOnly;
         _step = step;
@@ -594,6 +656,7 @@ public sealed class StepExecutor
         _daedalusOffSaid = false;
         _moveRetries = 0;
         _shardApproached = false;
+        _hopSkipped = false;
         _sawOccupied = false;
         _interactRetries = 0;
         _dismountAsked = false;
@@ -646,6 +709,35 @@ public sealed class StepExecutor
             return;
         }
 
+        // A door into another zone, with the character already through it. Gosetsu and Tsuyu (3070)
+        // opens with Kugane's guard into the Ruby Bazaar offices, and the quest before it ends inside
+        // them: the aethernet hop was asked for from the offices, where there is none, and Lifestream
+        // could not find the destination. Being on the far side is what the step is for.
+        if (step.Kind == StepKind.Interact && step.TargetTerritoryId is { } into
+            && into != step.TerritoryId && _world.TerritoryId == into)
+        {
+            _world.Log($"Already in territory {into}, where this step's door leads — nothing to do.");
+            Enter(Phase.Finish);
+            return;
+        }
+
+        _attuneThenStep = false;
+        if (step.Kind is StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard)
+        {
+            BeginAttuneStep(step);
+            return;
+        }
+
+        // Passing an aetheryte or shard not yet attuned: a few seconds now saves a refused
+        // teleport later — the newtoons reached the Doman Enclave's teleport without it.
+        if (AttuneInPassing && !IsHandoff(step.Kind) && !_world.IsRidingVehicle
+            && _world.UnattunedNear(_world.PlayerPosition, AttunePassingRange) is { } passing)
+        {
+            _world.Log($"Passing {passing.Name}, not yet attuned — attuning it first.");
+            StartAttune(passing.Id, passing.Name, passing.At, thenStep: true);
+            return;
+        }
+
         Enter(step.DelaySecondsAtStart is > 0 ? Phase.Delay : NextAfterDelay());
     }
 
@@ -667,6 +759,7 @@ public sealed class StepExecutor
         _world.ReleaseDialogue();
         ReleaseCombatHold();
         _world.ReleaseDescent();
+        ReleaseAutoSnipe();
         _step = null;
         _phase = Phase.None;
         Status = StepStatus.Idle;
@@ -681,7 +774,7 @@ public sealed class StepExecutor
         or StepKind.EquipRecommended or StepKind.Action or StepKind.Instruction or StepKind.StatusOff
         or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Craft or StepKind.Gather
         or StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset or StepKind.Dive
-        or StepKind.CleanUpOtherQuests;
+        or StepKind.CleanUpOtherQuests or StepKind.Snipe;
 
     /// <summary>The step hands the character to another plugin for a whole instance.</summary>
     public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
@@ -754,6 +847,10 @@ public sealed class StepExecutor
         // away from the hand-in it belongs to. So it is answered wherever it appears, which is
         // safe because the world matches it against the game's own string for that one prompt.
         _world.ConfirmTradeDialog();
+
+        // A door's travel question, whatever phase the step is in (the Dialogue phase answers it too).
+        if (_phase != Phase.Dialogue)
+            AnswerTravelQuestion(step, now);
 
         // A fight that wants its mob left alive under a line holds Daedalus from the step's first
         // tick, not from the fight phase: a mob that aggroes on the approach or the landing is
@@ -858,6 +955,27 @@ public sealed class StepExecutor
                     Fail("aethernet hop with no destination");
                     break;
                 }
+                // An Airship Landing has no shard: it joins the aethernet once every shard in the
+                // city is attuned, and until then the walk up ends at the lift doors. Ride it.
+                if (!_world.AethernetAttuned(hop) && step.Position is { } liftMark
+                    && (OnAnotherLevel(liftMark) || step.TerritoryId != _world.TerritoryId)
+                    && Travel.Lifts.Ride(_world.TerritoryId, _world.PlayerPosition, step.TerritoryId, liftMark) is { } ride)
+                {
+                    _world.Log($"{hop} is not on the aethernet yet — taking the lift.");
+                    _autoAethernet = null;
+                    _hopSkipped = true;
+                    StartLift(ride.Board, ride.Alight);
+                    break;
+                }
+                if (!_world.AethernetAttuned(hop) && _world.AethernetTerritoryOf(hop) == _world.TerritoryId)
+                {
+                    // Lifestream cannot hop to a shard never attuned; in the same zone the walk gets there.
+                    _world.Log($"{hop} is not attuned — walking instead.");
+                    _autoAethernet = null;
+                    _hopSkipped = true;
+                    Enter(NextAfterTravel());
+                    break;
+                }
                 if (!_world.AethernetTeleport(hop))
                 {
                     Fail($"aethernet to {hop} was refused — Lifestream loaded?");
@@ -929,6 +1047,17 @@ public sealed class StepExecutor
                 break;
 
             case Phase.Move:
+                // On the way to an aetheryte or shard: the moment the object itself is in view, go
+                // to it. The walk aims at the map marker with a guessed height, which in a city of
+                // levels is the wrong level — the route then ends beside the shard, 45y "short",
+                // and was given up as no path (the Crystarium's Cabinet of Curiosity, every time).
+                if (_detourThen == Phase.Attune && _detourTo is not null
+                    && _world.NearestAttuneObject(_attuneAt, 40f) is not null)
+                {
+                    _detourTo = null;
+                    Enter(Phase.Attune);
+                    break;
+                }
                 TickMove(step, now);
                 break;
 
@@ -1008,7 +1137,16 @@ public sealed class StepExecutor
                 break;
 
             case Phase.Interact:
+                if (_battlehorn is not null)
+                {
+                    Enter(Phase.Battlehorn);
+                    break;
+                }
                 TickInteract(step, now);
+                break;
+
+            case Phase.Battlehorn:
+                TickBattlehorn(now);
                 break;
 
             case Phase.Dialogue:
@@ -1216,6 +1354,18 @@ public sealed class StepExecutor
                 TickMeld(now);
                 break;
 
+            case Phase.Attune:
+                TickAttune(step, now);
+                break;
+
+            case Phase.Lift:
+                TickLift(now);
+                break;
+
+            case Phase.Door:
+                TickDoor(now);
+                break;
+
             case Phase.Gather:
                 TickGather(step, now);
                 break;
@@ -1224,6 +1374,7 @@ public sealed class StepExecutor
                 _world.ReleaseDialogue();
                 ReleaseCombatHold();
                 _world.ReleaseDescent();
+                ReleaseAutoSnipe();
                 Status = StepStatus.Done;
                 break;
         }
@@ -1263,6 +1414,10 @@ public sealed class StepExecutor
                 // Bad or renamed data. Say so, but do not stop on it — working the route out
                 // ourselves below gets there anyway, and the log keeps the data problem visible.
                 _world.Log($"Unknown aetheryte \"{aetheryteName}\" in the path data; finding my own way.");
+            }
+            else if (!_world.IsAttuned(id.Value))
+            {
+                _world.Log($"The path teleports to {aetheryteName}, which is not attuned on this character — finding another way.");
             }
             else
             {
@@ -1309,6 +1464,12 @@ public sealed class StepExecutor
         if (away > TeleportWorthDistance)
             return false;
 
+        // A mark on another level with a hop recorded: the hop is the way up. Ul'dah's top
+        // level (A Sultana's Duty, It Could Happen to You) read as 148y away and walkable; the
+        // walk went to the lift instead of the Airship Landing shard beside the NPC.
+        if (step.AethernetShortcut is { Length: 2 } && OnAnotherLevel(mark))
+            return false;
+
         if (step.AetheryteShortcut is not null || step.AethernetShortcut is { Length: 2 })
             _world.Log($"Already in the step's zone and {away:F0}y from the mark — skipping the recorded "
                        + (step.AetheryteShortcut is { } named ? $"teleport to {named}." : "aethernet hop."));
@@ -1348,6 +1509,18 @@ public sealed class StepExecutor
             return Phase.Teleport;
         }
 
+        // Same zone, a city, no shortcut in the path, and the mark across it: the aethernet. The
+        // Disciple of the Hand quests walked Ul'dah end to end one way and hopped it back, because
+        // only the return step named a shard.
+        if (_world.TerritoryId == step.TerritoryId && step.AethernetShortcut is null && !TravelsNowhere(step)
+            && !_skipTeleport && !_world.IsRidingVehicle && step.Position is { } cityGoal
+            && _world.CityHop(step.TerritoryId, _world.PlayerPosition, cityGoal) is { } shard)
+        {
+            _world.Log($"The mark is {Vector3.Distance(_world.PlayerPosition, cityGoal):F0}y across the city — hopping to {shard} on the aethernet.");
+            _autoAethernet = shard;
+            return BeginAethernet();
+        }
+
         if (step.TerritoryId == 0 || _world.TerritoryId == step.TerritoryId || TravelsNowhere(step))
             return NextAfterTeleport();
 
@@ -1364,7 +1537,22 @@ public sealed class StepExecutor
             return NextAfterTeleport();
 
         if (_world.RouteTo(step.TerritoryId, step.Position) is not { } route)
+        {
+            // No aetheryte inside: a zone entered by a door, like the Rising Stones from Mor Dhona.
+            // Get to the door's zone; the travel check takes it through the door from there.
+            if (_world.DoorInto(step.TerritoryId) is { } door && door.From != _world.TerritoryId
+                && _world.RouteTo(door.From, door.At) is { } outside)
+            {
+                _world.Log($"Quest step is in territory {step.TerritoryId}, entered by a door in {door.From} — going there first.");
+                _autoAethernet = outside.AethernetName;
+                if (outside.AetheryteId is not { } outsideAetheryte)
+                    return Phase.Aethernet;
+                _teleportTarget = outsideAetheryte;
+                _teleportTerritory = outside.AetheryteTerritory;
+                return Phase.Teleport;
+            }
             return NextAfterTeleport(); // no way in; the travel check names it
+        }
 
         _autoAethernet = route.AethernetName;
         _world.Log($"Quest step is in territory {step.TerritoryId} and the path names no way there — " +
@@ -1385,7 +1573,7 @@ public sealed class StepExecutor
 
     private Phase NextAfterTeleport()
     {
-        if (AethernetDestination is { } hop && WorthHopping(hop))
+        if (!_hopSkipped && AethernetDestination is { } hop && WorthHopping(hop))
             return BeginAethernet();
         return NextAfterTravel();
     }
@@ -1411,8 +1599,13 @@ public sealed class StepExecutor
         if (_world.AethernetTerritoryOf(destination) is not { } lands || lands != _world.TerritoryId)
             return true;
         return _step!.Position is { } target
-               && Vector3.Distance(_world.PlayerPosition, target) > TeleportWorthDistance;
+               && (Vector3.Distance(_world.PlayerPosition, target) > TeleportWorthDistance || OnAnotherLevel(target));
     }
+
+    /// <summary>A city's levels are this far apart and joined by lifts; the aethernet is the way between them.</summary>
+    private const float LevelChange = 15f;
+
+    private bool OnAnotherLevel(Vector3 mark) => MathF.Abs(_world.PlayerPosition.Y - mark.Y) > LevelChange;
 
     /// <summary>
     /// Walk to an aethernet access point before hopping.
@@ -1472,6 +1665,11 @@ public sealed class StepExecutor
         // the wrong zone. (Highway Robbery's first step: starts in 129, ends in 128, hops there.)
         if (step.TargetTerritoryId is { } crossedInto && _world.TerritoryId == crossedInto)
             return Phase.WaitReady;
+
+        // A zone entered by a door standing here: go through it.
+        if (step.TerritoryId != 0 && _world.TerritoryId != step.TerritoryId
+            && _world.DoorInto(step.TerritoryId) is { } door && door.From == _world.TerritoryId)
+            return BeginDoor(door);
 
         if (step.TerritoryId != 0 && _world.TerritoryId != step.TerritoryId)
         {
@@ -2111,6 +2309,7 @@ public sealed class StepExecutor
         {
             _stalledSince = now;
             _closestSeen = distance;
+            _stallAnchor = _world.PlayerPosition;
         }
 
         var arrived = distance <= tolerance + ArrivalSlack
@@ -2304,19 +2503,35 @@ public sealed class StepExecutor
             }
             _lastMoveIssue = now;
 
+            // No mount allowed here: Sprint is the fastest thing going. Asked again as it runs out.
+            if (!_world.IsMounted && !_world.CanMountHere && distance > SprintWorthDistance
+                && now - _lastSprintTry > SprintRetry)
+            {
+                _lastSprintTry = now;
+                _world.Sprint();
+            }
+
             // Moving but not getting anywhere: running into scenery the mesh thinks is passable, or
             // caught on the lip of something. A jump clears most of it, and it is what a person does
             // without thinking. Once per stall, with a long gap, so a genuinely slow leg is not
             // turned into a pogo stick.
-            if (distance < _closestSeen - StallProgress)
+            // Progress is getting closer *or* getting anywhere: a route round a building, or back to a
+            // waypoint the follower overshot, leaves the straight-line distance where it was while the
+            // character walks the whole time — and every such bend was a hop through town.
+            var moved = Vector3.Distance(_world.PlayerPosition, _stallAnchor) > StallMoveProgress;
+            if (distance < _closestSeen - StallProgress || moved)
             {
-                _closestSeen = distance;
+                if (distance < _closestSeen) _closestSeen = distance;
+                _stallAnchor = _world.PlayerPosition;
                 _stalledSince = now;
                 _stallJumps = 0;
             }
             else if (now - _stalledSince > StallJumpAfter && now - _lastStallJump > StallJumpGap
-                     && !(step.DataId is not null && distance <= 10f) && !_world.IsInFlight)
+                     && !(step.DataId is not null && distance <= 10f) && !_world.IsInFlight
+                     && _world.CanMountHere)
             {
+                // (Not in a zone that allows no mount: the cities. Nothing there wants a hop, and
+                // what looked like a snag was the follower turning back — a hop per waypoint.)
                 // (No hopping from the saddle in the air either — a flying mount cannot jump,
                 // and the attempt only jitters the position under the frozen detector.)
                 // Close quarters to an interact target are exempt: the game refuses commands
@@ -2384,7 +2599,10 @@ public sealed class StepExecutor
         // A fly move needs the saddle: issued on foot it is an air path the follower cannot
         // walk, and the character stands still until the frozen ladder gives it the ground. A
         // 29-yalm hop between Cedarwood spawns did exactly that, dismounted from the last node.
-        var fly = (((step.Fly || _wedgeFly || _farFly) && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback && !_world.IsRidingVehicle)
+        // Mounted where flying is unlocked, every leg is a flight — not only those the path marks or
+        // the very long ones. Riding a leg the air would halve was the slow way round; where the
+        // ground truly is quicker, the pathfinder answers with the ground route and it is ridden.
+        var fly = (((step.Fly || _wedgeFly || _farFly || FlyByDefault) && _world.CanFlyHere && (!_groundOnly || _flyFallback) && !_combatLanded && !_groundFallback && !_world.IsRidingVehicle)
                    || (_detourFly && detour is not null))
                   && _world.IsMounted
                   || _world.IsDiving;
@@ -2646,6 +2864,429 @@ public sealed class StepExecutor
     /// to work it out from an empty crafting log.
     /// </para>
     /// </summary>
+    /// <summary>Attune what is passed within this reach, before the step goes on (Settings can turn it off).</summary>
+    public bool AttuneInPassing { get; set; } = true;
+    private const float AttunePassingRange = 35f;
+
+    /// <summary>How near the object an interact is pressed; how long the whole attune may take.</summary>
+    private const float AttuneReach = 4.5f;
+    private static readonly TimeSpan AttuneMax = TimeSpan.FromSeconds(90);
+
+    /// <summary>This step's hop was dropped for an unattuned shard — do not choose it again.</summary>
+    private bool _hopSkipped;
+
+    private uint _attuneId;
+    private string _attuneName = string.Empty;
+    private Vector3 _attuneAt;
+    /// <summary>The attune was a stop on the way: the step itself runs after it.</summary>
+    private bool _attuneThenStep;
+    private DateTime _lastAttunePress;
+    private DateTime _lastAttuneMove;
+
+    private void BeginAttuneStep(QuestStep step)
+    {
+        var id = step.AttuneId ?? (step.AttuneName is { Length: > 0 } named ? _world.AttunableId(named) : null);
+        if (id is not { } which)
+        {
+            _world.Log($"This attune step names {(step.AttuneName is { Length: > 0 } n ? $"\"{n}\", which" : "no aetheryte, and nothing")} Odysseus can place — passing it.");
+            Enter(Phase.Finish);
+            return;
+        }
+        if (_world.IsAttuned(which))
+        {
+            Enter(Phase.Finish);
+            return;
+        }
+        if (_world.AttunableAt(which) is not { } place)
+        {
+            Fail($"aetheryte {which} ({step.AttuneName}) is not on any map Odysseus reads — attune it yourself, then Retry");
+            return;
+        }
+        if (place.TerritoryId != _world.TerritoryId)
+        {
+            Fail($"{place.Name} is in territory {place.TerritoryId} and you are in {_world.TerritoryId} — go there, then Retry");
+            return;
+        }
+        StartAttune(which, place.Name, place.At, thenStep: false);
+    }
+
+    private void StartAttune(uint id, string name, Vector3 at, bool thenStep)
+    {
+        _attuneId = id;
+        _attuneName = name;
+        _attuneAt = at;
+        _attuneThenStep = thenStep;
+        _lastAttunePress = default;
+        _lastAttuneMove = default;
+        var far = Vector2.Distance(new Vector2(_world.PlayerPosition.X, _world.PlayerPosition.Z), new Vector2(at.X, at.Z));
+        if (far > 40f)
+        {
+            // The long way is the ordinary walk (mounted or flown as any leg is), to the map's spot.
+            _detourTo = at;
+            _detourThen = Phase.Attune;
+            _detourTolerance = 15f;
+            _detourNeedsShard = false;
+            Enter(!_world.IsMounted && _world.CanMountHere && far > MountWorthDistance ? Phase.Mount : Phase.Move);
+            return;
+        }
+        Enter(Phase.Attune);
+    }
+
+    /// <summary>
+    /// Walk up to the aetheryte or shard itself and interact until the game says it is attuned;
+    /// then shut whatever menu that opened. An attune on the way hands back to its step; a failed
+    /// one on the way is said and passed, never the end of the quest.
+    /// </summary>
+    private void TickAttune(QuestStep step, DateTime now)
+    {
+        if (_world.IsAttuned(_attuneId))
+        {
+            _world.CloseTravelMenus();
+            _world.Log($"Attuned to {_attuneName}.");
+            AfterAttune(step);
+            return;
+        }
+        if (now - _phaseStart > AttuneMax)
+        {
+            _world.CloseTravelMenus();
+            if (_attuneThenStep)
+            {
+                _world.Log($"Could not attune {_attuneName} in {AttuneMax.TotalSeconds:F0}s — carrying on with the step.");
+                AfterAttune(step);
+            }
+            else
+                Fail($"could not attune {_attuneName} in {AttuneMax.TotalSeconds:F0}s — attune it yourself, then Retry");
+            return;
+        }
+        if (_world.IsOccupied || !_world.IsReady)
+            return;   // the attune animation, or the menu it opened
+
+        var obj = _world.NearestAttuneObject(_attuneAt, 40f);
+        var goal = obj ?? _attuneAt;
+        if (obj is null || Vector3.Distance(_world.PlayerPosition, goal) > AttuneReach)
+        {
+            if (now - _lastAttuneMove > TimeSpan.FromSeconds(2) && !_world.IsMoving)
+            {
+                _lastAttuneMove = now;
+                _world.MoveTo(goal, false);
+            }
+            return;
+        }
+        if (_world.IsMoving)
+        {
+            _world.StopMoving();
+            return;
+        }
+        if (_world.IsMounted)
+        {
+            _world.Dismount();
+            return;
+        }
+        if (now - _lastAttunePress > TimeSpan.FromSeconds(2))
+        {
+            _lastAttunePress = now;
+            _world.InteractAttuneObject(obj.Value);
+        }
+    }
+
+    // ── Beastmaster battlehorns ──
+
+    private static readonly string[] Ordinals = ["First", "Second", "Third"];
+    private static readonly System.Text.RegularExpressions.Regex BattlehornWords = new(
+        @"assign\s+(?<pet>.+?)\s+to\s+(?:the\s+)?(?<slot>first|second|third)\s+battlehorn",
+        System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+    private (int Slot, string Pet)? _battlehorn;
+    private bool _battlehornAsked;
+    private bool _battlehornReady;
+    private DateTime _battlehornSummonedAt;
+    private DateTime _lastBattlehornTry;
+
+    /// <summary>"Assign Cu Sith to first battlehorn" → (1, "Cu Sith"); null when a comment asks nothing of the kind.</summary>
+    internal static (int Slot, string Pet)? BattlehornAsk(string? comment)
+    {
+        if (comment is null || BattlehornWords.Match(comment) is not { Success: true } m)
+            return null;
+        var slot = Array.FindIndex(Ordinals, o => o.Equals(m.Groups["slot"].Value, StringComparison.OrdinalIgnoreCase)) + 1;
+        return (slot, m.Groups["pet"].Value.Trim());
+    }
+
+    /// <summary>
+    /// The pet onto its battlehorn (unless it is there already — picking it again would free it),
+    /// then the battlehorn's summon, then a moment for the familiar to appear, then the interact.
+    /// </summary>
+    private void TickBattlehorn(DateTime now)
+    {
+        var (slot, pet) = _battlehorn!.Value;
+        var horn = $"{Ordinals[slot - 1]} Battlehorn";
+
+        if (!_battlehornReady)
+        {
+            if (_world.BattlehornBusy)
+                return;
+            if (string.Equals(_world.BattlehornPet(slot), pet, StringComparison.OrdinalIgnoreCase))
+            {
+                _battlehornReady = true;
+                _itemUseTries = 0;
+                _phaseStart = now;
+                return;
+            }
+            if (_battlehornAsked)
+            {
+                Fail($"could not put {pet} on the {horn.ToLowerInvariant()} — {_world.BattlehornMessage} Assign it in the Master's Bestiary, then Retry");
+                return;
+            }
+            if (_world.IsOccupied || !_world.IsReady)
+                return;
+            _world.Log(_world.AssignBattlehorn(slot, pet));
+            _battlehornAsked = true;
+            return;
+        }
+
+        if (_battlehornSummonedAt == default)
+        {
+            if (now - _lastBattlehornTry < TimeSpan.FromSeconds(1.5))
+                return;
+            _lastBattlehornTry = now;
+            if (_world.ResolveAction(horn) is not { } actionId)
+            {
+                Fail($"action \"{horn}\" is not in the Action sheet");
+                return;
+            }
+            if (_world.UseAction(actionId, null))
+            {
+                _world.Log($"Summoned {pet} with {horn}.");
+                _battlehornSummonedAt = now;
+                return;
+            }
+            var cooling = _world.ActionRecastSeconds(actionId);
+            if (cooling > 0f)
+            {
+                _itemUseTries = 0;
+                if (now - _phaseStart > ActionRecastMax)
+                    Fail($"{horn} is still {cooling:F0}s from ready — summon {pet} yourself, then Retry");
+                else if (now - _lastRecastNote > RecastNoteEvery)
+                {
+                    _lastRecastNote = now;
+                    _world.Log($"Waiting {cooling:F0}s for {horn} to come off cooldown.");
+                }
+                return;
+            }
+            if (++_itemUseTries >= MaxItemUseTries)
+                Fail($"{horn} was refused — see the log for the game's reason");
+            return;
+        }
+
+        if (now - _battlehornSummonedAt < TimeSpan.FromSeconds(3))
+            return;   // the familiar appearing
+        _battlehorn = null;
+        Enter(Phase.Interact);
+    }
+
+    // ── Doors into zones with no aetheryte ──
+
+    private static readonly TimeSpan DoorMax = TimeSpan.FromSeconds(60);
+    private const float DoorReach = 3.5f;
+    private Travel.Doorways.Door? _door;
+    private DateTime _lastDoorPress;
+    private DateTime _lastDoorMove;
+
+    private Phase BeginDoor(Travel.Doorways.Door door)
+    {
+        _door = door;
+        _lastDoorPress = default;
+        _lastDoorMove = default;
+        _world.Log($"Going through the door into territory {door.Into}.");
+        var far = Vector2.Distance(new Vector2(_world.PlayerPosition.X, _world.PlayerPosition.Z), new Vector2(door.At.X, door.At.Z));
+        if (far > 40f)
+        {
+            _detourTo = door.At;
+            _detourThen = Phase.Door;
+            _detourTolerance = 15f;
+            _detourNeedsShard = false;
+            return !_world.IsMounted && _world.CanMountHere && far > MountWorthDistance ? Phase.Mount : Phase.Move;
+        }
+        return Phase.Door;
+    }
+
+    /// <summary>Walk up to the door, interact until the zone changes; its yes/no is answered on the way.</summary>
+    private void TickDoor(DateTime now)
+    {
+        var door = _door!;
+        if (_world.TerritoryId == door.Into)
+        {
+            if (!_world.IsReady || _world.IsOccupied)
+                return;
+            _world.Log($"Through the door into territory {door.Into}.");
+            Enter(NextAfterTravel());
+            return;
+        }
+        if (now - _phaseStart > DoorMax)
+        {
+            Fail($"could not get through the door into territory {door.Into} in {DoorMax.TotalSeconds:F0}s — go in yourself, then Retry");
+            return;
+        }
+        if (_world.IsOccupied || !_world.IsReady)
+            return;   // the question, or the loading screen
+
+        if (Vector3.Distance(_world.PlayerPosition, door.At) > DoorReach)
+        {
+            if (now - _lastDoorMove > TimeSpan.FromSeconds(2) && !_world.IsMoving)
+            {
+                _lastDoorMove = now;
+                _world.MoveTo(door.At, false);
+            }
+            return;
+        }
+        if (_world.IsMoving)
+        {
+            _world.StopMoving();
+            return;
+        }
+        if (_world.IsMounted)
+        {
+            _world.Dismount();
+            return;
+        }
+        if (now - _lastDoorPress > TimeSpan.FromSeconds(3))
+        {
+            _lastDoorPress = now;
+            _world.TryInteractWithDataId(door.DataId);
+        }
+    }
+
+    // ── City lifts ──
+
+    private static readonly TimeSpan LiftMax = TimeSpan.FromSeconds(90);
+    private Travel.Lifts.Stop? _liftBoard;
+    private Travel.Lifts.Stop? _liftAlight;
+    private uint _liftFromTerritory;
+    private float _liftFromY;
+    private bool _liftAnswered;
+    private DateTime _lastLiftPress;
+    private DateTime _lastLiftMove;
+
+    private void StartLift(Travel.Lifts.Stop board, Travel.Lifts.Stop alight)
+    {
+        _liftBoard = board;
+        _liftAlight = alight;
+        _liftFromTerritory = _world.TerritoryId;
+        _liftFromY = _world.PlayerPosition.Y;
+        _liftAnswered = false;
+        _lastLiftPress = default;
+        _lastLiftMove = default;
+        var far = Vector2.Distance(new Vector2(_world.PlayerPosition.X, _world.PlayerPosition.Z), new Vector2(board.At.X, board.At.Z));
+        if (far > 40f)
+        {
+            _detourTo = board.At;
+            _detourThen = Phase.Lift;
+            _detourTolerance = 15f;
+            _detourNeedsShard = false;
+            Enter(!_world.IsMounted && _world.CanMountHere && far > MountWorthDistance ? Phase.Mount : Phase.Move);
+            return;
+        }
+        Enter(Phase.Lift);
+    }
+
+    /// <summary>
+    /// Walk up to the attendant, talk, pick the stop from the menu, and wait to be on the other
+    /// level. A lift that never takes is said and left for the walk — never the end of the quest.
+    /// </summary>
+    private void TickLift(DateTime now)
+    {
+        var board = _liftBoard!;
+        var alight = _liftAlight!;
+        var where = alight.Name ?? $"the {alight.City} lift's other level";
+
+        if (_world.TerritoryId != _liftFromTerritory || MathF.Abs(_world.PlayerPosition.Y - _liftFromY) > LevelChange)
+        {
+            if (!_world.IsReady || _world.IsOccupied)
+                return;
+            _world.Log($"Took the lift to {where}.");
+            Enter(NextAfterTravel());
+            return;
+        }
+        if (now - _phaseStart > LiftMax)
+        {
+            _world.Log($"The lift to {where} did not take in {LiftMax.TotalSeconds:F0}s — walking instead.");
+            Enter(NextAfterTravel());
+            return;
+        }
+        if (_world.IsAddonVisible("SelectIconString"))
+        {
+            if (_liftAnswered)
+                return;
+            var entries = _world.SelectIconStringEntries();
+            if (entries.Count == 0)
+                return;
+            var index = Travel.Lifts.EntryFor(entries, alight);
+            if (index < 0)
+            {
+                _world.Log($"The lift menu does not offer {where} — [{string.Join(" | ", entries)}]; walking instead.");
+                _world.SelectIconStringIndex(entries.Count - 1);
+                Enter(NextAfterTravel());
+                return;
+            }
+            _world.Log($"Lift: \"{entries[index]}\".");
+            _world.SelectIconStringIndex(index);
+            _liftAnswered = true;
+            return;
+        }
+        if (_world.IsOccupied || !_world.IsReady)
+            return;   // the ride itself
+        _liftAnswered = false;
+
+        if (Vector3.Distance(_world.PlayerPosition, board.At) > AttuneReach)
+        {
+            if (now - _lastLiftMove > TimeSpan.FromSeconds(2) && !_world.IsMoving)
+            {
+                _lastLiftMove = now;
+                _world.MoveTo(board.At, false);
+            }
+            return;
+        }
+        if (_world.IsMoving)
+        {
+            _world.StopMoving();
+            return;
+        }
+        if (_world.IsMounted)
+        {
+            _world.Dismount();
+            return;
+        }
+        if (now - _lastLiftPress > TimeSpan.FromSeconds(3))
+        {
+            _lastLiftPress = now;
+            _world.TryInteractWithDataId(board.AttendantId);
+        }
+    }
+
+    private void AfterAttune(QuestStep step)
+    {
+        if (!_attuneThenStep)
+        {
+            Enter(Phase.Finish);
+            return;
+        }
+        _attuneThenStep = false;
+        Enter(step.DelaySecondsAtStart is > 0 ? Phase.Delay : NextAfterDelay());
+    }
+
+    /// <summary>This step is a sniping section, run as the interact that starts it.</summary>
+    private bool _sniping;
+
+    /// <summary>The snipe skip was switched on for this step and goes back off after it.</summary>
+    private bool _autoSnipeSwitched;
+
+    private void ReleaseAutoSnipe()
+    {
+        if (!_autoSnipeSwitched)
+            return;
+        _autoSnipeSwitched = false;
+        _world.SetAutoSnipe(false);
+    }
+
     /// <summary>The item this Craft step is making: the one it names, else the quest's hand-in in hand.</summary>
     private uint _craftItem;
     private int _craftWant = 1;
@@ -3299,6 +3940,9 @@ public sealed class StepExecutor
         {
             _sawOccupied = true;
             AnswerDialogue(step, now);
+            // Sniping by hand takes as long as it takes; the section ending is what ends the step.
+            if (_sniping)
+                _phaseStart = now;
         }
 
         // A capped reward: the game warns that not everything will be received and waits. The
@@ -3349,15 +3993,8 @@ public sealed class StepExecutor
             // guard's "Leave the Ala Mhigan Quarter?" (The Mad King's Trove, 2964). Questionable
             // answers these Yes for the same reason; the match is against the Warp sheet's
             // questions into the step's destination, so no other question is taken for one.
-            if (step.TargetTerritoryId is { } bound && IsTravelPromptInto(bound))
+            if (AnswerTravelQuestion(step, now))
             {
-                if (now - _lastTravelYes > TimeSpan.FromSeconds(1.5))
-                {
-                    if (_lastTravelYes == default)
-                        _world.Log($"Answering yes to \"{_world.YesNoPrompt()}\" — the crossing this step makes.");
-                    _lastTravelYes = now;
-                    _world.SelectYesNo(true);
-                }
                 _sawOccupied = true;
                 _phaseStart = now;
                 return;
@@ -3414,6 +4051,26 @@ public sealed class StepExecutor
                     var wanted = step.PickUpQuestId ?? _questId;
                     var name = _world.QuestName(wanted);
                     var index = name is null ? -1 : FindEntry(entries, name);
+
+                    // Not a quest menu: some NPCs ask their own question in this window — Ul'dah's
+                    // lift attendant ("Ride Lift to the Airship Landing") is one. The step's List
+                    // choice answers it just as it would the plain menu.
+                    if (index < 0 && step.DialogueChoices is { } choices && System.Linq.Enumerable.FirstOrDefault(choices, c => c.Type.Equals("List", StringComparison.OrdinalIgnoreCase)) is { Answer: { } key }
+                        && _texts?.Resolve(_questId, key) is { } answer)
+                    {
+                        index = FindEntry(entries, answer);
+                        name = answer;
+                    }
+
+                    // A lift attendant the path talks to without naming a stop — Nanahomi, at
+                    // Ul'dah's Airship Landing, carries When the Dust Settles (4063) down into the
+                    // Steps of Thal. The zone it crosses into says which stop.
+                    if (index < 0 && Travel.Lifts.IsLiftMenu(entries) && step.TargetTerritoryId is { } into && into != _world.TerritoryId
+                        && Travel.Lifts.StopFor(into, step.Position ?? _world.PlayerPosition) is { } stop)
+                    {
+                        index = Travel.Lifts.EntryFor(entries, stop);
+                        name = stop.Name ?? name;
+                    }
                     if (index >= 0)
                     {
                         _world.SelectIconStringIndex(index);
@@ -3688,6 +4345,32 @@ public sealed class StepExecutor
         return !now.IsAvailable
                || now.Sequence != before.Sequence
                || !now.Variables.Span.SequenceEqual(before.Variables.Span);
+    }
+
+    /// <summary>
+    /// The game's own travel question on the way to where the step is: into the zone the step
+    /// crosses to, or — the path marking no crossing — into the zone the step is in. Answered yes,
+    /// in any phase: the door's question comes up while the walk or the interact is still going,
+    /// and "Enter the Ruby Bazaar offices?" sat waiting there for a click. True when it answered.
+    /// </summary>
+    private bool AnswerTravelQuestion(QuestStep step, DateTime now)
+    {
+        if (!_world.IsAddonVisible("SelectYesno"))
+            return false;
+        uint? bound = _phase == Phase.Door && _door is { } door
+            ? door.Into
+            : step.TargetTerritoryId
+              ?? (step.TerritoryId != 0 && step.TerritoryId != _world.TerritoryId ? step.TerritoryId : null);
+        if (bound is not { } into || !IsTravelPromptInto(into))
+            return false;
+        if (now - _lastTravelYes > TimeSpan.FromSeconds(1.5))
+        {
+            if (_lastTravelYes == default)
+                _world.Log($"Answering yes to \"{_world.YesNoPrompt()}\" — the way into territory {into}, where this step goes.");
+            _lastTravelYes = now;
+            _world.SelectYesNo(true);
+        }
+        return true;
     }
 
     private bool IsTravelPromptInto(uint territoryId)
@@ -4097,6 +4780,7 @@ public sealed class StepExecutor
         _world.ReleaseDialogue();
         ReleaseCombatHold();
         _world.ReleaseDescent();
+        ReleaseAutoSnipe();
         FailReason = reason;
         Status = StepStatus.Failed;
         return Status;

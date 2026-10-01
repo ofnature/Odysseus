@@ -1,3 +1,5 @@
+using System;
+using System.Collections.Generic;
 using System.Numerics;
 using Dalamud.Bindings.ImGui;
 using Dalamud.Interface.Windowing;
@@ -21,11 +23,18 @@ public sealed class DebugWindow : OdysseusWindow
     private readonly IQuestStateReader _quests;
     private readonly QuestCatalog _catalog;
 
-    public DebugWindow(IQuestStateReader quests, QuestCatalog catalog)
+    private readonly Func<IReadOnlyList<(uint ItemId, int Missing)>, string> _grabFromChest;
+    private readonly Func<string> _chestStatus;
+    private string _grabSaid = string.Empty;
+
+    public DebugWindow(IQuestStateReader quests, QuestCatalog catalog,
+        Func<IReadOnlyList<(uint ItemId, int Missing)>, string> grabFromChest, Func<string> chestStatus)
         : base("Odysseus Debug##OdysseusDebug")
     {
         _quests = quests;
         _catalog = catalog;
+        _grabFromChest = grabFromChest;
+        _chestStatus = chestStatus;
         Size = new Vector2(640, 400);
         SizeCondition = ImGuiCond.FirstUseEver;
     }
@@ -34,8 +43,25 @@ public sealed class DebugWindow : OdysseusWindow
     {
         OdysseusTheme.SectionHeader("STORY FRONTIER");
         DrawFrontier();
+#if DEBUG
+        // A dev-build test of the chest split; not something a release should offer.
+        OdysseusTheme.SectionHeader("FC CHEST (SPLIT TEST)");
+        DrawChestTest();
+#endif
         OdysseusTheme.SectionHeader("QUEST STATE (LIVE, FROM QUESTMANAGER)");
         DrawQuestTable();
+    }
+
+    /// <summary>A partial withdrawal on demand: 3 out of whatever stack holds Volcanic Rock Salt.</summary>
+    private void DrawChestTest()
+    {
+        const uint VolcanicRockSalt = 6152;
+        if (ImGui.Button("Withdraw 3 Volcanic Rock Salt"))
+            _grabSaid = _grabFromChest([(VolcanicRockSalt, 3)]);
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Open the FC chest on the page holding it first. Takes exactly 3 — a bigger stack is split through the game's \"how many?\" prompt.");
+        ImGui.SameLine();
+        ImGui.TextColored(OdysseusTheme.TextSecondary, _grabSaid.Length > 0 ? $"{_grabSaid}  ·  now: {_chestStatus()}" : _chestStatus());
     }
 
     private void DrawFrontier()

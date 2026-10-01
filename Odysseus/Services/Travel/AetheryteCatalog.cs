@@ -48,8 +48,25 @@ public sealed class AetheryteCatalog
 
     private readonly List<Shard> _shards = [];
 
+    /// <summary>An aetheryte or shard the map places, for attuning: its row, name, zone and world X/Z.</summary>
+    public sealed record Attunable(uint Id, string Name, uint TerritoryId, System.Numerics.Vector2 At, bool IsShard);
+
+    private readonly Dictionary<uint, List<Attunable>> _attunables = new();
+
+    /// <summary>Every aetheryte and shard in a zone's map, for "attune this zone".</summary>
+    public IReadOnlyList<Attunable> AttunablesIn(uint territoryId)
+        => _attunables.TryGetValue(territoryId, out var list) ? list : [];
+
+    public Attunable? AttunableById(uint id)
+    {
+        foreach (var list in _attunables.Values)
+            foreach (var a in list)
+                if (a.Id == id) return a;
+        return null;
+    }
+
     /// <summary>Territory → its shards as the map draws them: name and world X/Z (a map has no heights).</summary>
-    private readonly Dictionary<uint, List<(string Name, System.Numerics.Vector2 At)>> _mappedShards = new();
+    private readonly Dictionary<uint, List<(uint Id, string Name, System.Numerics.Vector2 At)>> _mappedShards = new();
     /// <summary>Every aethernet stop by name — shards and city aetherytes alike.</summary>
     private readonly Dictionary<string, Shard> _stopsByName = new(StringComparer.OrdinalIgnoreCase);
     /// <summary>Aethernet group → the city aetheryte you can actually teleport to.</summary>
@@ -124,6 +141,27 @@ public sealed class AetheryteCatalog
     {
         var territories = data.GetExcelSheet<TerritoryType>();
         var markers = data.GetSubrowExcelSheet<MapMarker>();
+
+        // The aetherytes themselves: marker type 3, keyed by their Aetheryte row.
+        foreach (var territory in _byId.Values.Select(v => v.TerritoryId).Concat(_shards.Select(s => s.TerritoryId)).Distinct())
+        {
+            if (territories.GetRowOrDefault(territory)?.Map.ValueNullable is not { } zoneMap || zoneMap.SizeFactor == 0)
+                continue;
+            if (!markers.TryGetRow(zoneMap.MapMarkerRange, out var zoneRows))
+                continue;
+            var zoneScale = zoneMap.SizeFactor / 100f;
+            foreach (var marker in zoneRows)
+            {
+                if (marker.DataType != 3 || !_byId.TryGetValue(marker.DataKey.RowId, out var aetheryte) || aetheryte.TerritoryId != territory)
+                    continue;
+                var at = new System.Numerics.Vector2((marker.X - 1024f) / zoneScale - zoneMap.OffsetX, (marker.Y - 1024f) / zoneScale - zoneMap.OffsetY);
+                if (!_attunables.TryGetValue(territory, out var list))
+                    _attunables[territory] = list = [];
+                if (!list.Any(a => a.Id == marker.DataKey.RowId))
+                    list.Add(new Attunable(marker.DataKey.RowId, aetheryte.Name, territory, at, IsShard: false));
+            }
+        }
+
         foreach (var byTerritory in _shards.GroupBy(s => s.TerritoryId))
         {
             if (territories.GetRowOrDefault(byTerritory.Key)?.Map.ValueNullable is not { } map || map.SizeFactor == 0)
@@ -140,7 +178,11 @@ public sealed class AetheryteCatalog
                     (marker.Y - 1024f) / scale - map.OffsetY);
                 if (!_mappedShards.TryGetValue(byTerritory.Key, out var list))
                     _mappedShards[byTerritory.Key] = list = [];
-                list.Add((shard.Name, at));
+                list.Add((shard.Id, shard.Name, at));
+                if (!_attunables.TryGetValue(byTerritory.Key, out var attunables))
+                    _attunables[byTerritory.Key] = attunables = [];
+                if (!attunables.Any(a => a.Id == shard.Id))
+                    attunables.Add(new Attunable(shard.Id, shard.Name, byTerritory.Key, at, IsShard: true));
             }
         }
     }
@@ -151,8 +193,13 @@ public sealed class AetheryteCatalog
         if (!_mappedShards.TryGetValue(territoryId, out var list) || list.Count == 0)
             return null;
         var from = new System.Numerics.Vector2(near.X, near.Z);
-        return list.MinBy(s => System.Numerics.Vector2.Distance(s.At, from));
+        var best = list.MinBy(s => System.Numerics.Vector2.Distance(s.At, from));
+        return (best.Name, best.At);
     }
+
+    /// <summary>Every shard the zone's map shows, with its aetheryte row — for a hop across a city.</summary>
+    public IReadOnlyList<(uint Id, string Name, System.Numerics.Vector2 At)> MappedShardsIn(uint territoryId)
+        => _mappedShards.TryGetValue(territoryId, out var list) ? list : [];
 
     private static System.Numerics.Vector3? LevelPosition(Aetheryte a)
     {

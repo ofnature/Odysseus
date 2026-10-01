@@ -60,6 +60,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly GameChestWorld _chestWorld;
     private readonly ChestWithdrawer _withdrawer;
     private readonly Services.Flight.CurrentCollector _collector;
+    private readonly Services.Travel.AttuneRunner _attuner;
     private readonly FlightWindow _flightWindow;
     private readonly JournalWindow _journalWindow;
     private readonly System.Collections.Generic.Queue<byte> _tribeQueue = new();
@@ -158,6 +159,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             // A path note is for the player: chat is where they are looking, and it stays put.
             message => { try { Service.ChatGui.Print(message); } catch { /* chat is never worth a fault */ } });
         _world.Minerva = new MinervaIpc(PluginInterface, message => Warn(message));
+        _world.Snipe = new SnipeSkipper(GameInterop, message => Warn(message));
+        _world.Doors = new Services.Travel.Doorways(() => _pathStore.All);
+        _battlehorn = new BattlehornAssigner(_world, DataManager, message => Say(message));
+        _world.Battlehorn = _battlehorn;
         _recorderFeed = new RecorderFeed(_world, _quests, aetherytes, duties);
         var dialogue = new DialogueCatalog(DataManager, message => Warn(message));
         _runLog = new RunLog(
@@ -249,7 +254,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero,
             () => TargetManager.Target?.BaseId);
         _logWindow = new LogWindow(_runLog);
-        _debugWindow = new DebugWindow(_quests, _catalog);
+        _debugWindow = new DebugWindow(_quests, _catalog,
+            needs => _withdrawer.Start(needs) is var queued && queued > 0
+                ? $"Fetching {queued} {(queued == 1 ? "kind" : "kinds")} of item from the FC chest — keep it open."
+                : _withdrawer.Status,
+            () => _withdrawer.Status);
         _fleetWindow = new FleetWindow(_config, _fleet);
 
         var unlockPlanner = new UnlockPlanner(_catalog, _quests, _priority, _pathStore.Has, message => Say(message));
@@ -349,8 +358,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var flightState = new Services.Flight.FlightState(message => Warn(message));
         _collector = new Services.Flight.CurrentCollector(_world, flightState,
             new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
+        _attuner = new Services.Travel.AttuneRunner(_world,
+            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
         _flightWindow = new FlightWindow(currents, flightState, _collector, _priority, _catalog, unlockPlanner,
-            () => ClientState.TerritoryType);
+            () => ClientState.TerritoryType, _attuner);
 
         // The bill of materials for a queued line: its own steps, read against the bags and the FC
         // chest, with crafts expanded through the same recipe and ingredient lookups the deliveries
@@ -373,7 +384,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => _pathStore.OutdatedCount,
             () => _chestWorld.ChestOpen,
             needs => _withdrawer.Start(needs) is var queued && queued > 0
-                ? $"Fetching {queued} item(s) from the FC chest — keep it open."
+                ? $"Fetching {queued} {(queued == 1 ? "kind" : "kinds")} of item from the FC chest — keep it open."
                 : _withdrawer.Status);
 
         // Built after the windows it can open: the deps record captures them, and the
@@ -396,7 +407,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => ClientState.TerritoryType,
             () => ObjectTable.LocalPlayer?.ClassJob.ValueNullable?.Abbreviation.ExtractText() ?? "—",
             () => _gatherWindow.IsOpen = !_gatherWindow.IsOpen,
-            () => _objectives.Read()));
+            () => _objectives.Read(),
+            _attuner,
+            () => _flightWindow.IsOpen = true));
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
@@ -488,10 +501,12 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
     /// <summary>The click recorder, made the first time a recording is asked for.</summary>
     private CallbackRecorder? _clickRecorder;
+    private BattlehornAssigner? _battlehorn;
 
     public void Dispose()
     {
         _clickRecorder?.Dispose();
+        _world.Snipe?.Dispose();
         _ownLog?.Dispose();
         CommandManager.RemoveHandler(CommandMain);
         CommandManager.RemoveHandler(CommandShort);
@@ -537,6 +552,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _fleet.Tick();
 
         _chocobo.Tick();
+        _battlehorn?.Tick();
 
         // Auto-remove completed priority entries — quests finished by hand count too, so poll.
         var now = System.DateTime.UtcNow;
@@ -584,6 +600,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         // Collecting currents owns the frame; it drives its own executor, not the controller.
         if (!_collector.IsFinished) { NameFrameOwner($"the current collector ({_collector.State})"); _collector.Tick(); return; }
+
+        // Attuning a zone owns the frame while it runs, the same way.
+        if (!_attuner.IsFinished) { NameFrameOwner($"attuning ({_attuner.StatusLine})"); _attuner.Tick(); return; }
 
         // Spending owns the frame while it runs; it is short and never touches the controller.
         if (!_spender.IsFinished) { NameFrameOwner($"scrip spending ({_spender.State}: {_spender.StatusLine})"); _spender.Tick(); return; }
@@ -755,6 +774,20 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         // "/od record MateriaAttach" — what a window sends when you click in it, for automating a
         // click from the game's own values rather than a guess. Again to stop.
+        // "/od battlehorn 1 Cu Sith" — a Bestiary pet onto a battlehorn; bare, lists them.
+        if (trimmed.Equals("battlehorn", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("battlehorn ", StringComparison.OrdinalIgnoreCase))
+        {
+            _battlehorn ??= new BattlehornAssigner(_world, DataManager, message => Say(message));
+            Say(_battlehorn.Busy ? "Still assigning the last one." : _battlehorn.Start(trimmed["battlehorn".Length..].Trim()));
+            return;
+        }
+        if (trimmed.StartsWith("record agentof ", StringComparison.OrdinalIgnoreCase))
+        {
+            _clickRecorder ??= new CallbackRecorder(GameInterop, message => Say(message));
+            Say(_clickRecorder.ToggleAgentOf(trimmed["record agentof ".Length..].Trim(), GameGui));
+            return;
+        }
         if (trimmed.StartsWith("record ", StringComparison.OrdinalIgnoreCase))
         {
             _clickRecorder ??= new CallbackRecorder(GameInterop, message => Say(message));

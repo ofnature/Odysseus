@@ -330,8 +330,7 @@ public sealed class JournalWindow : OdysseusWindow
         {
             if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Box, $"Grab from FC##grab{id}", OdysseusTheme.GreenDark,
                     open
-                        ? $"Withdraw {wanted.Count} item(s) from the FC chest.\n" +
-                          "Whole stacks only — the game's move has no quantity, so this can bring back more than you need."
+                        ? $"Withdraw {wanted.Count} item(s) from the FC chest — exactly what is short; a bigger stack is split."
                         : "Open the FC chest first — that window is the transfer session, standing next to it is not enough.",
                     new Vector2(118, 20)))
                 _status = _grabFromChest(wanted);

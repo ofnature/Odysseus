@@ -186,6 +186,14 @@ public sealed class SkipConditions
 /// <summary>One thing to do. The unit the executor works in and the unit the editor patches.</summary>
 public sealed class QuestStep
 {
+    /// <summary>This step, run as another kind — the stored path is left as it is.</summary>
+    internal QuestStep As(StepKind kind)
+    {
+        var copy = (QuestStep)MemberwiseClone();
+        copy.Kind = kind;
+        return copy;
+    }
+
     public StepKind Kind { get; set; }
     /// <summary>The upstream verb name, kept verbatim so an <see cref="StepKind.Unknown"/> step can say what it was.</summary>
     public string? KindName { get; set; }
@@ -250,6 +258,16 @@ public sealed class QuestStep
     public int? MinimumKillCount { get; set; }
     public ushort? PickUpQuestId { get; set; }
     public uint? AetherCurrentId { get; set; }
+
+    /// <summary>
+    /// The aetheryte or shard an AttuneAetheryte / AttuneAethernetShard step means, as the data
+    /// names it ("Doman Enclave", "[Gridania] Archers' Guild"). Dropped before format 7, which left
+    /// every attune step a no-op.
+    /// </summary>
+    public string? AttuneName { get; set; }
+
+    /// <summary>The same, already resolved to its Aetheryte row — what the "attune this zone" button builds.</summary>
+    public uint? AttuneId { get; set; }
     public uint? ItemId { get; set; }
     /// <summary>How many the step wants — Craft and PurchaseItem both carry it.</summary>
     public int? ItemCount { get; set; }
@@ -359,7 +377,13 @@ public sealed class QuestPath
     /// 5 → 6 (2026-09-27): a Craft step that names no item carries the path's own comment, where the
     /// authors write "Crafted Item: 3x Square Maple Shield" — the only place the count is written down.
     /// </para>
-    public const int CurrentFormatVersion = 6;
+    ///
+    /// <para>
+    /// 6 → 7 (2026-09-29): <c>Aetheryte</c> / <c>AethernetShard</c> on the attune steps. Without the
+    /// name an attune step had nothing to go to and finished in a frame — the Doman Enclave was never
+    /// attuned, and its teleport was refused a quest later.
+    /// </para>
+    public const int CurrentFormatVersion = 7;
 
     public int FormatVersion { get; set; } = CurrentFormatVersion;
     public ushort QuestId { get; set; }
@@ -429,7 +453,8 @@ public sealed class QuestPath
             foreach (var step in sequence.Steps)
             {
                 if (step.Kind is StepKind.Craft or StepKind.Gather or StepKind.Fish
-                    or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Combat)
+                    or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Combat
+                    or StepKind.AttuneAetheryte or StepKind.AttuneAethernetShard)
                     return true;
                 if (step.Kind == StepKind.Unknown && step.KindName is { Length: > 0 } named
                     && Enum.TryParse<StepKind>(named, ignoreCase: false, out _))

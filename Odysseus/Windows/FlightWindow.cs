@@ -33,10 +33,16 @@ public sealed class FlightWindow : OdysseusWindow
     private string _status = string.Empty;
     private bool _hideFlyable = true;
 
+    private readonly Services.Travel.AttuneRunner _attuner;
+    private int _attuneMissing = -1;
+    private DateTime _attuneCountedAt;
+
     public FlightWindow(AetherCurrentCatalog catalog, IFlightState state, CurrentCollector collector,
-        PriorityList priority, QuestCatalog quests, UnlockPlanner unlock, Func<uint> territory)
+        PriorityList priority, QuestCatalog quests, UnlockPlanner unlock, Func<uint> territory,
+        Services.Travel.AttuneRunner attuner)
         : base("Odysseus Flight##OdysseusFlight")
     {
+        _attuner = attuner;
         _catalog = catalog;
         _state = state;
         _collector = collector;
@@ -58,6 +64,38 @@ public sealed class FlightWindow : OdysseusWindow
         OdysseusTheme.IdChip($"Flying in {flyable}/{zones.Count} zones");
         ImGui.SameLine(0f, 8f);
         ImGui.Checkbox("Hide finished", ref _hideFlyable);
+
+        // Aetherytes and shards: attune what this zone still lacks. Counted once a second — it
+        // reads the game's unlock state for every one in the zone.
+        if (DateTime.UtcNow - _attuneCountedAt > TimeSpan.FromSeconds(1))
+        {
+            _attuneCountedAt = DateTime.UtcNow;
+            _attuneMissing = _attuner.MissingHere;
+        }
+        ImGui.SameLine(0f, 8f);
+        if (_attuner.Running)
+        {
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Stop, "Stop attuning", OdysseusTheme.NeutralDark,
+                    "Stop attuning this zone.", new Vector2(120, 22)))
+                _attuner.Stop();
+            ImGui.SameLine(0f, 8f);
+            ImGui.TextColored(OdysseusTheme.TextSecondary, _attuner.StatusLine);
+        }
+        else
+        {
+            using (ImRaii.Disabled(_attuneMissing <= 0 || !_collector.IsFinished))
+            {
+                if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Gem, $"Attune this zone ({Math.Max(0, _attuneMissing)})", OdysseusTheme.GreenDark,
+                        "Walk to every aetheryte and aethernet shard in this zone this character has not attuned, and attune it.",
+                        new Vector2(170, 22)))
+                    _attuner.Start();
+            }
+            if (_attuner.StatusLine.Length > 0)
+            {
+                ImGui.SameLine(0f, 8f);
+                ImGui.TextColored(OdysseusTheme.TextDisabled, _attuner.StatusLine);
+            }
+        }
         if (!_collector.IsFinished)
         {
             ImGui.SameLine(0f, 8f);

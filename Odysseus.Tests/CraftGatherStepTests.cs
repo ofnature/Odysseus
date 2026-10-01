@@ -893,7 +893,7 @@ public class CraftGatherStepTests
         Assert.DoesNotContain("not implemented", StepExecutor.WhyUnsupported(stale));
 
         // A verb we genuinely cannot run still says so.
-        var genuinely = new QuestStep { Kind = StepKind.Unknown, KindName = "Snipe", TerritoryId = 400 };
+        var genuinely = new QuestStep { Kind = StepKind.Unknown, KindName = "UnlockTaxiStand", TerritoryId = 400 };
         Assert.Contains("not implemented", StepExecutor.WhyUnsupported(genuinely));
 
         // And one nobody has ever seen keeps its name.

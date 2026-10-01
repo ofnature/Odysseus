@@ -320,6 +320,174 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// </summary>
     public bool CanSummonHere => CanMountHere && !InDuty;
 
+    public uint? AttunableId(string name)
+        => _aetherytes.Resolve(name) ?? _aetherytes.StopNamed(name)?.Id;
+
+    public bool IsAttuned(uint aetheryteId) => Attuned([aetheryteId]) is not null;
+
+    public (string Name, uint TerritoryId, Vector3 At)? AttunableAt(uint aetheryteId)
+    {
+        if (_aetherytes.AttunableById(aetheryteId) is not { } a)
+            return null;
+        return (a.Name, a.TerritoryId, Grounded(a.At, a.TerritoryId));
+    }
+
+    /// <summary>A map point at the height the mesh finds there, near the player's own height; the player's height where it finds none.</summary>
+    private Vector3 Grounded(Vector2 at, uint territoryId)
+    {
+        var flat = new Vector3(at.X, PlayerPosition.Y, at.Y);
+        return territoryId == TerritoryId ? NearestReachablePoint(flat, 60f) ?? flat : flat;
+    }
+
+    public (uint Id, string Name, Vector3 At)? UnattunedNear(Vector3 near, float within)
+    {
+        try
+        {
+            (uint, string, Vector3)? best = null;
+            var bestDistance = within;
+            foreach (var a in _aetherytes.AttunablesIn(TerritoryId))
+            {
+                var d = Vector2.Distance(new Vector2(near.X, near.Z), a.At);
+                if (d > bestDistance || IsAttuned(a.Id)) continue;
+                bestDistance = d;
+                best = (a.Id, a.Name, Grounded(a.At, a.TerritoryId));
+            }
+            return best;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public IReadOnlyList<(uint Id, string Name, bool IsShard)> UnattunedHere()
+    {
+        try
+        {
+            return _aetherytes.AttunablesIn(TerritoryId).Where(a => !IsAttuned(a.Id)).Select(a => (a.Id, a.Name, a.IsShard)).ToList();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private IGameObject? AttuneObjectNear(Vector3 near, float within)
+    {
+        var shards = ShardObjectIds();
+        IGameObject? best = null;
+        var bestDistance = within;
+        foreach (var obj in _objectTable)
+        {
+            var isAccess = obj.ObjectKind == ObjectKind.Aetheryte
+                           || (obj.ObjectKind == ObjectKind.EventObj && shards.Contains(obj.BaseId));
+            if (!isAccess) continue;
+            // Across the ground only: a map marker has no height, so the point asked about carries a
+            // guessed one, and in a city of levels it can be the wrong level entirely — the
+            // Crystarium's Cabinet of Curiosity shard sits ~57y below where it was guessed, and a 3D
+            // test never found it from the level above.
+            var d = Vector2.Distance(new Vector2(obj.Position.X, obj.Position.Z), new Vector2(near.X, near.Z));
+            if (d > bestDistance) continue;
+            bestDistance = d;
+            best = obj;
+        }
+        return best;
+    }
+
+    public Vector3? NearestAttuneObject(Vector3 near, float within)
+    {
+        try
+        {
+            return AttuneObjectNear(near, within)?.Position;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public bool InteractAttuneObject(Vector3 at)
+    {
+        try
+        {
+            if (AttuneObjectNear(at, 2f) is not { } obj) return false;
+            SetTarget(obj);
+            return Interact(obj);
+        }
+        catch (Exception ex)
+        {
+            _log($"Interacting with the aetheryte failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public void CloseTravelMenus()
+    {
+        foreach (var name in new[] { "TelepotTown", "SelectString", "Telepo" })
+        {
+            try
+            {
+                var addon = _gameGui.GetAddonByName(name);
+                if (!addon.IsNull && addon.IsVisible)
+                    ((AtkUnitBase*)addon.Address)->Close(true);
+            }
+            catch
+            {
+                // a menu that will not close is left for the player
+            }
+        }
+    }
+
+    public bool AethernetAttuned(string destination)
+        => _aetherytes.StopNamed(destination) is not { } stop || IsAttuned(stop.Id);
+
+    /// <summary>GeneralAction 4, "Sprint"; status 50 while it runs.</summary>
+    private const uint SprintGeneralAction = 4;
+    private const uint SprintStatus = 50;
+
+    public bool Sprint()
+    {
+        try
+        {
+            if (_objectTable.LocalPlayer is not { } player) return false;
+            foreach (var status in player.StatusList)
+                if (status.StatusId == SprintStatus) return false;
+            var manager = ActionManager.Instance();
+            if (manager == null || manager->GetActionStatus(ActionType.GeneralAction, SprintGeneralAction) != 0)
+                return false;
+            return manager->UseAction(ActionType.GeneralAction, SprintGeneralAction);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>A hop costs a cast and a loading screen: worth this much walking.</summary>
+    private const float CityHopCost = 60f;
+    private const float CityHopMin = 100f;
+
+    public string? CityHop(uint territoryId, Vector3 from, Vector3 to)
+    {
+        try
+        {
+            var shards = _aetherytes.MappedShardsIn(territoryId);
+            if (shards.Count < 2) return null;
+            static float Flat(Vector3 a, Vector2 b) => Vector2.Distance(new Vector2(a.X, a.Z), b);
+            var direct = Vector2.Distance(new Vector2(from.X, from.Z), new Vector2(to.X, to.Z));
+            if (direct < CityHopMin) return null;
+            var nearHere = shards.MinBy(s => Flat(from, s.At));
+            var nearGoal = shards.MinBy(s => Flat(to, s.At));
+            if (nearHere.Id == nearGoal.Id || Attuned([nearGoal.Id]) is null) return null;
+            var via = Flat(from, nearHere.At) + Flat(to, nearGoal.At) + CityHopCost;
+            return via < direct * 0.75f ? nearGoal.Name : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public bool CanFlyHere
     {
         get
@@ -777,6 +945,37 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// because of a bad read.
     /// </para>
     /// </summary>
+    /// <summary>The doors the path library walks through. Null means none are known.</summary>
+    public Travel.Doorways? Doors { get; set; }
+
+    public Travel.Doorways.Door? DoorInto(uint territoryId) => Doors?.Into(territoryId, _clientState.TerritoryType);
+
+    /// <summary>The battlehorn assigner the command uses too. Null means no battlehorns are reached.</summary>
+    public BattlehornAssigner? Battlehorn { get; set; }
+
+    public string? BattlehornPet(int slot) => Battlehorn?.PetOn(slot);
+
+    public string AssignBattlehorn(int slot, string pet) => Battlehorn?.Assign(slot, pet) ?? "Battlehorns are not available.";
+
+    public bool BattlehornBusy => Battlehorn?.Busy ?? false;
+
+    public string BattlehornMessage => Battlehorn?.LastMessage ?? string.Empty;
+
+    /// <summary>Close a window if it is up.</summary>
+    public void CloseAddon(string name)
+    {
+        try
+        {
+            var addon = _gameGui.GetAddonByName(name);
+            if (!addon.IsNull && addon.IsVisible)
+                ((AtkUnitBase*)addon.Address)->Close(true);
+        }
+        catch
+        {
+            // a window that will not close is left for the player
+        }
+    }
+
     public TravelRoute? RouteTo(uint territoryId, Vector3? near)
     {
         if (Attuned(_aetherytes.InTerritory(territoryId, near)) is { } direct)
@@ -1657,6 +1856,13 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// <summary>The Minerva preset to hold the fight under, or empty to just switch its dodging on.</summary>
     public string MinervaPreset { get; set; } = string.Empty;
 
+    /// <summary>The sniping-section skip (ported from CBT). Null means sniping is left to the player.</summary>
+    public SnipeSkipper? Snipe { get; set; }
+
+    public bool? AutoSnipeEnabled => Snipe?.Enabled;
+
+    public void SetAutoSnipe(bool on) => Snipe?.Set(on);
+
     /// <summary>The Minerva handoff, when that is the chosen duty AI. Null changes nothing.</summary>
     public Ipc.MinervaIpc? Minerva { get; set; }
 
@@ -2103,7 +2309,16 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
             if (addon.IsNull || !addon.IsVisible)
                 return string.Empty;
             var yesno = (FFXIVClientStructs.FFXIV.Client.UI.AddonSelectYesno*)addon.Address;
-            return yesno->PromptText == null ? string.Empty : yesno->PromptText->NodeText.ToString();
+            var shown = yesno->PromptText == null ? string.Empty : yesno->PromptText->NodeText.ToString();
+            if (shown.Length > 0)
+                return shown;
+            // Some skins of the window have no PromptText node, and a fresh one has not filled it
+            // yet — "Overcap check: the window has no PromptText node" in every log. The question
+            // the window was opened with is its first value either way.
+            var unit = (AtkUnitBase*)addon.Address;
+            if (unit->AtkValuesCount > 0 && unit->AtkValues[0].String.Value != null)
+                return Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)unit->AtkValues[0].String.Value).TextValue;
+            return string.Empty;
         }
         catch
         {

@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using FFXIVClientStructs.FFXIV.Client.Game;
+using FFXIVClientStructs.FFXIV.Client.UI;
+using FFXIVClientStructs.FFXIV.Component.GUI;
 
 namespace Odysseus.Services.Quest;
 
@@ -28,6 +30,14 @@ public sealed unsafe class GameChestWorld : IChestWorld
     private readonly Dalamud.Plugin.Services.IDataManager _data;
     private readonly Func<uint, int> _held;
     private readonly Action<string> _log;
+
+    /// <summary>
+    /// The split move's return slot and four values. They outlive the call on purpose: the "how
+    /// many?" prompt reads the move back when it is answered, after the call has returned
+    /// (QuickTransfer keeps its buffers alive for the same reason). One move runs at a time, so one
+    /// buffer, allocated once, does.
+    /// </summary>
+    private readonly AtkValue* _moveValues = (AtkValue*)System.Runtime.InteropServices.NativeMemory.AllocZeroed(5, (nuint)sizeof(AtkValue));
 
     public GameChestWorld(Dalamud.Plugin.Services.IGameGui gui, Dalamud.Plugin.Services.IDataManager data,
         Func<uint, int> held, Action<string> log)
@@ -113,23 +123,89 @@ public sealed unsafe class GameChestWorld : IChestWorld
     }
 
     /// <summary>
-    /// Success is the source slot no longer holding what we moved. The return code cannot be used:
-    /// Charon verified it comes back 6 on moves that plainly worked.
+    /// Part of a stack, the way a player does it: <c>RaptureAtkModule.HandleItemMove</c> with
+    /// [source inventory type, source slot, destination type, destination slot] — the move that a
+    /// click on the stack then a click on a bag slot makes (QuickTransfer's route, read for Charon's
+    /// FC chest plan). The game then asks how many; the withdrawer answers.
     /// </summary>
-    public bool HasLeft(ChestStack stack)
+    public bool WithdrawSome(ChestStack stack, int amount)
     {
         try
         {
             var manager = InventoryManager.Instance();
-            if (manager == null) return true;
+            var module = RaptureAtkModule.Instance();
+            if (manager == null || module == null) return false;
+
+            var flags = FlagsOf((InventoryType)stack.Container, stack.Slot);
+            if (Destination(manager, stack with { Quantity = amount }, flags, out var type, out var slot) is false)
+                return false;
+
+            var values = _moveValues + 1;
+            values[0].SetInt(stack.Container);
+            values[1].SetInt(stack.Slot);
+            values[2].SetInt((int)type);
+            values[3].SetInt(slot);
+            module->HandleItemMove(_moveValues, values, 4);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _log($"Withdrawing {amount} of item {stack.ItemId} failed: {ex.GetType().Name}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public bool QuantityPromptOpen
+    {
+        get
+        {
+            try
+            {
+                var addon = _gui.GetAddonByName("InputNumeric");
+                return !addon.IsNull && addon.IsVisible;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>OK with this many — the prompt's own callback, recorded as <c>[Int n]</c> (Cancel is <c>-1</c>).</summary>
+    public void AnswerQuantity(int amount)
+    {
+        try
+        {
+            var unit = (AtkUnitBase*)_gui.GetAddonByName("InputNumeric").Address;
+            if (unit == null) return;
+            var value = stackalloc AtkValue[1];
+            value[0].SetInt(amount);
+            unit->FireCallback(1, value, true);
+        }
+        catch (Exception ex)
+        {
+            _log($"Answering the chest's quantity prompt failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// What is left in the stack's slot. Success is it emptying, or shrinking by what was asked for;
+    /// the return code cannot be used — Charon verified it comes back 6 on moves that plainly worked.
+    /// </summary>
+    public int QuantityAt(ChestStack stack)
+    {
+        try
+        {
+            var manager = InventoryManager.Instance();
+            if (manager == null) return 0;
             var container = manager->GetInventoryContainer((InventoryType)stack.Container);
-            if (container == null || !container->IsLoaded || stack.Slot >= container->Size) return true;
+            if (container == null || !container->IsLoaded || stack.Slot >= container->Size) return 0;
             var item = container->GetInventorySlot(stack.Slot);
-            return item == null || item->ItemId != stack.ItemId || item->Quantity == 0;
+            return item == null || item->ItemId != stack.ItemId ? 0 : (int)item->Quantity;
         }
         catch
         {
-            return true; // unreadable mid-transition; the caller's own count is the backstop
+            return 0; // unreadable mid-transition; the caller's own count is the backstop
         }
     }
 
