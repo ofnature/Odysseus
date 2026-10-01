@@ -1,6 +1,40 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.12 — 2026-09-30
+
+### Getting there
+- Fastest way first: where flying is unlocked every mounted leg flies (not only the ones the path marks or the very long ones); where it is not, the mount; where no mount is allowed, Sprint on any leg over 25 yalms
+- Across a city with no aethernet shortcut in the path, Odysseus hops to the shard nearest the mark when that beats walking by a clear margin — the Disciple of the Hand quests walked Ul'dah end to end one way and hopped it back
+- No more hopping through town: the "not getting any closer — jumping" rescue now needs the character to be genuinely stuck (barely moved in four seconds), so a route round a building or back to an overshot waypoint is no longer a jump at every bend, and it never jumps in a zone that allows no mount
+- A mark on another level of a city takes the aethernet hop the path names instead of walking: Ul'dah's top level read as 148 yalms away and walkable, and the walk went to the lift rather than the Airship Landing shard beside the NPC (A Sultana's Duty, It Could Happen to You)
+- A door's travel question — "Enter the Ruby Bazaar offices?" — is answered whatever the step is doing, walking up or interacting, and for the step's own zone even when the path marks no crossing; the question is read from the window's own values when its text node is empty, which left some of them unrecognised and waiting for a click
+- Zones with no aetheryte of their own are entered by their door: the Rising Stones from Mor Dhona, and the 300-odd other doors the path library walks through (inn rooms, Grand Company offices, …). Prelude in Violet (3149) had faulted "no aetheryte there" with the character standing outside. Starting from elsewhere, Odysseus teleports to the door's zone first
+- City lifts are ridden. An Airship Landing has no shard of its own and only joins the aethernet once every shard in the city is attuned; until then the walk up ended at the lift doors. Odysseus now goes to the lift attendant (Willahelm, Nanahomi, Lolomaya in Ul'dah; Blanmhas, Skaenrael, Grehfarr in Limsa), picks the stop, and walks the rest
+- The lift menu is answered: it is the icon menu, not the plain one, so a path's choice for it was never picked and a path that talks to the attendant without naming a stop (When the Dust Settles, 4063, riding down from the Airship Landing) sat with the menu open. The stop is now the path's choice, or the one in the zone the step crosses into
+- (Ariadne) a flight answered with a ground route ("groundFaster") is ridden as a ground route — landing first if already in the air — instead of being steered as a flight, which hopped along the ground waypoints and overshot the mark
+
+### Aetherytes
+- A shard on a different level than its map marker suggests is still reached: the marker has no height, the guess put the Crystarium's Cabinet of Curiosity on the level above, and "Attune this zone" gave it up as no path every time with the shard right below. Odysseus now goes to the shard itself as soon as it is in view, matching it across the ground rather than by the guessed height
+- Attune steps attune: the converter kept no name for the aetheryte or shard, so every one of the path library's 319 attune steps finished in a frame without attuning anything — the Doman Enclave was never attuned, and its teleport was refused a quest later. They now walk to it (its spot from the city or zone map), interact until the game says it is attuned, and close the menu it opens. The path library is rebuilt as format 7 to carry the names
+- On the way through a quest, an aetheryte or shard within 35 yalms that is not attuned is attuned first, then the step carries on
+- "Attune this zone" — the gem button on the main window's icon row (also in the Flight window, which Quick access now opens): every aetheryte and shard in the zone you stand in that this character has not attuned, one after another; any it could not reach is named at the end
+- An aethernet hop to a shard in the same zone that is not attuned walks instead, and a path's teleport to an aetheryte this character has not attuned finds another way rather than being refused for thirteen seconds
+
+### Quests
+- A step that goes through a door into another zone is done when the character is already on the other side: Gosetsu and Tsuyu (3070) opens with Kugane's guard into the Ruby Bazaar offices, the quest before it ends inside them, and the aethernet hop asked for from the offices ended in Lifestream's "Destination could not be found"
+- Sniping sections (Securing the Saltery and 31 others, Stormblood onward) run instead of stopping with "Snipe is not implemented": Odysseus goes to the rifle, interacts with it, and the shots are skipped — CBT's "Sniper no sniping" is built in (ported, BSD-3-Clause), switched on for the section only, so CBT need not be installed. If a patch moves the game function it hooks, you are told once to take the shots yourself, and the run waits however long that takes
+
+### Materials
+- "Grab from FC" takes exactly what is short: a stack holding more is split through the game's own "how many?" prompt, so 6 Copper Ingot out of a stack of 99 brings 6 and leaves 93 in the chest for the other characters. It used to bring the whole stack
+
+### Beastmaster
+- The Wilds Call (5491) runs on its own: its "assign Cu Sith to the first battlehorn, summon, then talk to J'yhuh Tia" step was a manual one. Odysseus opens the Master's Bestiary (closing it again after), puts the pet on the battlehorn unless it is there already, summons it, and talks. Any step written "assign <pet> to <first|second|third> battlehorn" is read the same way
+
+### Tools
+- `/od battlehorn 1 Cu Sith` puts a Bestiary pet on a battlehorn (opening the Master's Bestiary if it is not up); `/od battlehorn` lists what is on each one
+<!-- LATEST-END -->
+
 ## v0.2.11 — 2026-09-27
 
 Hephaestus can do the crafting, quests that want HQ or melded items get them, and gather lists handle timed nodes.
@@ -32,7 +66,6 @@ Hephaestus can do the crafting, quests that want HQ or melded items get them, an
 
 ### Dialogue
 - An NPC's chat menu that the path names no answer for is no longer asked about forever: the first line is still tried once, and when the same menu comes back the last line ("Nothing.") ends the talk. Straight after a hand-in Severian answered Might Made Right (648) with his chat menu, and Odysseus asked "What do you do here?" every three seconds for minutes; now it leaves the conversation and asks him again, which is when he offers the quest
-<!-- LATEST-END -->
 
 ## v0.2.10 — 2026-09-27
 
