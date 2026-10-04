@@ -150,4 +150,36 @@ public class FlightTests
         Assert.Contains("story has not opened", _collector.StatusLine);
         Assert.DoesNotContain(_world.Calls, c => c.StartsWith("Move"));
     }
+
+    /// <summary>
+    /// The map shows what is still to get here: loose currents of this zone, and the givers of
+    /// current quests taken here; collected ones only when everything is asked for, ticked.
+    /// </summary>
+    [Fact]
+    public void Map_pins_are_what_is_still_to_get_here()
+    {
+        var quest = new AetherCurrent(6, 2001, null, null, Zone, new Vector3(5, 0, 5));
+        var elsewhere = new AetherCurrent(7, 2002, null, null, 132, new Vector3(1, 0, 1));
+        var zones = new[] { Coerthas(Loose, LooseToo, quest, elsewhere, Unrecorded) };
+        _state.Unlocked.Add(LooseToo.Id);
+
+        var pins = CurrentMapPins.For(zones, Zone, _state.IsUnlocked, showAll: false, q => $"Quest {q}", null);
+        Assert.Equal(2, pins.Count);
+        Assert.Contains(pins, p => p.CurrentId == Loose.Id && p.Icon == CurrentMapPins.CurrentIcon);
+        Assert.Contains(pins, p => p.CurrentId == 6 && p.Icon == CurrentMapPins.QuestIcon && p.Label == "Quest 2001");
+
+        var all = CurrentMapPins.For(zones, Zone, _state.IsUnlocked, showAll: true, q => $"Quest {q}", null);
+        Assert.Contains(all, p => p.CurrentId == LooseToo.Id && p.Collected && p.Icon == CurrentMapPins.CurrentIcon && p.Label == "collected");
+        Assert.DoesNotContain(all, p => p.CurrentId == 7);   // its giver stands in another zone
+    }
+
+    /// <summary>Flag nearest takes ground the story has opened before any it has not.</summary>
+    [Fact]
+    public void Flag_nearest_prefers_ground_the_story_has_opened()
+    {
+        var zones = new[] { Coerthas(Loose, LooseToo) };
+        var pins = CurrentMapPins.For(zones, Zone, _state.IsUnlocked, false, q => "", (_, at) => at.X > 20);
+        Assert.Equal(LooseToo.Id, CurrentMapPins.Nearest(pins, Vector3.Zero)!.CurrentId);   // Loose is nearer, but later
+        Assert.True(pins.Single(p => p.CurrentId == Loose.Id).Later);
+    }
 }

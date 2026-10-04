@@ -62,6 +62,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly Services.Flight.CurrentCollector _collector;
     private readonly Services.Travel.AttuneRunner _attuner;
     private readonly FlightWindow _flightWindow;
+    private readonly Services.Flight.AetherCurrentCatalog _currents;
+    private readonly Services.Flight.FlightState _flight;
+    private readonly Services.Flight.GameMapMarkers _mapMarkers;
     private readonly JournalWindow _journalWindow;
     private readonly System.Collections.Generic.Queue<byte> _tribeQueue = new();
     private System.DateTime _lastQueueNote;
@@ -360,14 +363,17 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             artisan, unlockPlanner, _deliveryRunner, deliveryRequests, _config, SaveConfig, gatherBuddy,
             scripShop, spending, _spender);
 
-        var currents = new Services.Flight.AetherCurrentCatalog(DataManager, _pathStore, message => Warn(message));
-        var flightState = new Services.Flight.FlightState(message => Warn(message));
+        var currents = _currents = new Services.Flight.AetherCurrentCatalog(DataManager, _pathStore, message => Warn(message));
+        var flightState = _flight = new Services.Flight.FlightState(message => Warn(message));
         _collector = new Services.Flight.CurrentCollector(_world, flightState,
             new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
         _attuner = new Services.Travel.AttuneRunner(_world,
             new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
+        _mapMarkers = new Services.Flight.GameMapMarkers(GameInterop,
+            territory => _config.CurrentsOnMap ? PinsFor(territory, _config.CollectedCurrentsOnMap) : [],
+            message => WriteOwn("INF", message));
         _flightWindow = new FlightWindow(currents, flightState, _collector, _priority, _catalog, unlockPlanner,
-            () => ClientState.TerritoryType, _attuner);
+            () => ClientState.TerritoryType, _attuner, _config, SaveConfig, FlagNearest);
         _controller.BetweenQuests = () => CurrentsBetweenQuests(currents, flightState, unlockPlanner);
         // The story moving is an MSQ quest completing: then whatever was set aside gets another try.
         // (Read off the scenario guide, a side quest finishing had counted, and Closing Up Shop was
@@ -565,6 +571,25 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         return near.Any(q => _quests.IsComplete(q) || q == current);
     }
 
+    private System.Collections.Generic.IReadOnlyList<Services.Flight.MapPin> PinsFor(uint territory, bool showAll)
+        => Services.Flight.CurrentMapPins.For(_currents.Zones, territory, _flight.IsUnlocked, showAll,
+            id => _catalog.NameOf(id), StoryHasBeen);
+
+    /// <summary>Flight window's "Flag nearest": the map flag on the nearest current still to get, map opened.</summary>
+    private string FlagNearest(Services.Flight.ZoneFlight zone)
+    {
+        var here = zone.TerritoryId == ClientState.TerritoryType;
+        var me = ObjectTable.LocalPlayer?.Position ?? System.Numerics.Vector3.Zero;
+        var pin = Services.Flight.CurrentMapPins.Nearest(PinsFor(zone.TerritoryId, showAll: false), me);
+        if (pin is null)
+            return $"{zone.Name}: nothing still to get on this map (a current quest's giver may stand in another zone).";
+        var mapId = DataManager.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(zone.TerritoryId)?.Map.RowId ?? 0;
+        Services.Flight.GameMapMarkers.Flag(zone.TerritoryId, mapId, pin.At, zone.Name);
+        var what = pin.Icon == Services.Flight.CurrentMapPins.QuestIcon ? $"the giver of {pin.Label}" : "an aether current";
+        var far = here ? $", {System.Numerics.Vector3.Distance(me, pin.At):F0} y away" : "";
+        return $"{zone.Name}: flag on {what}{far}" + (pin.Later ? " — on ground the story has not opened yet." : ".");
+    }
+
     /// <summary>Zones whose loose aether currents were collected (or tried) this session.</summary>
     private readonly HashSet<uint> _currentZonesDone = [];
 
@@ -638,6 +663,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     {
         try { Service.ChatGui.ChatMessage -= OnChatMessage; } catch { }
         _clickRecorder?.Dispose();
+        try { _mapMarkers.Dispose(); } catch { }
         _world.Snipe?.Dispose();
         _ownLog?.Dispose();
         CommandManager.RemoveHandler(CommandMain);

@@ -10,9 +10,12 @@ namespace Odysseus.Services.Flight;
 
 /// <summary>One aether current, and how it is obtained.</summary>
 /// <param name="QuestId">The quest that grants it, or 0 when it is a pickup out in the world.</param>
-/// <param name="Position">Where the pickup is, when a path recorded it.</param>
-/// <param name="DataId">The pickup's own object, from the same path step — what the attune presses.</param>
-public sealed record AetherCurrent(uint Id, ushort QuestId, Vector3? Position, uint? DataId = null)
+/// <param name="Position">Where the pickup is: a path's step to it, else the zone's layout.</param>
+/// <param name="DataId">The pickup's own object — what the attune presses.</param>
+/// <param name="GiverTerritory">For a quest current: the zone its quest is taken in (0 when unknown).</param>
+/// <param name="GiverAt">For a quest current: where its quest is taken.</param>
+public sealed record AetherCurrent(uint Id, ushort QuestId, Vector3? Position, uint? DataId = null,
+    uint GiverTerritory = 0, Vector3? GiverAt = null)
 {
     public bool FromQuest => QuestId != 0;
     /// <summary>A pickup we know how to walk to.</summary>
@@ -38,10 +41,11 @@ public sealed record ZoneFlight(uint TerritoryId, string Name, IReadOnlyList<Aet
 /// </para>
 ///
 /// <para>
-/// Positions for the loose ones are harvested from the converted paths: every
-/// <c>AttuneAetherCurrent</c> step carries both an id and a position, so the corpus already knows
-/// where they are without a table of our own. Anything no path has visited is listed without a
-/// position and has to be collected by hand.
+/// Positions for the loose ones are harvested from the converted paths first: every
+/// <c>AttuneAetherCurrent</c> step carries both an id and a position the path has stood at. The
+/// rest come from the zone's own layout (<c>planevent.lgb</c>), which places every current object —
+/// an <c>EObj</c> whose <c>Data</c> is the current. Between them every loose current is placed.
+/// A quest current's spot is its quest's giver (<c>Quest.IssuerLocation</c>).
 /// </para>
 /// </summary>
 public sealed class AetherCurrentCatalog
@@ -53,6 +57,7 @@ public sealed class AetherCurrentCatalog
         try
         {
             var positions = HarvestPositions(paths);
+            var laid = LayoutPositions(data);
 
             foreach (var set in data.GetExcelSheet<AetherCurrentCompFlgSet>())
             {
@@ -69,7 +74,13 @@ public sealed class AetherCurrentCatalog
                         ? (ushort)(questRow - Quest.QuestCatalog.RowIdBase)
                         : (ushort)0;
                     var seen = positions.TryGetValue(id, out var where) ? where : default;
-                    currents.Add(new AetherCurrent(id, questId, seen.Position, seen.DataId));
+                    if (seen.Position is null && laid.TryGetValue(id, out var placed))
+                        seen = (placed.Position, placed.DataId);
+                    var giver = slot.ValueNullable?.Quest.ValueNullable?.IssuerLocation.ValueNullable;
+                    currents.Add(questId == 0
+                        ? new AetherCurrent(id, questId, seen.Position, seen.DataId)
+                        : new AetherCurrent(id, questId, seen.Position, seen.DataId,
+                            giver?.Territory.RowId ?? 0, giver is { } g ? new Vector3(g.X, g.Y, g.Z) : null));
                 }
                 if (currents.Count == 0) continue;
 
@@ -93,6 +104,35 @@ public sealed class AetherCurrentCatalog
     /// <summary>Every zone, with the unlocked count filled in for this character.</summary>
     public IReadOnlyList<ZoneFlight> Progress(Func<uint, bool> unlocked)
         => _zones.Select(z => z with { Unlocked = z.Currents.Count(c => unlocked(c.Id)) }).ToList();
+
+    /// <summary>
+    /// Where every current object stands, read from each zone's event layout: an event object whose
+    /// <c>EObj.Data</c> is an aether current. Covers the ones no path walks to.
+    /// </summary>
+    private static Dictionary<uint, (Vector3 Position, uint DataId)> LayoutPositions(IDataManager data)
+    {
+        var found = new Dictionary<uint, (Vector3 Position, uint DataId)>();
+        var currentIds = data.GetExcelSheet<Lumina.Excel.Sheets.AetherCurrent>().Select(r => r.RowId).ToHashSet();
+        var objects = data.GetExcelSheet<EObj>().Where(e => currentIds.Contains(e.Data.RowId))
+            .ToDictionary(e => e.RowId, e => e.Data.RowId);
+        foreach (var set in data.GetExcelSheet<AetherCurrentCompFlgSet>())
+        {
+            var bg = set.Territory.ValueNullable?.Bg.ExtractText() ?? string.Empty;
+            var level = bg.IndexOf("/level/", StringComparison.Ordinal);
+            if (level < 0) continue;
+            var layout = data.GetFile<Lumina.Data.Files.LgbFile>($"bg/{bg[..level]}/level/planevent.lgb");
+            if (layout is null) continue;
+            foreach (var layer in layout.Layers)
+                foreach (var instance in layer.InstanceObjects)
+                    if (instance.Object is Lumina.Data.Parsing.Layer.LayerCommon.EventInstanceObject eventObject
+                        && objects.TryGetValue(eventObject.ParentData.BaseId, out var current))
+                    {
+                        var t = instance.Transform.Translation;
+                        found.TryAdd(current, (new Vector3(t.X, t.Y, t.Z), eventObject.ParentData.BaseId));
+                    }
+        }
+        return found;
+    }
 
     /// <summary>
     /// Where the loose currents are, taken from every converted path. A current can appear in more

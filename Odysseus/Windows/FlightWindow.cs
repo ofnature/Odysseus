@@ -37,11 +37,19 @@ public sealed class FlightWindow : OdysseusWindow
     private int _attuneMissing = -1;
     private DateTime _attuneCountedAt;
 
+    private readonly Config.OdysseusConfig _config;
+    private readonly Action _save;
+    private readonly Func<ZoneFlight, string> _flagNearest;
+
     public FlightWindow(AetherCurrentCatalog catalog, IFlightState state, CurrentCollector collector,
         PriorityList priority, QuestCatalog quests, UnlockPlanner unlock, Func<uint> territory,
-        Services.Travel.AttuneRunner attuner)
+        Services.Travel.AttuneRunner attuner, Config.OdysseusConfig config, Action save,
+        Func<ZoneFlight, string> flagNearest)
         : base("Odysseus Flight##OdysseusFlight")
     {
+        _config = config;
+        _save = save;
+        _flagNearest = flagNearest;
         _attuner = attuner;
         _catalog = catalog;
         _state = state;
@@ -64,6 +72,30 @@ public sealed class FlightWindow : OdysseusWindow
         OdysseusTheme.IdChip($"Flying in {flyable}/{zones.Count} zones");
         ImGui.SameLine(0f, 8f);
         ImGui.Checkbox("Hide finished", ref _hideFlyable);
+
+        ImGui.SameLine(0f, 8f);
+        var onMap = _config.CurrentsOnMap;
+        if (ImGui.Checkbox("Show on map", ref onMap))
+        {
+            _config.CurrentsOnMap = onMap;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Mark the aether currents still to get on the map and minimap, and the givers of\n" +
+                             "current quests taken in that zone. Ones on ground the story has not\n" +
+                             "opened yet are labelled \"later\". Takes effect the next time the map opens.");
+        if (onMap)
+        {
+            ImGui.SameLine(0f, 8f);
+            var all = _config.CollectedCurrentsOnMap;
+            if (ImGui.Checkbox("Collected too", ref all))
+            {
+                _config.CollectedCurrentsOnMap = all;
+                _save();
+            }
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Every current, held or not (held ones ticked), in zones you already fly in too.");
+        }
 
         // Aetherytes and shards: attune what this zone still lacks. Counted once a second — it
         // reads the game's unlock state for every one in the zone.
@@ -129,8 +161,8 @@ public sealed class FlightWindow : OdysseusWindow
         OdysseusTheme.TextWrappedColored(OdysseusTheme.TextDisabled,
             "Flight needs every current in a zone. The quest half is mostly side quests, so the MSQ alone " +
             "leaves zones grounded — Queue puts those chains on the priority list. Collect walks to the loose " +
-            "ones, and only works in the zone you are standing in. Positions come from the converted paths, so " +
-            "a current no path ever visited is counted but cannot be walked to.");
+            "ones, and only works in the zone you are standing in. Positions come from the converted paths and " +
+            "the zone's own layout.");
     }
 
     private void DrawZone(ZoneFlight zone, uint here)
@@ -207,5 +239,12 @@ public sealed class FlightWindow : OdysseusWindow
                     _status = _collector.StatusLine;
             }
         }
+
+        ImGui.SameLine();
+        if (OdysseusTheme.IconTextButton(FontAwesomeIcon.MapMarkerAlt, $"Flag nearest##f{zone.TerritoryId}",
+                OdysseusTheme.NeutralDark,
+                "Put the map flag on the nearest current still to get (or its quest's giver), and open the map on it.",
+                new Vector2(116, 22)))
+            _status = _flagNearest(zone);
     }
 }

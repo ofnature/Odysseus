@@ -44,6 +44,12 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// </summary>
     public bool AutoAetherCurrents { get; set; }
 
+    /// <summary>Flight window: the zone's aether currents still to get, and their quests' givers, on the map and minimap.</summary>
+    public bool CurrentsOnMap { get; set; }
+
+    /// <summary>With <see cref="CurrentsOnMap"/>: the ones already held as well, ticked — flying zones included.</summary>
+    public bool CollectedCurrentsOnMap { get; set; }
+
     /// <summary>
     /// Stop when the character reaches this level. 0 = no level stop. Useful for keeping an alt
     /// under a duty's sync level, or parking a trial account before its cap.
