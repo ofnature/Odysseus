@@ -1,7 +1,7 @@
 # Changelog
 
 <!-- LATEST-START -->
-## v0.2.13 — unreleased
+## v0.2.13 — 2026-10-04
 
 ### Getting there
 - Kholusia is reached from the Crystarium on the aspiring amaro tamer at the Amaro Launch ("Travel to Kholusia?"), the only way in before Kholusia's aetherytes are attuned: A Still Tide (3283) had faulted "no aetheryte there" from the Crystarium. A ride's plain "Travel to <zone>?" question is answered like a warp's. When several doors lead into a zone, the one in a zone Odysseus can reach is taken (from the Ocular it had picked one in a zone a new character cannot reach), and a door across a city is reached by its aethernet — the Amaro Launch shard, not a walk from the aetheryte plaza
