@@ -3347,6 +3347,17 @@ public sealed class StepExecutor
         if (_world.IsOccupied || !_world.IsReady)
             return;   // the question, or the loading screen
 
+        // A zone line has nothing to press: walk into it until the zone changes.
+        if (door.DataId == 0)
+        {
+            if (now - _lastDoorMove > TimeSpan.FromSeconds(2) && !_world.IsMoving)
+            {
+                _lastDoorMove = now;
+                _world.MoveTo(door.At, false);
+            }
+            return;
+        }
+
         if (Vector3.Distance(_world.PlayerPosition, door.At) > DoorReach)
         {
             if (now - _lastDoorMove > TimeSpan.FromSeconds(2) && !_world.IsMoving)

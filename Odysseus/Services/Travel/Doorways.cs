@@ -14,6 +14,7 @@ namespace Odysseus.Services.Travel;
 /// </summary>
 public sealed class Doorways
 {
+    /// <param name="DataId">What to interact with; 0 for a zone line, walked into rather than pressed.</param>
     public sealed record Door(uint From, uint Into, uint DataId, Vector3 At);
 
     /// <summary>
@@ -25,6 +26,10 @@ public sealed class Doorways
     private static readonly Door[] Rides =
     [
         new(819, 814, 1029806, new Vector3(62.39f, 36.25f, -169.39f)),
+        // Kholusia's zone line into Eulmore's Gatetown (planmap exit range). Every path into Eulmore
+        // teleports to its aetheryte, which will not attune early in Shadowbringers, so the library
+        // knows no way in; a character that had left for Kholusia's currents could not get back.
+        new(814, 820, 0, new Vector3(174.0f, 356.2f, 891.4f)),
     ];
 
     private readonly Func<IEnumerable<QuestPath>> _paths;

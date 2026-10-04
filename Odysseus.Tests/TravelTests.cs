@@ -1011,6 +1011,36 @@ public class StepDismountTests
         Assert.DoesNotContain(w.Calls, c => c.StartsWith("Teleport"));
     }
 
+    /// <summary>
+    /// Eulmore early in Shadowbringers: its aetheryte will not attune, and every path in teleports
+    /// there. The way back from Kholusia is its zone line into the Gatetown — walked into, nothing
+    /// to press.
+    /// </summary>
+    [Fact]
+    public void A_zone_line_door_is_walked_into()
+    {
+        var w = new FakeStepWorld { TerritoryId = 814, ArriveOnMove = true, CanMountHere = false };
+        w.PlayerPosition = new Vector3(170, 356, 870);
+        w.Spawned.Add(1027000);
+        w.Doors[820] = [new Odysseus.Services.Travel.Doorways.Door(814, 820, 0, new Vector3(174f, 356.2f, 891.4f))];
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 1027000, TerritoryId = 820, Position = new Vector3(1, -12, -150) });
+
+        for (var i = 0; i < 120 && ex.Status == StepStatus.Running; i++)
+        {
+            ex.Tick(); w.Advance(0.5);
+            if (w.TerritoryId == 814 && Vector3.Distance(w.PlayerPosition, new Vector3(174f, 356.2f, 891.4f)) < 1f)
+            {
+                w.TerritoryId = 820;
+                w.PlayerPosition = new Vector3(0, -12, -160);
+            }
+        }
+        Assert.Equal(820u, w.TerritoryId);
+        Assert.Contains("Interact 1027000", w.Calls);
+        Assert.DoesNotContain("Interact 0", w.Calls);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Teleport"));
+    }
+
     [Fact]
     public void Starting_elsewhere_teleports_to_the_doors_zone_first()
     {

@@ -65,6 +65,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly Services.Flight.AetherCurrentCatalog _currents;
     private readonly Services.Flight.FlightState _flight;
     private readonly Services.Flight.GameMapMarkers _mapMarkers;
+    private readonly Services.Travel.AetheryteCatalog _aetherytes;
+    private uint _heldForStory;
     private readonly JournalWindow _journalWindow;
     private readonly System.Collections.Generic.Queue<byte> _tribeQueue = new();
     private System.DateTime _lastQueueNote;
@@ -133,7 +135,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 Services.Paths.PathPack.AssetFolder, "PathFixes"),
             _config.PathEditsDirectory);
 
-        var aetherytes = new Services.Travel.AetheryteCatalog(DataManager, message => Warn(message));
+        var aetherytes = _aetherytes = new Services.Travel.AetheryteCatalog(DataManager, message => Warn(message));
         var duties = new DutyCatalog(DataManager, message => Warn(message));
         // Built here rather than with the rest of the delivery services: the step world buys through
         // the shop half for PurchaseItem steps and hands Craft/Gather steps to the same Artisan and
@@ -606,6 +608,24 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         if (!_collector.IsFinished)
             return true;
 
+        // Eulmore early in Shadowbringers: the story goes on here, and its aetheryte will not attune
+        // yet. Leave for a current and the only way back is the walk — a roommate's character left
+        // after every MSQ quest and faulted, unable to get back. So nothing leaves: the current
+        // quests this setting queued come off the list (queued again once the story moves on).
+        var here = ClientState.TerritoryType;
+        if (StoryHoldsHere(here))
+        {
+            foreach (var id in _autoQueuedCurrents.Where(_priority.Contains).ToList())
+                _priority.Remove(id);
+            if (_heldForStory != here)
+            {
+                _heldForStory = here;
+                Say($"{DataManager.GetExcelSheet<Lumina.Excel.Sheets.TerritoryType>().GetRowOrDefault(here)?.PlaceName.ValueNullable?.Name.ExtractText() ?? $"Territory {here}"}: the story goes on here and there is no aetheryte to teleport back to, so aether currents wait.");
+            }
+            return false;
+        }
+        _heldForStory = 0;
+
         // Current quests already in the journal, wherever they are: the story's own paths pick them up
         // as they pass the giver (City of Final Pleasures takes A Plankless Task and Village of Woe in
         // Kholusia) and never come back for them. Queued here, the priority list runs them — travel
@@ -620,7 +640,6 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 Say($"{held.Zone.Name}: queued {_catalog.NameOf(held.Current.QuestId)} (in your journal) for its aether current.");
         }
 
-        var here = ClientState.TerritoryType;
         if (currents.ForTerritory(here) is not { } zone)
             return false;
         var missing = zone.Missing(flight.IsUnlocked).ToList();
@@ -644,6 +663,23 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             return false;
         Say($"{zone.Name}: collecting its loose aether currents before the next quest.");
         return _collector.Start(zone);
+    }
+
+    /// <summary>
+    /// The story's next step is in this zone, and no aetheryte in it is one this character can
+    /// teleport to: leaving would strand the story behind a walk.
+    /// </summary>
+    private bool StoryHoldsHere(uint here)
+        => StoryTerritoryNext() == here && !_aetherytes.InTerritory(here).Any(_world.IsAttuned);
+
+    /// <summary>Where the story goes next: the zone of the scenario quest's next step (its first, when not taken).</summary>
+    private uint? StoryTerritoryNext()
+    {
+        if (_quests.CurrentScenarioQuest() is not { } id || _pathStore.ForQuest(id) is not { } path)
+            return null;
+        var sequence = _quests.IsAccepted(id) ? _quests.Read(id).Sequence : (byte)0;
+        var steps = (path.Sequences.FirstOrDefault(s => s.Sequence == sequence) ?? path.Sequences.FirstOrDefault())?.Steps;
+        return steps?.FirstOrDefault(st => st.TerritoryId != 0)?.TerritoryId;
     }
 
     /// <summary>Chat the run listens for — today only the aetheryte's "special permission is required".</summary>
