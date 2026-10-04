@@ -1,6 +1,15 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.14 — 2026-10-04
+
+### Aether currents
+- Flight window → "Show on map": the aether currents still to get go on the map (a whirlwind) — whichever zone's map you look at — and on the minimap, and so do the givers of the current quests taken there (the quest's "!", named). Ones on ground the story has not opened yet are labelled "later". "Collected too" shows every current, held or not (held currents labelled "collected", done quests ticked), in zones you already fly in as well
+- "Flag nearest" on each zone's row puts the map flag on the nearest current still to get (or its quest's giver), ground the story has opened first, and opens the map on it
+- Every loose current now has a spot: the ones no quest path walks to are read from the zone's own layout, so Collect reaches all of them and "no path recorded where" is gone (152 of 152 placed)
+
+<!-- LATEST-END -->
+
 ## v0.2.13 — 2026-10-04
 
 ### Getting there
@@ -24,7 +33,6 @@
 ### Paths
 - Hand fixes to quest paths now ship: they live in the plugin's Assets/PathFixes and are laid over the shipped library and any import, on every install. First one: A Taste of Honey (3288), up Eulmore's spiral staircase on the mesh instead of the old no-mesh steps
 - Settings → Paths → "Save path edits to": a central fixes folder. Path Editor saves go there, and every install pointed at it runs those fixes after a reload
-<!-- LATEST-END -->
 
 ## v0.2.12 — 2026-09-30
 
