@@ -1,6 +1,16 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.15 — 2026-10-04
+
+### Aether currents
+- "Pick up aether currents while doing the story" no longer leaves a zone the story goes on in when there is no aetheryte there to teleport back to — Eulmore early in Shadowbringers, whose aetheryte will not attune yet. A character had left after every MSQ quest for Kholusia's current quests and faulted, unable to get back. The currents wait (said once) and are queued again once the story moves on
+
+### Getting there
+- Back into Eulmore without its aetheryte: from Kholusia, Odysseus walks in through the zone line into the Gatetown instead of faulting "no aetheryte there that you have attuned". Every path into Eulmore teleports to its aetheryte, so the library knew no other way in; a door can now be a zone line walked into as well as something to interact with
+
+<!-- LATEST-END -->
+
 ## v0.2.14 — 2026-10-04
 
 ### Aether currents
@@ -8,7 +18,6 @@
 - "Flag nearest" on each zone's row puts the map flag on the nearest current still to get (or its quest's giver), ground the story has opened first, and opens the map on it
 - Every loose current now has a spot: the ones no quest path walks to are read from the zone's own layout, so Collect reaches all of them and "no path recorded where" is gone (152 of 152 placed)
 
-<!-- LATEST-END -->
 
 ## v0.2.13 — 2026-10-04
 
