@@ -99,6 +99,23 @@ public sealed class QuestController
     /// </summary>
     public Func<ushort?>? StoryCurrent { get; set; }
 
+    /// <summary>
+    /// Something to do at a quest boundary before the next quest is chosen — collecting a zone's
+    /// aether currents. True while it is still doing it; the run waits, then rolls on. Set by the
+    /// plugin; null does nothing.
+    /// </summary>
+    public Func<bool>? BetweenQuests { get; set; }
+
+    /// <summary>
+    /// A priority quest failed: true sets it aside and the run goes on (the list without it, else the
+    /// story) instead of faulting. For the quests the plugin queued itself — an aether current quest
+    /// whose area the story has not opened yet. Null, or false: fault as ever.
+    /// </summary>
+    public Func<ushort, string, bool>? SetAside { get; set; }
+
+    /// <summary>A quest finished and the roll-on is waiting on <see cref="BetweenQuests"/>.</summary>
+    private ushort? _pendingRollOn;
+
     /// <summary>The running quest came from the priority list, not the story.</summary>
     private bool _runningPriority;
 
@@ -439,6 +456,7 @@ public sealed class QuestController
     {
         _singleStep = null;
         _awaitingResumeConfirm = false;
+        _pendingRollOn = null;
         PauseAfterStep = false;
         if (_executor.Status == StepStatus.Running && _executor.Current is { } running && _block is not null)
             LogStep(running, "Cancelled", null);
@@ -505,12 +523,33 @@ public sealed class QuestController
 
     private void TickInner()
     {
+        if (_pendingRollOn is { } finished)
+        {
+            if (BetweenQuests?.Invoke() == true)
+            {
+                State = RunState.Advance;
+                StatusLine = "Between quests — picking up this zone's aether currents.";
+                return;
+            }
+            _pendingRollOn = null;
+            RollOn(finished);
+            return;
+        }
+
         if (_quests.IsComplete(_questId))
         {
             _log($"Quest {_questId} ({_path!.Name}) complete.");
             var id = _questId;
             _questsThisRun++;
             QuestCompleted?.Invoke(id);
+            // Only when the run is going on: a stop asked for (Stop after, one quest at a time, the
+            // level stop) is the stop, not a detour first — Stop after was armed, and the run went
+            // collecting Lakeland's currents instead of stopping.
+            if (BetweenQuests is not null && GoesOn)
+            {
+                _pendingRollOn = id;   // asked next tick, then rolled on
+                return;
+            }
             RollOn(id);
             return;
         }
@@ -762,6 +801,10 @@ public sealed class QuestController
         return best;
     }
 
+    /// <summary>The run carries on past this quest: nothing asked it to stop here.</summary>
+    private bool GoesOn => !StopAfterQuest && _policy.ContinueToNextQuest
+                           && !(_policy.StopAtLevel > 0 && _world.PlayerLevel >= _policy.StopAtLevel);
+
     private void RollOn(ushort completed)
     {
         var elapsed = _world.UtcNow - _runStarted;
@@ -936,6 +979,15 @@ public sealed class QuestController
 
     private void Fault(string reason)
     {
+        if (_runningPriority && State != RunState.Idle && SetAside?.Invoke(_questId, reason) == true)
+        {
+            _executor.Cancel();
+            _world.StopMoving();
+            _world.ReleaseDialogue();
+            _log($"Setting priority quest {_questId} aside — {reason}. Going on without it.");
+            RollOn(_questId);   // the rest of the list, else the story
+            return;
+        }
         _executor.Cancel();
         _world.StopMoving();
         _world.ReleaseDialogue();

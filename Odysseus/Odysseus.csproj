@@ -28,6 +28,10 @@
     <Content Include="Assets\paths.pak" Condition="Exists('Assets\paths.pak')">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+    <!-- Hand fixes to quests the converted data gets wrong: laid over the library on every install. -->
+    <Content Include="Assets\PathFixes\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <!--

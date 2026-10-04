@@ -1,3 +1,4 @@
+using System.Numerics;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,6 +44,9 @@ public sealed class CurrentCollector
     private Queue<AetherCurrent> _queue = new();
     private AetherCurrent? _current;
     private List<uint> _unknown = [];
+    /// <summary>Currents that would not attune or could not be reached; named at the end, the rest still collected.</summary>
+    private readonly List<string> _missed = [];
+    private int _later;
     private int _collected;
     private uint _territory;
 
@@ -53,6 +57,13 @@ public sealed class CurrentCollector
         _executor = executor;
         _log = log;
     }
+
+    /// <summary>
+    /// Whether the story has taken this character near a spot yet (territory, position). Shadowbringers
+    /// zones are split into a side the story opens early and one it opens late; a current on the late
+    /// side cannot be reached, and every one tried cost three failed paths. Null: try them all.
+    /// </summary>
+    public Func<uint, Vector3, bool>? StoryHasBeen { get; set; }
 
     public CollectState State { get; private set; } = CollectState.Idle;
     public string StatusLine { get; private set; } = string.Empty;
@@ -73,13 +84,19 @@ public sealed class CurrentCollector
 
         var missing = zone.Currents.Where(c => !c.FromQuest && !_state.IsUnlocked(c.Id)).ToList();
         _unknown = missing.Where(c => c.Position is null).Select(c => c.Id).ToList();
-        var reachable = missing.Where(c => c.Position is not null).ToList();
+        _missed.Clear();
+        var placed = missing.Where(c => c.Position is not null).ToList();
+        var later = placed.Where(c => StoryHasBeen?.Invoke(zone.TerritoryId, c.Position!.Value) == false).ToList();
+        var reachable = placed.Except(later).ToList();
+        _later = later.Count;
 
         if (reachable.Count == 0)
         {
-            StatusLine = _unknown.Count > 0
-                ? $"{_unknown.Count} current(s) left in {zone.Name}, but no path ever recorded where they are."
-                : $"Nothing loose left to collect in {zone.Name}.";
+            StatusLine = later.Count > 0
+                ? $"{later.Count} current(s) left in {zone.Name}, on ground the story has not opened yet."
+                : _unknown.Count > 0
+                    ? $"{_unknown.Count} current(s) left in {zone.Name}, but no path ever recorded where they are."
+                    : $"Nothing loose left to collect in {zone.Name}.";
             return false;
         }
 
@@ -89,7 +106,8 @@ public sealed class CurrentCollector
         Target = reachable.Count;
         _territory = zone.TerritoryId;
         State = CollectState.Collecting;
-        _log($"{zone.Name}: collecting {Target} aether current(s).");
+        _log($"{zone.Name}: collecting {Target} aether current(s)"
+             + (later.Count > 0 ? $"; {later.Count} more are on ground the story has not opened yet." : "."));
         return true;
     }
 
@@ -137,15 +155,22 @@ public sealed class CurrentCollector
 
             StatusLine = $"Collecting current {_collected + 1}/{Target}";
             var status = _executor.Tick();
+            // One that will not come is noted and passed: the rest are still worth the trip.
             if (status == StepStatus.Failed)
             {
-                Block($"Could not reach current {running.Id} — {_executor.FailReason}. " +
-                      $"{_collected} of {Target} collected.");
+                _missed.Add($"{running.Id} (could not reach: {_executor.FailReason})");
+                _log($"Current {running.Id}: could not reach it — {_executor.FailReason}. Going on to the next.");
+                _executor.Cancel();
+                _current = null;
                 return;
             }
             if (status == StepStatus.Done && !_state.IsUnlocked(running.Id))
             {
-                Block($"Reached current {running.Id} but it did not attune. {_collected} of {Target} collected.");
+                _missed.Add($"{running.Id} (reached, did not attune)");
+                _log($"Current {running.Id}: reached but it did not attune. Going on to the next.");
+                _executor.Cancel();
+                _current = null;
+                return;
                 return;
             }
             return;
@@ -161,9 +186,10 @@ public sealed class CurrentCollector
         if (_queue.Count == 0)
         {
             State = CollectState.Done;
-            StatusLine = _unknown.Count > 0
-                ? $"Collected {_collected}. {_unknown.Count} more exist but no path recorded where."
-                : $"Collected {_collected} aether current(s).";
+            StatusLine = $"Collected {_collected} of {Target} aether current(s)."
+                + (_missed.Count > 0 ? $" Missed: {string.Join("; ", _missed)}." : "")
+                + (_later > 0 ? $" {_later} left for later — the story has not opened that ground." : "")
+                + (_unknown.Count > 0 ? $" {_unknown.Count} more exist but no path recorded where." : "");
             _log(StatusLine);
             return;
         }
@@ -174,6 +200,7 @@ public sealed class CurrentCollector
             Kind = StepKind.AttuneAetherCurrent,
             KindName = nameof(StepKind.AttuneAetherCurrent),
             Position = _current.Position,
+            DataId = _current.DataId,
             TerritoryId = _territory,
             AetherCurrentId = _current.Id,
             Fly = true,

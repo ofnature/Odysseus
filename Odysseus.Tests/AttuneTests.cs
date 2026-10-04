@@ -175,6 +175,161 @@ public class AttuneTests
         Assert.Contains(w.Calls, c => c.StartsWith("Move -54,-37,-241"));
     }
 
+    /// <summary>
+    /// A hunt mark wandered into the attune (Maultasche, A Still Tide): the attune kept walking to the
+    /// aetheryte through the fight and ran its 90 seconds. Held instead, then attuned after.
+    /// </summary>
+    [Fact]
+    public void A_fight_during_an_attune_is_waited_out()
+    {
+        var w = new FakeStepWorld { TerritoryId = 814, ArriveOnMove = true, InCombat = true };
+        w.PlayerPosition = new Vector3(30, 0, -10);
+        w.Attunables[Enclave] = ("Wright", new Vector3(42, 0, -15));
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.AttuneAetheryte, KindName = "AttuneAetheryte", TerritoryId = 814, AttuneName = "Wright" });
+
+        Ticks(ex, w, 400);   // over three minutes of fighting
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.DoesNotContain("InteractAetheryte", w.Calls);
+
+        w.InCombat = false;
+        Ticks(ex, w, 60);
+        Assert.Equal(StepStatus.Done, ex.Status);
+        Assert.Contains(Enclave, w.AttunedIds);
+    }
+
+    /// <summary>Eulmore: the shard beside you first, not the aetheryte up the stairs that came first in the catalog.</summary>
+    [Fact]
+    public void The_button_takes_the_nearest_first()
+    {
+        var w = new FakeStepWorld { TerritoryId = 820, ArriveOnMove = true };
+        w.PlayerPosition = new Vector3(10, 40, 10);
+        w.Attunables[134] = ("Eulmore", new Vector3(0, 82, 1));
+        w.Attunables[157] = ("The Mainstay", new Vector3(12, 40, 14));
+        var runner = new AttuneRunner(w, new StepExecutor(w), _ => { });
+
+        Assert.True(runner.Start());
+        for (var i = 0; i < 200 && !w.AttunedIds.Contains(157u) && !w.AttunedIds.Contains(134u); i++) { runner.Tick(); w.Advance(0.5); }
+        Assert.Contains(157u, w.AttunedIds);
+        Assert.DoesNotContain(134u, w.AttunedIds);
+    }
+
+    /// <summary>
+    /// newtoon2 on Eulmore's bottom floor: the aetheryte, three floors up but near the middle across the
+    /// ground, came out "nearest" and was climbed to first. Shards first, the aetheryte last.
+    /// </summary>
+    [Fact]
+    public void Shards_come_before_the_zones_aetheryte()
+    {
+        var w = new FakeStepWorld { TerritoryId = 820, ArriveOnMove = true };
+        w.PlayerPosition = new Vector3(5, 0, 5);
+        w.Attunables[134] = ("Eulmore", new Vector3(0, 82, 1));
+        w.Attunables[135] = ("Southeast Derelicts", new Vector3(60, 0, 60));
+        w.ShardIds.Add(135);
+        var runner = new AttuneRunner(w, new StepExecutor(w), _ => { });
+
+        Assert.True(runner.Start());
+        for (var i = 0; i < 200 && !w.AttunedIds.Contains(135u) && !w.AttunedIds.Contains(134u); i++) { runner.Tick(); w.Advance(0.5); }
+        Assert.Contains(135u, w.AttunedIds);
+        Assert.DoesNotContain(134u, w.AttunedIds);
+    }
+
+    /// <summary>
+    /// Eulmore's stairs wind away from a shard before reaching it: walking the whole time, the straight-
+    /// line distance did not drop, and two reachable shards were given up on newtoon2 — and remembered,
+    /// so the button called the zone done. Walking is progress; an unreachable one is not remembered.
+    /// </summary>
+    [Fact]
+    public void Walking_the_long_way_round_is_not_giving_up()
+    {
+        var w = new FakeStepWorld { TerritoryId = 820 };
+        w.PlayerPosition = new Vector3(0, 0, 0);
+        w.Attunables[135] = ("Southeast Derelicts", new Vector3(20, 0, 20));
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.AttuneAethernetShard, KindName = "AttuneAethernetShard", TerritoryId = 820, AttuneId = 135 });
+        for (var i = 0; i < 60; i++)   // thirty seconds walking a circle round it, never nearer
+        {
+            ex.Tick(); w.Advance(0.5);
+            var a = i * 0.2f;
+            w.PlayerPosition = new Vector3(20 - 28.3f * MathF.Cos(a), 0, 20 - 28.3f * MathF.Sin(a));
+        }
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.DoesNotContain(135u, w.RefusedAttunes);
+    }
+
+    /// <summary>The game says why on the first press — "special permission is required" — and that is the refusal.</summary>
+    [Fact]
+    public void The_games_refusal_message_ends_the_attune_at_once()
+    {
+        var w = new FakeStepWorld { TerritoryId = 820, ArriveOnMove = true, InteractAttunes = false };
+        w.PlayerPosition = new Vector3(1, 82, 3);
+        w.Attunables[134] = ("Eulmore", new Vector3(0, 82, 1));
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.AttuneAetheryte, KindName = "AttuneAetheryte", TerritoryId = 820, AttuneId = 134 });
+        for (var i = 0; i < 40 && !w.Calls.Contains("InteractAetheryte"); i++) { ex.Tick(); w.Advance(0.5); }
+        w.LastAttuneRefusal = w.UtcNow;   // the game's reply to that first press
+        ex.Tick(); w.Advance(0.5); ex.Tick();
+
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.Single(w.Calls, c => c == "InteractAetheryte");
+        Assert.Contains(134u, w.RefusedAttunes);
+    }
+
+    /// <summary>Somewhere the story has not opened: no closer in twenty seconds is said, not paced for ninety.</summary>
+    [Fact]
+    public void An_attune_that_gets_no_closer_gives_up_early()
+    {
+        var w = new FakeStepWorld { TerritoryId = 820 };
+        w.PlayerPosition = new Vector3(10, 40, 10);
+        w.Attunables[134] = ("Eulmore", new Vector3(0, 82, 1));
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.AttuneAetheryte, KindName = "AttuneAetheryte", TerritoryId = 820, AttuneId = 134 });
+        Ticks(ex, w, 60);   // thirty seconds
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.Contains("cannot get to Eulmore", ex.FailReason);
+    }
+
+    /// <summary>
+    /// Eulmore: the Mainstay shard sits right under the city aetheryte. Standing by the aetheryte,
+    /// the attune matched the shard below across the ground and ran back down the stairs.
+    /// </summary>
+    [Fact]
+    public void The_aetheryte_itself_is_found_not_the_shard_beneath_it()
+    {
+        var w = new FakeStepWorld { TerritoryId = 820, ArriveOnMove = true };
+        w.PlayerPosition = new Vector3(-6.8f, 83.1f, -37.2f);
+        w.Attunables[157] = ("The Mainstay", new Vector3(0.5f, 48f, 1f));
+        w.AttunedIds.Add(157);
+        w.Attunables[134] = ("Eulmore", new Vector3(0, 82, 1));
+        w.MarkerHeight[134] = 48;   // the guessed height lands on the floor below
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.AttuneAetheryte, KindName = "AttuneAetheryte", TerritoryId = 820, AttuneId = 134 });
+
+        Ticks(ex, w, 30);
+        Assert.Contains(134u, w.AttunedIds);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Move 0,48") || c.StartsWith("Move 1,48"));
+    }
+
+    /// <summary>
+    /// Eulmore's aetheryte is story-locked early in Shadowbringers: pressed at arm's length, nothing
+    /// attunes. Five presses, said, and remembered — the button's count and attune-in-passing skip it.
+    /// </summary>
+    [Fact]
+    public void A_story_locked_aetheryte_is_given_up_and_remembered()
+    {
+        var w = new FakeStepWorld { TerritoryId = 820, ArriveOnMove = true, InteractAttunes = false };
+        w.PlayerPosition = new Vector3(1, 82, 3);
+        w.Attunables[134] = ("Eulmore", new Vector3(0, 82, 1));
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.AttuneAetheryte, KindName = "AttuneAetheryte", TerritoryId = 820, AttuneId = 134 });
+        Ticks(ex, w, 40);   // twenty seconds
+
+        Assert.Equal(StepStatus.Failed, ex.Status);
+        Assert.Contains("will not attune yet", ex.FailReason);
+        Assert.Contains(134u, w.RefusedAttunes);
+        Assert.Empty(w.UnattunedHere());
+    }
+
     [Fact]
     public void The_button_attunes_everything_in_the_zone_and_names_what_it_missed()
     {

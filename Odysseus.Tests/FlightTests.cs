@@ -120,10 +120,11 @@ public class FlightTests
 
     /// <summary>
     /// The game is the authority on whether an attune took. Trusting the executor's "done" would
-    /// spin forever on a current that silently refused.
+    /// spin forever on a current that silently refused — so it is noted once and passed, and the
+    /// rest are still collected (Lakeland: one refusal had ended the run at 0 of 2).
     /// </summary>
     [Fact]
-    public void Arriving_without_attuning_stops_rather_than_repeating()
+    public void Arriving_without_attuning_is_noted_and_passed_not_repeated()
     {
         Assert.True(_collector.Start(Coerthas(Loose)));
         for (var i = 0; i < 200 && !_collector.IsFinished; i++)
@@ -132,8 +133,21 @@ public class FlightTests
             _world.Advance(0.5);   // never marked unlocked
         }
 
-        Assert.Equal(CollectState.Blocked, _collector.State);
+        Assert.Equal(CollectState.Done, _collector.State);
         Assert.Equal(0, _collector.Collected);
         Assert.Contains("did not attune", _collector.StatusLine);
+    }
+
+    /// <summary>
+    /// Shadowbringers zones are split by the story: a current on the side it has not opened cannot be
+    /// reached, and each one tried cost three failed paths. Those are left for later and said.
+    /// </summary>
+    [Fact]
+    public void Currents_on_ground_the_story_has_not_opened_are_left_for_later()
+    {
+        _collector.StoryHasBeen = (_, at) => at.X < 0;   // only the west half is open; Loose is east
+        Assert.False(_collector.Start(Coerthas(Loose)));
+        Assert.Contains("story has not opened", _collector.StatusLine);
+        Assert.DoesNotContain(_world.Calls, c => c.StartsWith("Move"));
     }
 }

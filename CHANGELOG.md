@@ -1,6 +1,31 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.13 — unreleased
+
+### Getting there
+- Kholusia is reached from the Crystarium on the aspiring amaro tamer at the Amaro Launch ("Travel to Kholusia?"), the only way in before Kholusia's aetherytes are attuned: A Still Tide (3283) had faulted "no aetheryte there" from the Crystarium. A ride's plain "Travel to <zone>?" question is answered like a warp's. When several doors lead into a zone, the one in a zone Odysseus can reach is taken (from the Ocular it had picked one in a zone a new character cannot reach), and a door across a city is reached by its aethernet — the Amaro Launch shard, not a walk from the aetheryte plaza
+- A teleport Ariadne starts mid-walk (when teleporting beats walking) is no longer cancelled by the "not getting any closer — jumping" rescue: standing still for the cast, or while Ariadne waits for a zone's mesh or plans the route, read as stuck
+- Aetherytes and shards drawn on a zone's other map layers are found: Eulmore is drawn on three, and only the main one was read, so its Mainstay shard and its aetheryte were "not on any map" (A Blessed Instrument, 3289)
+- "Attune this zone" takes shards first and the zone's aetheryte last, each nearest first across the ground: in Eulmore it climbed to the Canopy for the city aetheryte (story-locked, as it happens) before the shards around you. An attune that gets no closer for 20 seconds — somewhere the story has not opened yet — is given up and named instead of pacing for 90. An aetheryte or shard is found by its own object when it is in view, not by whatever stands nearest across the ground — Eulmore's Mainstay shard, right under the city aetheryte, had been taken for it and walked back down to. One the game will not attune — story-locked, like Eulmore's early in Shadowbringers — is given up on the game's own "special permission is required" (or after five presses at arm's length) and left out of the button's count and attuning on the way — remembered per character until the story has moved on; one it cannot reach is given up after 20 seconds of standing still (walking the long way round counts as progress) and tried again next time
+- Gates inside a zone are used, and a path's own step to a gate guard walks to him (it had read "you are already in this zone" as "already crossed" and stood 550 y away): a walk that finds no way across a wall takes the nearest gate the path library knows — the Peaks' Ala Mhigan Resistance gate guards, which Closing Up Shop's first steps sit behind — then walks on
+- Going through a door, riding a lift or attuning waits while pathing reloads instead of running out its clock: an Ariadne update mid-run left the character standing still and the trip to the amaro faulted after a minute
+- A fight the step never asked for is waited out instead of faulting — on the way, at an attune, a door, a lift or an interact: a mob that attacks mid-walk had Daedalus fighting and Minerva dodging, every walk Odysseus issued was cut off, and the step faulted "no path" with a good route (A Still Tide), and a hunt mark that wandered into an attune ran its clock out. The step now holds, gets off the mount so Daedalus can fight, and when the fight ends mounts back up (if the fight took it off, or the rest is a ride worth taking) and goes on. With Daedalus switched off it walks on as before
+
+### Dialogue
+- A step that names several menu answers gives each menu the one it offers: A Taste of Honey (3288) answered its high-or-low menu with "Let's play!" (the first answer named), which that menu does not have, and guessed the first option every round
+
+### Aether currents
+- Settings → "Pick up aether currents while doing the story" (off by default): between quests, in a zone you cannot fly in yet, its aether current quests that can be taken now go on the priority list and run before the story continues, and its loose currents are collected once per zone per session. Current quests already in your journal are queued too, wherever they are: the Shadowbringers story paths pick up every one they pass (City of Final Pleasures takes A Plankless Task and Village of Woe) and never came back for them. One that fails — somewhere the story has not opened yet, as parts of Kholusia stay shut for a while — is set aside and the story goes on; it is tried again once an MSQ quest has been completed (side quests finishing do not count — that had looped Closing Up Shop). Loose currents on the side of a zone the story has not opened yet (Shadowbringers zones are split that way) are left for later and counted, judged by where the MSQ paths go and which of those quests are done. A stop asked for (Stop after, one quest at a time, the level stop) still stops at the quest's end, with no detour first. Collected currents are pressed by their own object (the collector had walked to each spot with nothing to press, and Lakeland went 0 of 2), and one that will not attune is named at the end instead of ending the round
+
+### Settings
+- General is grouped under Story, Dialogue and rewards, Travel, Combat, and Gathering and crafting. The Handoffs page is folded in: the duty handoffs (solo duties, duty AI, Minerva preset, Theseus) under Combat, the crafter choice (Artisan or Hephaestus) under Gathering and crafting
+
+### Paths
+- Hand fixes to quest paths now ship: they live in the plugin's Assets/PathFixes and are laid over the shipped library and any import, on every install. First one: A Taste of Honey (3288), up Eulmore's spiral staircase on the mesh instead of the old no-mesh steps
+- Settings → Paths → "Save path edits to": a central fixes folder. Path Editor saves go there, and every install pointed at it runs those fixes after a reload
+<!-- LATEST-END -->
+
 ## v0.2.12 — 2026-09-30
 
 ### Getting there
@@ -33,7 +58,6 @@
 
 ### Tools
 - `/od battlehorn 1 Cu Sith` puts a Bestiary pet on a battlehorn (opening the Master's Bestiary if it is not up); `/od battlehorn` lists what is on each one
-<!-- LATEST-END -->
 
 ## v0.2.11 — 2026-09-27
 

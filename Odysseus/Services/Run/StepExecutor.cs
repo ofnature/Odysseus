@@ -511,6 +511,11 @@ public sealed class StepExecutor
     }
     private float _bestMoveDistance;
     private DateTime _lastMoveProgress;
+    /// <summary>The walk is held for a fight the step did not ask for; said once per fight.</summary>
+    private bool _combatPauseSaid;
+    private DateTime _lastCombatDismount;
+    /// <summary>The fight took us off the mount, so the walk after it starts with getting back on.</summary>
+    private bool _combatDismounted;
 
     /// <summary>
     /// Gathering Odysseus does itself, when one is wired in and switched on — quest Gather
@@ -657,6 +662,9 @@ public sealed class StepExecutor
         _moveRetries = 0;
         _shardApproached = false;
         _hopSkipped = false;
+        _doorHopTaken = false;
+        _gateTried = false;
+        _gatePressedAt = null;
         _sawOccupied = false;
         _interactRetries = 0;
         _dismountAsked = false;
@@ -859,6 +867,10 @@ public sealed class StepExecutor
         if (step.Kind == StepKind.Combat && step.CombatItemUse is { } heldFor && HoldsAllFight(heldFor))
             SetCombatHold(true, now);
 
+        // The same fight hold the walk has, for the phases that walk on their own to something.
+        if (_phase is Phase.Attune or Phase.Door or Phase.Lift or Phase.Interact && HoldForFight(step, now))
+            return Status;
+
         switch (_phase)
         {
             case Phase.Delay:
@@ -1052,7 +1064,7 @@ public sealed class StepExecutor
                 // levels is the wrong level — the route then ends beside the shard, 45y "short",
                 // and was given up as no path (the Crystarium's Cabinet of Curiosity, every time).
                 if (_detourThen == Phase.Attune && _detourTo is not null
-                    && _world.NearestAttuneObject(_attuneAt, 40f) is not null)
+                    && _world.AttuneObjectFor(_attuneId, _attuneAt, 40f) is not null)
                 {
                     _detourTo = null;
                     Enter(Phase.Attune);
@@ -1533,23 +1545,29 @@ public sealed class StepExecutor
             return NextAfterTeleport();
 
         // Already where a zone-line walk was meant to end — the walk itself handles that arrival.
-        if (step.TargetTerritoryId is { } crossing && _world.TerritoryId == crossing)
+        if (step.TargetTerritoryId is { } crossing && crossing != step.TerritoryId && _world.TerritoryId == crossing)
             return NextAfterTeleport();
 
         if (_world.RouteTo(step.TerritoryId, step.Position) is not { } route)
         {
             // No aetheryte inside: a zone entered by a door, like the Rising Stones from Mor Dhona.
-            // Get to the door's zone; the travel check takes it through the door from there.
-            if (_world.DoorInto(step.TerritoryId) is { } door && door.From != _world.TerritoryId
-                && _world.RouteTo(door.From, door.At) is { } outside)
+            // A door standing here is the travel check's to take; otherwise get to the zone of the
+            // first door that can be reached, and the travel check takes it through from there.
+            var doors = _world.DoorsInto(step.TerritoryId);
+            if (!System.Linq.Enumerable.Any(doors, d => d.From == _world.TerritoryId))
             {
-                _world.Log($"Quest step is in territory {step.TerritoryId}, entered by a door in {door.From} — going there first.");
-                _autoAethernet = outside.AethernetName;
-                if (outside.AetheryteId is not { } outsideAetheryte)
-                    return Phase.Aethernet;
-                _teleportTarget = outsideAetheryte;
-                _teleportTerritory = outside.AetheryteTerritory;
-                return Phase.Teleport;
+                foreach (var door in doors)
+                {
+                    if (_world.RouteTo(door.From, door.At) is not { } outside)
+                        continue;
+                    _world.Log($"Quest step is in territory {step.TerritoryId}, entered by a door in {door.From} — going there first.");
+                    _autoAethernet = outside.AethernetName;
+                    if (outside.AetheryteId is not { } outsideAetheryte)
+                        return Phase.Aethernet;
+                    _teleportTarget = outsideAetheryte;
+                    _teleportTerritory = outside.AetheryteTerritory;
+                    return Phase.Teleport;
+                }
             }
             return NextAfterTeleport(); // no way in; the travel check names it
         }
@@ -1663,12 +1681,16 @@ public sealed class StepExecutor
         // TargetTerritoryId is where it finishes. Standing in the far one means the crossing has
         // already happened — which is what an aethernet hop into it does — so it is arrival, not
         // the wrong zone. (Highway Robbery's first step: starts in 129, ends in 128, hops there.)
-        if (step.TargetTerritoryId is { } crossedInto && _world.TerritoryId == crossedInto)
+        // A gate writes its target as the zone it stands in (the Peaks' gate guards): you are always
+        // "there" already, and taking that as arrival skipped the walk to the guard — the step stood
+        // 550 y off, called him missing after thirty seconds, and went on the wrong side of the wall.
+        // Only a real change of zone counts.
+        if (step.TargetTerritoryId is { } crossedInto && crossedInto != step.TerritoryId && _world.TerritoryId == crossedInto)
             return Phase.WaitReady;
 
         // A zone entered by a door standing here: go through it.
         if (step.TerritoryId != 0 && _world.TerritoryId != step.TerritoryId
-            && _world.DoorInto(step.TerritoryId) is { } door && door.From == _world.TerritoryId)
+            && System.Linq.Enumerable.FirstOrDefault(_world.DoorsInto(step.TerritoryId), d => d.From == _world.TerritoryId) is { } door)
             return BeginDoor(door);
 
         if (step.TerritoryId != 0 && _world.TerritoryId != step.TerritoryId)
@@ -2264,6 +2286,64 @@ public sealed class StepExecutor
         _world.Log($"Item {step.ItemId} was refused — trying again ({_itemUseTries}/{MaxItemUseTries}).");
     }
 
+    /// <summary>
+    /// A fight the step never asked for — a mob that took a swing on the way, a FATE spilling over, a
+    /// hunt mark that wandered into an attune (Maultasche, A Still Tide). Daedalus finishes it (its
+    /// combat override is on for the whole task) and Minerva dodges in it; both move the character,
+    /// so every walk issued meanwhile was cut off within half a second and counted as a failure —
+    /// the step faulted "no path" with a good route, or ran an attune's clock out mid-fight. Hold:
+    /// every clock with it, off the mount (nobody fights from the saddle), and carry on when it is
+    /// over — remounting for a walk the fight took us off, or one long enough to ride. Daedalus
+    /// switched off means nobody fights: then moving on is the better answer, and nothing holds.
+    /// True while held, or when the step moved on to remount.
+    /// </summary>
+    private bool HoldForFight(QuestStep step, DateTime now)
+    {
+        if (_world.InCombat && step.Kind != StepKind.Combat && !_world.DaedalusDisabledByUser)
+        {
+            if (!_combatPauseSaid)
+            {
+                _combatPauseSaid = true;
+                if (_world.IsMoving)
+                    _world.StopMoving();   // our own walk, out of the fighters' way
+                var where = _detourTo ?? step.Position;
+                _world.Log(where is { } at
+                    ? $"In combat on the way to {Fmt(at)} — waiting for it to end, then going on."
+                    : "In combat — waiting for it to end, then going on.");
+            }
+            // From the air the dismount is the game's own descent; asked again every two seconds.
+            if (_world.IsMounted && now - _lastCombatDismount > TimeSpan.FromSeconds(2))
+            {
+                _lastCombatDismount = now;
+                _combatDismounted = true;
+                _world.StopMoving();
+                _world.Dismount();
+            }
+            _phaseStart = now;
+            _stepStart = now;
+            _lastMoveIssue = now;
+            _stalledSince = default;
+            return true;
+        }
+        if (!_combatPauseSaid)
+            return false;
+
+        _combatPauseSaid = false;
+        _lastMoveIssue = default;   // issue the walk again now
+        // Back in the saddle for a walk: the fight took us off it, or what is left is a ride worth
+        // taking. A step that wants feet keeps them; an attune, door or lift is already at hand.
+        var left = Vector3.Distance(_world.PlayerPosition, _detourTo ?? step.Position ?? _world.PlayerPosition);
+        var remount = _phase == Phase.Move && (_combatDismounted || left > MountWorthDistance)
+                      && !step.Dismount && step.Mount != false && _world.CanMountHere && !_world.IsMounted;
+        _combatDismounted = false;
+        _world.Log(remount ? "Out of combat — mounting up and riding on." : "Out of combat — going on.");
+        if (!remount)
+            return false;
+        _lastMountTry = default;
+        Enter(Phase.Mount);
+        return true;
+    }
+
     private void TickMove(QuestStep step, DateTime now)
     {
         // A cutscene or a conversation owns the character: it cannot move, and the mesh is not
@@ -2288,6 +2368,9 @@ public sealed class StepExecutor
             return;
         }
 
+        if (HoldForFight(step, now))
+            return;
+
         // A detour — walking to a merchant the craft turned out to need — borrows this phase and
         // lands somewhere other than the step's own destination.
         var detour = _detourTo;
@@ -2296,7 +2379,7 @@ public sealed class StepExecutor
         var distance = Vector3.Distance(_world.PlayerPosition, target);
 
         // A walk across a zone line arrives by changing zone, not by reaching the point.
-        if (detour is null && step.TargetTerritoryId is { } targetTerritory && _world.TerritoryId == targetTerritory)
+        if (detour is null && step.TargetTerritoryId is { } targetTerritory && targetTerritory != step.TerritoryId && _world.TerritoryId == targetTerritory)
         {
             _world.StopMoving();
             Enter(Phase.WaitReady);
@@ -2414,7 +2497,10 @@ public sealed class StepExecutor
             // The epsilon must exceed a jump's bob: the stall hop moves the character a yalm
             // and a half, which reset this clock every eight seconds and kept the wedge alive
             // in place — the user broke the loop by flipping Fly off by hand, again.
-            if (Vector3.Distance(_world.PlayerPosition, _frozenAt) > 2.5f)
+            // Standing still while the pathing plugin plans, waits for a mesh or runs a teleport it
+            // chose is not frozen either — the same reason the stall hop now waits (Kholusia, ~40 s).
+            if (Vector3.Distance(_world.PlayerPosition, _frozenAt) > 2.5f
+                || _world.IsPathfinding || _world.IsCasting || _world.IsTravelBusy)
             {
                 _frozenAt = _world.PlayerPosition;
                 _frozenSince = now;
@@ -2518,6 +2604,18 @@ public sealed class StepExecutor
             // Progress is getting closer *or* getting anywhere: a route round a building, or back to a
             // waypoint the follower overshot, leaves the straight-line distance where it was while the
             // character walks the whole time — and every such bend was a hop through town.
+            // A cast is not a stall, and neither is the pathing plugin still at work. Ariadne teleports
+            // first when that beats the walk ("16s via Stilltide — teleporting first"); standing still
+            // for the cast read as stuck, and the hop cancelled the teleport (A Still Tide's hand-in).
+            // It also fired 21 ms after Ariadne chose the teleport — before any cast began — having
+            // run its four seconds while Ariadne waited for Kholusia's mesh, and again while the walk
+            // it fell back to was still being planned (5 s). Both are Ariadne busy, not stuck.
+            if (_world.IsCasting || _world.IsTravelBusy || _world.IsPathfinding)
+            {
+                _stalledSince = now;
+                _stallAnchor = _world.PlayerPosition;
+                return;
+            }
             var moved = Vector3.Distance(_world.PlayerPosition, _stallAnchor) > StallMoveProgress;
             if (distance < _closestSeen - StallProgress || moved)
             {
@@ -2718,6 +2816,23 @@ public sealed class StepExecutor
             // Both ends on the mesh and still nothing: the mesh is lying about the world — built
             // before a quest opened a gate, usually. Rebuild it once and start the attempts over;
             // the not-ready wait above holds the clocks while it builds.
+            // A wall the mesh cannot cross, with a gate in it: the Peaks' Ala Mhigan Resistance gate
+            // guards pass you through, and a walk to the far side found no path and was given up —
+            // set aside, re-queued and given up again (Closing Up Shop). Once per step, the nearest.
+            if (!_gateTried && detour is null && _world.TerritoryId == step.TerritoryId)
+            {
+                var here = new Vector2(_world.PlayerPosition.X, _world.PlayerPosition.Z);
+                var gate = System.Linq.Enumerable.FirstOrDefault(System.Linq.Enumerable.OrderBy(_world.GatesIn(_world.TerritoryId),
+                    g => Vector2.Distance(here, new Vector2(g.At.X, g.At.Z))));
+                if (gate is not null && Vector2.Distance(here, new Vector2(gate.At.X, gate.At.Z)) <= GateReach)
+                {
+                    _gateTried = true;
+                    _world.StopMoving();
+                    _world.Log($"No way across to {Fmt(target)} on the mesh — taking the gate at {Fmt(gate.At)}.");
+                    Enter(BeginDoor(gate));
+                    return;
+                }
+            }
             if (!direct && !_meshRebuilt && _world.PathWaypointCount == 0 && MeshDiagnosis(target).Length == 0
                 && _world.RebuildNavmesh())
             {
@@ -2882,6 +2997,13 @@ public sealed class StepExecutor
     private bool _attuneThenStep;
     private DateTime _lastAttunePress;
     private DateTime _lastAttuneMove;
+    private float _attuneClosest;
+    private DateTime _attuneProgressAt;
+    private Vector3 _attuneAnchor;
+    private int _attunePresses;
+    private DateTime _attuneStartedAt;
+    private const int AttunePressesMax = 5;
+    private static readonly TimeSpan AttuneNoProgress = TimeSpan.FromSeconds(20);
 
     private void BeginAttuneStep(QuestStep step)
     {
@@ -2918,6 +3040,11 @@ public sealed class StepExecutor
         _attuneThenStep = thenStep;
         _lastAttunePress = default;
         _lastAttuneMove = default;
+        _attuneClosest = float.MaxValue;
+        _attuneProgressAt = _world.UtcNow;
+        _attuneAnchor = _world.PlayerPosition;
+        _attunePresses = 0;
+        _attuneStartedAt = _world.UtcNow;
         var far = Vector2.Distance(new Vector2(_world.PlayerPosition.X, _world.PlayerPosition.Z), new Vector2(at.X, at.Z));
         if (far > 40f)
         {
@@ -2946,6 +3073,11 @@ public sealed class StepExecutor
             AfterAttune(step);
             return;
         }
+        if (!_world.NavmeshReady)
+        {
+            _phaseStart = now;   // pathing reloading: not the attune's time
+            return;
+        }
         if (now - _phaseStart > AttuneMax)
         {
             _world.CloseTravelMenus();
@@ -2961,10 +3093,39 @@ public sealed class StepExecutor
         if (_world.IsOccupied || !_world.IsReady)
             return;   // the attune animation, or the menu it opened
 
-        var obj = _world.NearestAttuneObject(_attuneAt, 40f);
+        var obj = _world.AttuneObjectFor(_attuneId, _attuneAt, 40f);
         var goal = obj ?? _attuneAt;
         if (obj is null || Vector3.Distance(_world.PlayerPosition, goal) > AttuneReach)
         {
+            // Getting no closer for a while is a place the character cannot reach yet — Eulmore's
+            // Canopy is shut until the story opens it, and the walk to its aetheryte only paced the
+            // stairs for the whole ninety seconds. Said and passed (or failed) after twenty.
+            // Progress is getting closer or getting anywhere: Eulmore's stairs wind away from a shard
+            // before they reach it, and measured by straight-line distance alone two reachable shards
+            // were given up on newtoon2 with the character still walking toward them.
+            var away = Vector3.Distance(_world.PlayerPosition, goal);
+            var moved = Vector3.Distance(_world.PlayerPosition, _attuneAnchor) > 3f;
+            if (away < _attuneClosest - 1f || moved || _world.IsPathfinding || _world.IsCasting)
+            {
+                _attuneClosest = MathF.Min(_attuneClosest, away);
+                _attuneAnchor = _world.PlayerPosition;
+                _attuneProgressAt = now;
+            }
+            else if (now - _attuneProgressAt > AttuneNoProgress)
+            {
+                // Said, not remembered: unreachable can be a routing hiccup, and the next press of the
+                // button should try again. A refusal at arm's length (below) is the story's, and is.
+                _world.StopMoving();
+                _world.CloseTravelMenus();
+                if (_attuneThenStep)
+                {
+                    _world.Log($"Cannot get to {_attuneName} from here ({away:F0}y, no closer in {AttuneNoProgress.TotalSeconds:F0}s) — carrying on with the step.");
+                    AfterAttune(step);
+                }
+                else
+                    Fail($"cannot get to {_attuneName} from here ({away:F0}y, no closer in {AttuneNoProgress.TotalSeconds:F0}s) — somewhere the story has not opened yet?");
+                return;
+            }
             if (now - _lastAttuneMove > TimeSpan.FromSeconds(2) && !_world.IsMoving)
             {
                 _lastAttuneMove = now;
@@ -2982,9 +3143,29 @@ public sealed class StepExecutor
             _world.Dismount();
             return;
         }
+        // Pressed at arm's length and still not attuned: the game is refusing — Eulmore's aetheryte is
+        // story-locked early in Shadowbringers. Five presses (about ten seconds) and it is said,
+        // remembered for the session, and passed (or failed), not pressed for ninety.
+        // The game says why on the first press ("special permission is required to use this
+        // aetheryte"): that is the refusal, five presses or not.
+        if (_attunePresses >= AttunePressesMax
+            || (_attunePresses > 0 && _world.LastAttuneRefusal > _attuneStartedAt))
+        {
+            _world.CloseTravelMenus();
+            _world.AttuneRefused(_attuneId);
+            if (_attuneThenStep)
+            {
+                _world.Log($"{_attuneName} will not attune yet (story-locked?) — carrying on with the step.");
+                AfterAttune(step);
+            }
+            else
+                Fail($"{_attuneName} will not attune yet — the story has not opened it (pressed {AttunePressesMax} times)");
+            return;
+        }
         if (now - _lastAttunePress > TimeSpan.FromSeconds(2))
         {
             _lastAttunePress = now;
+            _attunePresses++;
             _world.InteractAttuneObject(obj.Value);
         }
     }
@@ -3088,6 +3269,14 @@ public sealed class StepExecutor
     private static readonly TimeSpan DoorMax = TimeSpan.FromSeconds(60);
     private const float DoorReach = 3.5f;
     private Travel.Doorways.Door? _door;
+    /// <summary>A gate's guard was pressed here; through it is being moved well away from this spot.</summary>
+    private Vector3? _gatePressedAt;
+    /// <summary>The gate fallback was taken this step — once is the whole of it.</summary>
+    private bool _gateTried;
+    /// <summary>How far a gate may be from where the walk gave up and still be the way across.</summary>
+    private const float GateReach = 250f;
+    /// <summary>The city hop toward this step's door has been taken; the rest is a walk.</summary>
+    private bool _doorHopTaken;
     private DateTime _lastDoorPress;
     private DateTime _lastDoorMove;
 
@@ -3096,6 +3285,17 @@ public sealed class StepExecutor
         _door = door;
         _lastDoorPress = default;
         _lastDoorMove = default;
+        // Across a city to its door: the aethernet when a shard by the door beats the walk — the
+        // Crystarium's Amaro Launch shard stands beside the amaro, and the run had walked there
+        // from the aetheryte plaza. Once per door; after the hop the walk is short.
+        if (!_doorHopTaken && !_hopSkipped && !_world.IsRidingVehicle && _world.TerritoryId == door.From
+            && _world.CityHop(door.From, _world.PlayerPosition, door.At) is { } shard)
+        {
+            _doorHopTaken = true;
+            _world.Log($"The door into territory {door.Into} is across the city — hopping to {shard} on the aethernet first.");
+            _autoAethernet = shard;
+            return BeginAethernet();
+        }
         _world.Log($"Going through the door into territory {door.Into}.");
         var far = Vector2.Distance(new Vector2(_world.PlayerPosition.X, _world.PlayerPosition.Z), new Vector2(door.At.X, door.At.Z));
         if (far > 40f)
@@ -3113,12 +3313,30 @@ public sealed class StepExecutor
     private void TickDoor(DateTime now)
     {
         var door = _door!;
-        if (_world.TerritoryId == door.Into)
+        // A gate stays in the zone: through it is having been moved well away from where it was pressed.
+        var throughGate = door.Into == door.From && _gatePressedAt is { } pressed
+                          && Vector3.Distance(_world.PlayerPosition, pressed) > 15f;
+        if (throughGate)
+        {
+            if (!_world.IsReady || _world.IsOccupied)
+                return;
+            _world.Log($"Through the gate, at {Fmt(_world.PlayerPosition)}.");
+            _gatePressedAt = null;
+            Enter(NextAfterTravel());
+            return;
+        }
+        if (door.Into != door.From && _world.TerritoryId == door.Into)
         {
             if (!_world.IsReady || _world.IsOccupied)
                 return;
             _world.Log($"Through the door into territory {door.Into}.");
             Enter(NextAfterTravel());
+            return;
+        }
+        // Pathing reloading (an Ariadne update mid-run did it) moves nobody: not the door's time.
+        if (!_world.NavmeshReady)
+        {
+            _phaseStart = now;
             return;
         }
         if (now - _phaseStart > DoorMax)
@@ -3151,6 +3369,8 @@ public sealed class StepExecutor
         if (now - _lastDoorPress > TimeSpan.FromSeconds(3))
         {
             _lastDoorPress = now;
+            if (door.Into == door.From)
+                _gatePressedAt = _world.PlayerPosition;
             _world.TryInteractWithDataId(door.DataId);
         }
     }
@@ -3204,6 +3424,11 @@ public sealed class StepExecutor
                 return;
             _world.Log($"Took the lift to {where}.");
             Enter(NextAfterTravel());
+            return;
+        }
+        if (!_world.NavmeshReady)
+        {
+            _phaseStart = now;   // pathing reloading: not the lift's time
             return;
         }
         if (now - _phaseStart > LiftMax)
@@ -4509,9 +4734,29 @@ public sealed class StepExecutor
         }
 
         // The data carries text keys; the menu shows text. Resolve the answer key against the
-        // quest's dialogue sheet and pick the entry that says it.
+        // quest's dialogue sheet and pick the entry that says it. A step can name several list
+        // answers, one per menu it raises — A Taste of Honey (3288) asks "Let's play?" and then
+        // "high or low?" — so the answer is the one this menu offers, not the first named: the
+        // high/low menu was answered with "Let's play!", which it does not have, and fell to the
+        // first option every round.
         var wanted = listChoice.Answer is { } key ? _texts?.Resolve(_questId, key) : null;
         var index = wanted is null ? -1 : FindEntry(entries, wanted);
+        if (index < 0)
+        {
+            foreach (var other in step.DialogueChoices!)
+            {
+                if (other == listChoice || !other.Type.Equals("List", StringComparison.OrdinalIgnoreCase)
+                    || other.Answer is not { } otherKey || _texts?.Resolve(_questId, otherKey) is not { } otherText)
+                    continue;
+                var at = FindEntry(entries, otherText);
+                if (at < 0)
+                    continue;
+                listChoice = other;
+                wanted = otherText;
+                index = at;
+                break;
+            }
+        }
 
         // Falling back to the first option rather than leaving the menu hanging, on the same
         // reasoning as an undeclared one: an answer is expected here and the wording is flavour.

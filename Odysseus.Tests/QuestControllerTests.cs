@@ -567,6 +567,69 @@ public class QuestControllerTests : IDisposable
         Assert.Equal((ushort)1623, _controller.QuestId);
     }
 
+    /// <summary>
+    /// Between quests the run waits on the boundary hook (collecting a zone's aether currents),
+    /// then rolls on into the next quest as before.
+    /// </summary>
+    [Fact]
+    public void The_run_waits_on_the_between_quests_hook_then_rolls_on()
+    {
+        StoreTwoQuestChain(); // 1622 -> 1623
+        _policy.ContinueToNextQuest = true;
+        var busy = 5;
+        _controller.BetweenQuests = () => busy-- > 0;
+
+        _controller.Start(1622);
+        Ticks(3);
+        _quests.Complete.Add(1622);
+        Ticks(3);
+        Assert.Equal((ushort)1622, _controller.QuestId);   // still at the boundary, waiting
+        Assert.Equal(RunState.Advance, _controller.State);
+        Ticks(6);
+        Assert.Equal((ushort)1623, _controller.QuestId);
+    }
+
+    /// <summary>Stop after armed: the quest's end is the stop — no aether current detour first.</summary>
+    [Fact]
+    public void Stop_after_skips_the_between_quests_detour()
+    {
+        StoreTwoQuestChain();
+        _policy.ContinueToNextQuest = true;
+        var asked = 0;
+        _controller.BetweenQuests = () => { asked++; return true; };
+
+        _controller.Start(1622);
+        _controller.StopAfterQuest = true;
+        Ticks(3);
+        _quests.Complete.Add(1622);
+        Ticks(3);
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.Equal(0, asked);
+    }
+
+    /// <summary>
+    /// An aether current quest queued by the setting, in ground the story has not opened: set aside,
+    /// and the story goes on, instead of the whole run faulting.
+    /// </summary>
+    [Fact]
+    public void A_priority_quest_set_aside_lets_the_story_go_on()
+    {
+        StoreTwoQuestChain(); // 1622 -> 1623
+        _store.Save(new QuestPath { QuestId = 7000, Name = "Plankless", Category = "x", Sequences = [new QuestSequence { Sequence = 0, Steps = [Interact(99)] }] });
+        _policy.ContinueToNextQuest = true;
+        var priority = (ushort?)7000;
+        _controller.PriorityNext = () => priority;
+        _controller.StoryCurrent = () => 1623;
+        _controller.SetAside = (id, _) => { priority = null; return id == 7000; };
+
+        _controller.Start(1622);
+        Ticks(3);
+        _quests.Complete.Add(1622);
+        Ticks(200);   // 7000's NPC (99) never appears: the step fails
+        Assert.NotEqual(RunState.Faulted, _controller.State);
+        Assert.Equal((ushort)1623, _controller.QuestId);
+    }
+
     [Fact]
     public void Level_gate_stops_before_walking_to_a_quest_the_character_cannot_accept()
     {

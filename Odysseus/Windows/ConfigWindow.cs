@@ -19,7 +19,6 @@ internal enum ConfigSection
     Priority,
     Paths,
     Wake,
-    Handoffs,
     Fleet,
     Debug,
 }
@@ -159,7 +158,6 @@ public sealed class ConfigWindow : OdysseusWindow
         DrawNavItem("General", ConfigSection.General);
         DrawNavItem("Priority", ConfigSection.Priority);
         DrawNavItem("Paths", ConfigSection.Paths);
-        DrawNavItem("Handoffs", ConfigSection.Handoffs);
         ImGui.Spacing();
 
         DrawCategoryHeader("RECOVERY");
@@ -226,7 +224,6 @@ public sealed class ConfigWindow : OdysseusWindow
             case ConfigSection.General: DrawGeneralSection(); break;
             case ConfigSection.Priority: DrawPrioritySection(); break;
             case ConfigSection.Paths: DrawPathsSection(); break;
-            case ConfigSection.Handoffs: DrawHandoffsSection(); break;
             case ConfigSection.Wake: DrawWakeSection(); break;
             case ConfigSection.Fleet: DrawFleetSection(); break;
             case ConfigSection.Debug: DrawDebugSection(); break;
@@ -235,8 +232,9 @@ public sealed class ConfigWindow : OdysseusWindow
 
     private void DrawGeneralSection()
     {
-        OdysseusTheme.SectionHeader("GENERAL");
-
+        // Grouped by what each setting is about. The Handoffs page lives here now too: its duty
+        // handoffs under Combat, its crafter choice under Gathering and crafting.
+        OdysseusTheme.SectionHeader("STORY");
         var continueNext = _config.ContinueToNextQuest;
         if (ImGui.Checkbox("Continue into the next MSQ quest", ref continueNext))
         {
@@ -265,18 +263,6 @@ public sealed class ConfigWindow : OdysseusWindow
         }
         OdysseusTheme.HelpMarker("Which company to join when the ARR story asks. Ignored once the character has joined one.");
 
-        var chocobo = _config.KeepChocoboOut;
-        if (ImGui.Checkbox("Keep the chocobo companion out", ref chocobo))
-        {
-            _config.KeepChocoboOut = chocobo;
-            _save();
-        }
-        OdysseusTheme.HelpMarker(
-            "Feeds it a Gysahl Green whenever the summon has under five minutes left, so it never " +
-            "vanishes mid-fight. Only in the field — never in a city or a duty, where a companion is " +
-            "refused and the green would be wasted — and nothing happens at all until \"My Little " +
-            "Chocobo\" is done on this character.");
-
         var derive = _config.DeriveMissingPaths;
         if (ImGui.Checkbox("Run quests with no path from the game's own journal data", ref derive))
         {
@@ -301,11 +287,41 @@ public sealed class ConfigWindow : OdysseusWindow
                 + "the story or your priority list needs one (checked through each quest's prerequisites). "
                 + "Checked against the whole library: none of today's pick-ups is needed by the story.");
 
+        var currents = _config.AutoAetherCurrents;
+        if (ImGui.Checkbox("Pick up aether currents while doing the story", ref currents))
+        {
+            _config.AutoAetherCurrents = currents;
+            _save();
+        }
+        OdysseusTheme.HelpMarker(
+            "Between quests: aether current quests already in your journal (the story's paths pick them up on the way) go on " +
+            "the priority list and are done before the story continues, wherever they are. In a zone you cannot fly in yet, " +
+            "its current quests that can be taken now are queued too, and its loose currents are collected — once per zone per session.");
+
+        OdysseusTheme.SectionHeader("DIALOGUE AND REWARDS");
+        var advance = _config.AutoAdvanceDialogue;
+        if (ImGui.Checkbox("Advance dialogue ourselves", ref advance))
+        {
+            _config.AutoAdvanceDialogue = advance;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Subtitle boxes advanced and cutscene skips confirmed during runs, without needing TextAdvance. Cutscene ESC and optional-reward picking still come from TextAdvance when it is installed.");
+
         var pickRewards = _config.PickQuestRewards;
         if (ImGui.Checkbox("Pick quest rewards automatically", ref pickRewards))
         {
             _config.PickQuestRewards = pickRewards;
             _save();
+        }
+        OdysseusTheme.HelpMarker(
+            "Done by TextAdvance under Odysseus's control, using TextAdvance's own reward priority (gil, vendor " +
+            "value, gear coffers, gear for your job). Odysseus then presses Complete. Off = the reward window " +
+            "waits for you and the run says so.");
+        if (!_presence.TextAdvance)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.StatusYellow, "(TextAdvance not loaded)");
         }
 
         var acceptOvercap = _config.AcceptRewardOvercap;
@@ -317,6 +333,7 @@ public sealed class ConfigWindow : OdysseusWindow
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("The capped-reward warning (tomestones, seals, gil). On: answer Yes and keep the run moving, losing the excess. Off: the dialog waits for you.");
 
+        OdysseusTheme.SectionHeader("TRAVEL");
         var ariadne = string.Equals(_config.PathingProvider, VnavIpc.AriadneProvider, StringComparison.OrdinalIgnoreCase);
         ImGui.SetNextItemWidth(160f);
         if (ImGui.BeginCombo("Pathing", ariadne ? "Ariadne" : "vnavmesh"))
@@ -328,14 +345,27 @@ public sealed class ConfigWindow : OdysseusWindow
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("Which plugin paths and moves the character. Ariadne serves the same gates under its own name and needs Mnemosyne running; vnavmesh can stay installed as the fallback. Switching takes effect immediately.");
 
-        var ownGathering = _config.OwnGathering;
-        if (ImGui.Checkbox("Gather with Odysseus", ref ownGathering))
+        var questLine = _config.ShowQuestLine;
+        if (ImGui.Checkbox("Draw the route in the world", ref questLine))
         {
-            _config.OwnGathering = ownGathering;
+            _config.ShowQuestLine = questLine;
             _save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Quest gathers, gathered deliveries and the gather lists are done by our own gatherer. Off, they hand to GatherBuddy's auto-gather lists as before.");
+            ImGui.SetTooltip("While a run drives a step, its route is drawn on the ground — vnavmesh's live waypoints, or a straight line to the step's mark — with a ring and distance at the goal.");
+
+        OdysseusTheme.SectionHeader("COMBAT");
+        var chocobo = _config.KeepChocoboOut;
+        if (ImGui.Checkbox("Keep the chocobo companion out", ref chocobo))
+        {
+            _config.KeepChocoboOut = chocobo;
+            _save();
+        }
+        OdysseusTheme.HelpMarker(
+            "Feeds it a Gysahl Green whenever the summon has under five minutes left, so it never " +
+            "vanishes mid-fight. Only in the field — never in a city or a duty, where a companion is " +
+            "refused and the green would be wasted — and nothing happens at all until \"My Little " +
+            "Chocobo\" is done on this character.");
 
         var repairAt = _config.RepairAtPercent;
         ImGui.SetNextItemWidth(120f);
@@ -347,32 +377,92 @@ public sealed class ConfigWindow : OdysseusWindow
         if (ImGui.IsItemHovered())
             ImGui.SetTooltip("During a gather run, once the worst-worn piece is at or under this, gear is self-repaired between items (dark matter and crafter levels permitting). 0 never repairs.");
 
-        var questLine = _config.ShowQuestLine;
-        if (ImGui.Checkbox("Draw the route in the world", ref questLine))
+        ImGui.PushTextWrapPos(0f);
+        ImGui.TextColored(OdysseusTheme.TextSecondary,
+            "Instanced fights inside a quest are handed to the plugin that already does them. " +
+            "With a handoff off, Odysseus walks to the entrance and waits for you.");
+        ImGui.PopTextWrapPos();
+        ImGui.Spacing();
+        var solo = _config.HandOffSoloDuties;
+        if (ImGui.Checkbox($"Solo duties → {_config.DutyAiProvider}", ref solo))
         {
-            _config.ShowQuestLine = questLine;
+            _config.HandOffSoloDuties = solo;
             _save();
         }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("While a run drives a step, its route is drawn on the ground — vnavmesh's live waypoints, or a straight line to the step's mark — with a ring and distance at the goal.");
-
-        var advance = _config.AutoAdvanceDialogue;
-        if (ImGui.Checkbox("Advance dialogue ourselves", ref advance))
-        {
-            _config.AutoAdvanceDialogue = advance;
-            _save();
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Subtitle boxes advanced and cutscene skips confirmed during runs, without needing TextAdvance. Cutscene ESC and optional-reward picking still come from TextAdvance when it is installed.");
-        OdysseusTheme.HelpMarker(
-            "Done by TextAdvance under Odysseus's control, using TextAdvance's own reward priority (gil, vendor " +
-            "value, gear coffers, gear for your job). Odysseus then presses Complete. Off = the reward window " +
-            "waits for you and the run says so.");
-        if (!_presence.TextAdvance)
+        if (!_presence.BossMod)
         {
             ImGui.SameLine();
-            ImGui.TextColored(OdysseusTheme.StatusYellow, "(TextAdvance not loaded)");
+            ImGui.TextColored(OdysseusTheme.StatusYellow, $"({_config.DutyAiProvider} not loaded)");
         }
+
+        ImGui.SetNextItemWidth(160f);
+        if (ImGui.BeginCombo("Duty AI", _config.DutyAiProvider))
+        {
+            foreach (var provider in new[] { PluginPresence.BossModRebornProvider, PluginPresence.MinervaProvider })
+                if (ImGui.Selectable(provider, provider == _config.DutyAiProvider))
+                {
+                    _config.DutyAiProvider = provider;
+                    _save();
+                }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Which plugin fights a solo instanced duty. BossMod Reborn's AI is switched on for the "
+                + "fight and off for travel; Minerva is claimed for the fight and handed back after. "
+                + "Switching takes effect immediately.");
+
+        if (_presence.UsesMinerva)
+        {
+            var preset = _config.MinervaPreset;
+            ImGui.SetNextItemWidth(160f);
+            if (ImGui.InputTextWithHint("Minerva preset", "(just switch its dodging on)", ref preset, 48))
+                _config.MinervaPreset = preset;
+            if (ImGui.IsItemDeactivatedAfterEdit())
+                _save();
+            if (ImGui.IsItemHovered())
+                ImGui.SetTooltip("Odysseus claims Minerva's preset slot as \"odysseus\" for the length of a fight "
+                    + "and hands it back after, which returns your own Default. Name a preset to fight to its "
+                    + "settings, or leave this empty to just switch dodging on. A name Minerva does not know is "
+                    + "refused and said so in the log, never guessed at.");
+        }
+
+        var duties = _config.HandOffDutiesToTheseus;
+        if (ImGui.Checkbox("Dungeons and trials → Theseus", ref duties))
+        {
+            _config.HandOffDutiesToTheseus = duties;
+            _save();
+        }
+        if (!_presence.Theseus)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.StatusYellow, "(Theseus not loaded)");
+        }
+
+        OdysseusTheme.SectionHeader("GATHERING AND CRAFTING");
+        ImGui.SetNextItemWidth(160f);
+        if (ImGui.BeginCombo("Crafting", _config.CraftProvider))
+        {
+            foreach (var provider in CrafterChoice.Providers)
+                if (ImGui.Selectable(provider, provider == _config.CraftProvider))
+                {
+                    _config.CraftProvider = provider;
+                    _save();
+                }
+            ImGui.EndCombo();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Which plugin crafts when a quest's Craft step or a delivery needs an item made. "
+                + "Odysseus asks it for the recipe and watches the bag; a craft already under way finishes "
+                + "with the one that started it. Switching takes effect immediately.");
+
+        var ownGathering = _config.OwnGathering;
+        if (ImGui.Checkbox("Gather with Odysseus", ref ownGathering))
+        {
+            _config.OwnGathering = ownGathering;
+            _save();
+        }
+        if (ImGui.IsItemHovered())
+            ImGui.SetTooltip("Quest gathers, gathered deliveries and the gather lists are done by our own gatherer. Off, they hand to GatherBuddy's auto-gather lists as before.");
 
         var sellRewards = _config.SellQuestRewards;
         if (ImGui.Checkbox("Sell crafter and gatherer quest rewards", ref sellRewards))
@@ -529,6 +619,25 @@ public sealed class ConfigWindow : OdysseusWindow
             "import, four accounts. Nothing is redistributed: the paths are a conversion of " +
             "Questionable's data, and moving your own copy between your own installs is yours to do.");
 
+        var edits = _config.PathEditsDirectory;
+        ImGui.SetNextItemWidth(-90f);
+        if (ImGui.InputTextWithHint("##pathedits", "save path edits to — blank for this install's own folder", ref edits, 512))
+        {
+            _config.PathEditsDirectory = edits.Trim();
+            _save();
+        }
+        ImGui.SameLine();
+        if (ImGui.Button("Apply##edits"))
+        {
+            _pathStore.Reload();
+            _importStatus = $"Path edits now save to {_pathStore.SaveDirectory}; {_pathStore.FromFixes} hand fix(es) in use. " +
+                            "A plugin reload makes it stick for everything else that holds the store.";
+        }
+        OdysseusTheme.HelpMarker(
+            "The central fixes folder. A quest fixed in the Path Editor is saved here, and every install pointed at " +
+            "the same folder runs that fix, over the shipped library and any import. On the dev machine point all " +
+            "characters at the repo's Odysseus\\Assets\\PathFixes: fixes there ship with the next release.");
+
         var shipped = _pathStore.FromPack;
         var mine = _pathStore.FromFolder;
         ImGui.TextColored(OdysseusTheme.TextSecondary, shipped == 0
@@ -620,86 +729,6 @@ public sealed class ConfigWindow : OdysseusWindow
         catch (Exception ex)
         {
             _importStatus = $"Import failed: {ex.Message}";
-        }
-    }
-
-    private void DrawHandoffsSection()
-    {
-        OdysseusTheme.SectionHeader("HANDOFFS");
-        ImGui.TextWrapped(
-            "Instanced content inside a quest is handed to the plugin that already does it. " +
-            "With a handoff off, Odysseus walks to the entrance and waits for you.");
-        ImGui.Spacing();
-
-        var solo = _config.HandOffSoloDuties;
-        if (ImGui.Checkbox($"Solo duties → {_config.DutyAiProvider}", ref solo))
-        {
-            _config.HandOffSoloDuties = solo;
-            _save();
-        }
-        if (!_presence.BossMod)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(OdysseusTheme.StatusYellow, $"({_config.DutyAiProvider} not loaded)");
-        }
-
-        ImGui.SetNextItemWidth(160f);
-        if (ImGui.BeginCombo("Duty AI", _config.DutyAiProvider))
-        {
-            foreach (var provider in new[] { PluginPresence.BossModRebornProvider, PluginPresence.MinervaProvider })
-                if (ImGui.Selectable(provider, provider == _config.DutyAiProvider))
-                {
-                    _config.DutyAiProvider = provider;
-                    _save();
-                }
-            ImGui.EndCombo();
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Which plugin fights a solo instanced duty. BossMod Reborn's AI is switched on for the "
-                + "fight and off for travel; Minerva is claimed for the fight and handed back after. "
-                + "Switching takes effect immediately.");
-
-        if (_presence.UsesMinerva)
-        {
-            var preset = _config.MinervaPreset;
-            ImGui.SetNextItemWidth(160f);
-            if (ImGui.InputTextWithHint("Minerva preset", "(just switch its dodging on)", ref preset, 48))
-                _config.MinervaPreset = preset;
-            if (ImGui.IsItemDeactivatedAfterEdit())
-                _save();
-            if (ImGui.IsItemHovered())
-                ImGui.SetTooltip("Odysseus claims Minerva's preset slot as \"odysseus\" for the length of a fight "
-                    + "and hands it back after, which returns your own Default. Name a preset to fight to its "
-                    + "settings, or leave this empty to just switch dodging on. A name Minerva does not know is "
-                    + "refused and said so in the log, never guessed at.");
-        }
-
-        ImGui.SetNextItemWidth(160f);
-        if (ImGui.BeginCombo("Crafting", _config.CraftProvider))
-        {
-            foreach (var provider in CrafterChoice.Providers)
-                if (ImGui.Selectable(provider, provider == _config.CraftProvider))
-                {
-                    _config.CraftProvider = provider;
-                    _save();
-                }
-            ImGui.EndCombo();
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Which plugin crafts when a quest's Craft step or a delivery needs an item made. "
-                + "Odysseus asks it for the recipe and watches the bag; a craft already under way finishes "
-                + "with the one that started it. Switching takes effect immediately.");
-
-        var duties = _config.HandOffDutiesToTheseus;
-        if (ImGui.Checkbox("Dungeons and trials → Theseus", ref duties))
-        {
-            _config.HandOffDutiesToTheseus = duties;
-            _save();
-        }
-        if (!_presence.Theseus)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(OdysseusTheme.StatusYellow, "(Theseus not loaded)");
         }
     }
 

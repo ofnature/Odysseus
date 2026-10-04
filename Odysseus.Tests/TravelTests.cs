@@ -993,7 +993,7 @@ public class StepDismountTests
         w.PlayerPosition = new Vector3(15, 22, -600);
         w.Spawned.Add(2002881);
         w.Spawned.Add(1025549);
-        w.Doors[351] = new Odysseus.Services.Travel.Doorways.Door(156, 351, 2002881, new Vector3(21.1f, 22.3f, -631.3f));
+        w.Doors[351] = [new Odysseus.Services.Travel.Doorways.Door(156, 351, 2002881, new Vector3(21.1f, 22.3f, -631.3f))];
         var ex = new StepExecutor(w);
         ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 1025549, TerritoryId = 351, Position = new Vector3(1, 0, -12) });
 
@@ -1016,10 +1016,195 @@ public class StepDismountTests
     {
         var w = new FakeStepWorld { TerritoryId = 130 };
         w.AttunedByTerritory[156] = 24;
-        w.Doors[351] = new Odysseus.Services.Travel.Doorways.Door(156, 351, 2002881, new Vector3(21.1f, 22.3f, -631.3f));
+        w.Doors[351] = [new Odysseus.Services.Travel.Doorways.Door(156, 351, 2002881, new Vector3(21.1f, 22.3f, -631.3f))];
         var ex = new StepExecutor(w);
         ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 1025549, TerritoryId = 351, Position = new Vector3(1, 0, -12) });
         for (var i = 0; i < 10 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }
         Assert.Contains("Teleport 24", w.Calls);
+    }
+
+    /// <summary>
+    /// A Still Tide (3283) starts in Kholusia, which a new character reaches only on the
+    /// Crystarium's aspiring amaro tamer ("Travel to Kholusia?") — a ride no path step marks.
+    /// </summary>
+    [Fact]
+    public void Kholusia_is_reached_from_the_crystarium_on_the_amaro()
+    {
+        var door = new Odysseus.Services.Travel.Doorways(() => []).Into(814).Single(d => d.From == 819);
+        Assert.Equal(1029806u, door.DataId);
+    }
+
+    /// <summary>
+    /// newtoon1 in the Ocular (844): the most used door into Kholusia stands in a zone it cannot
+    /// reach, and taking it blindly faulted "no aetheryte there". The amaro's zone, the Crystarium,
+    /// has an attuned aetheryte — go there.
+    /// </summary>
+    [Fact]
+    public void An_unreachable_door_is_passed_over_for_one_that_can_be_reached()
+    {
+        var w = new FakeStepWorld { TerritoryId = 844 };
+        w.AttunedByTerritory[819] = 133;
+        w.Doors[814] =
+        [
+            new Odysseus.Services.Travel.Doorways.Door(895, 814, 2010829, new Vector3(1.4f, 0.8f, 2.5f)),
+            new Odysseus.Services.Travel.Doorways.Door(819, 814, 1029806, new Vector3(62.4f, 36.2f, -169.4f)),
+        ];
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 814, Position = new Vector3(639, 1, 534) });
+        for (var i = 0; i < 10 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains("Teleport 133", w.Calls);
+    }
+
+    /// <summary>
+    /// A mob swings on the way (A Still Tide, Kholusia): Daedalus fights, Minerva dodges, and every
+    /// walk issued meanwhile was cut off and counted — "no path" after three, with a good route.
+    /// The walk waits the fight out, off the mount, and finishes after.
+    /// </summary>
+    [Fact]
+    public void A_fight_on_the_way_is_waited_out_off_the_mount()
+    {
+        var w = new FakeStepWorld { TerritoryId = 814, IsMounted = true, InCombat = true };
+        w.PlayerPosition = new Vector3(649, 0, 552);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 814, Position = new Vector3(626, 3, 472) });
+
+        for (var i = 0; i < 120; i++) { ex.Tick(); w.Advance(0.5); }   // a minute of fighting
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.Contains("Dismount", w.Calls);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Move 626"));
+
+        w.IsMounted = false;   // the dismount took
+        var before = w.Calls.Count;
+        w.InCombat = false;
+        w.ArriveOnMove = true;
+        for (var i = 0; i < 40 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Equal(StepStatus.Done, ex.Status);
+        var after = w.Calls.Skip(before).ToList();
+        var mount = after.IndexOf("Mount");
+        Assert.True(mount >= 0 && mount < after.FindIndex(c => c.StartsWith("Move 626")), string.Join(" | ", after));   // back on, then ride
+    }
+
+    /// <summary>Daedalus switched off: nobody would fight, so the walk carries on and leaves the mob behind.</summary>
+    [Fact]
+    public void With_daedalus_off_a_fight_does_not_stop_the_walk()
+    {
+        var w = new FakeStepWorld { TerritoryId = 814, InCombat = true, DaedalusDisabledByUser = true, ArriveOnMove = true };
+        w.PlayerPosition = new Vector3(649, 0, 552);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 814, Position = new Vector3(626, 3, 472) });
+        for (var i = 0; i < 40 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    /// <summary>
+    /// Teleported to the Crystarium for the amaro, the run walked from the aetheryte plaza to the
+    /// Amaro Launch — whose own shard stands beside the amaro. The aethernet first, then the door.
+    /// </summary>
+    [Fact]
+    public void A_door_across_a_city_is_reached_by_the_aethernet()
+    {
+        var w = new FakeStepWorld { TerritoryId = 819, ArriveOnMove = true, CanMountHere = false };
+        w.PlayerPosition = new Vector3(-64, 20, -2);
+        w.AethernetAccess[819] = new Vector3(-62, 20, -2);
+        w.CityHopTo = "[Crystarium] The Amaro Launch";
+        w.Doors[814] = [new Odysseus.Services.Travel.Doorways.Door(819, 814, 1029806, new Vector3(62.4f, 36.2f, -169.4f))];
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 814, Position = new Vector3(639, 1, 534) });
+        for (var i = 0; i < 10; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains(w.Calls, c => c.StartsWith("Aethernet [Crystarium] The Amaro Launch"));
+    }
+
+    /// <summary>
+    /// Ariadne updated mid-run: nothing could move while it reloaded, and the door's minute ran out
+    /// before the amaro was reached. Pathing unavailable is not the door's time.
+    /// </summary>
+    [Fact]
+    public void A_door_waits_out_pathing_that_is_reloading()
+    {
+        var w = new FakeStepWorld { TerritoryId = 819 };
+        w.PlayerPosition = new Vector3(60, 36, -160);
+        w.Spawned.Add(1029806);
+        w.Doors[814] = [new Odysseus.Services.Travel.Doorways.Door(819, 814, 1029806, new Vector3(62.4f, 36.2f, -169.4f))];
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 814, Position = new Vector3(639, 1, 534) });
+        ex.Tick(); w.Advance(0.5);
+        w.NavmeshReady = false;
+        for (var i = 0; i < 240; i++) { ex.Tick(); w.Advance(0.5); }   // two minutes of reloading
+        Assert.Equal(StepStatus.Running, ex.Status);
+    }
+
+    /// <summary>
+    /// Ariadne chose to teleport first (A Still Tide's hand-in, 16s via Stilltide against 38s on
+    /// foot); standing still for the cast read as a stall, and the rescue hop cancelled it.
+    /// </summary>
+    [Fact]
+    public void A_cast_mid_walk_is_not_a_stall_to_jump_out_of()
+    {
+        var w = new FakeStepWorld { TerritoryId = 814, IsMoving = true, IsCasting = true };
+        w.PlayerPosition = new Vector3(600, 30, 100);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 814, Position = new Vector3(691, 30, 280) });
+        for (var i = 0; i < 24; i++) { ex.Tick(); w.Advance(0.5); }   // twelve seconds of casting
+        Assert.DoesNotContain(w.Calls, c => c.Contains("Jump"));
+    }
+
+    /// <summary>
+    /// Ariadne waited ~40 s for Kholusia's mesh, then chose to teleport; the stall hop had run its four
+    /// seconds and fired 21 ms later, before any cast — "teleport never started". Busy is not stuck.
+    /// </summary>
+    [Fact]
+    public void Pathing_still_at_work_is_not_a_stall_to_jump_out_of()
+    {
+        var w = new FakeStepWorld { TerritoryId = 814, IsMoving = true, IsPathfinding = true };
+        w.PlayerPosition = new Vector3(172, 39, 618);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 814, Position = new Vector3(742, 29, 266) });
+        for (var i = 0; i < 80; i++) { ex.Tick(); w.Advance(0.5); }   // forty seconds of planning
+        Assert.DoesNotContain(w.Calls, c => c.Contains("Jump"));
+    }
+
+    /// <summary>
+    /// Closing Up Shop: its NPCs stand behind a wall in the Peaks that the mesh cannot cross; the
+    /// Ala Mhigan Resistance gate guard passes you through. No path, so the gate, then the walk.
+    /// </summary>
+    [Fact]
+    public void A_wall_with_a_gate_is_crossed_by_its_guard()
+    {
+        var w = new FakeStepWorld { TerritoryId = 620, CanMountHere = false, PathWaypointCount = 0 };
+        w.PlayerPosition = new Vector3(-128, 305, 189);   // beside the guard, the wrong side of the wall
+        w.Spawned.Add(1021557);
+        w.Gates.Add(new Odysseus.Services.Travel.Doorways.Door(620, 620, 1021557, new Vector3(-130, 305, 190)));
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 620, Position = new Vector3(321, 324, 391) });
+
+        for (var i = 0; i < 300 && ex.Status == StepStatus.Running; i++)
+        {
+            ex.Tick(); w.Advance(0.5);
+            if (w.Calls.Contains("Interact 1021557") && w.PlayerPosition.X < 0)
+            {
+                w.PlayerPosition = new Vector3(300, 324, 380);   // the far side of the wall
+                w.PathWaypointCount = 5;
+                w.ArriveOnMove = true;
+            }
+        }
+        Assert.Contains("Interact 1021557", w.Calls);
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    /// <summary>
+    /// A gate guard's step names the zone it stands in as its target: the walk to him is still made.
+    /// Read as "already crossed", the step stood 550 y away and called him missing.
+    /// </summary>
+    [Fact]
+    public void A_gate_step_still_walks_to_its_guard()
+    {
+        var w = new FakeStepWorld { TerritoryId = 620, ArriveOnMove = true };
+        w.PlayerPosition = new Vector3(-223, 257, 741);
+        w.Spawned.Add(1021557);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 1021557, TerritoryId = 620, TargetTerritoryId = 620, Position = new Vector3(-130, 305, 190) });
+        for (var i = 0; i < 30 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains("Mount", w.Calls);             // it set off for him — read as "already crossed", it never travelled
+        Assert.Contains("Interact 1021557", w.Calls);
     }
 }

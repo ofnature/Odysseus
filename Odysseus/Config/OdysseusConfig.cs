@@ -39,6 +39,12 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     public bool ContinueToNextQuest { get; set; } = true;
 
     /// <summary>
+    /// Between quests, in a zone where flying is not yet unlocked: queue its aether current quests
+    /// that can be taken now, and collect its loose currents once. Off by default.
+    /// </summary>
+    public bool AutoAetherCurrents { get; set; }
+
+    /// <summary>
     /// Stop when the character reaches this level. 0 = no level stop. Useful for keeping an alt
     /// under a duty's sync level, or parking a trial account before its cap.
     /// </summary>
@@ -177,6 +183,18 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// </para>
     /// </summary>
     public string PathsDirectory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Where Path Editor saves go: the central fixes folder every character reads (the repo's
+    /// Assets/PathFixes on a dev machine, so fixes ship). Blank: this install's own paths folder.
+    /// </summary>
+    public string PathEditsDirectory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Aetherytes the game would not attune, per character (content id → aetheryte → the scenario quest
+    /// the story stood at then). Skipped while the story stands there; tried again once it has moved.
+    /// </summary>
+    public Dictionary<ulong, Dictionary<uint, ushort>> RefusedAttunes { get; set; } = new();
 
     /// <summary>
     /// Keep the chocobo companion summoned while running, feeding it a Gysahl Green whenever the

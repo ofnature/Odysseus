@@ -139,22 +139,39 @@ public sealed class AetheryteCatalog
     /// </summary>
     private void LoadMappedShards(IDataManager data)
     {
-        var territories = data.GetExcelSheet<TerritoryType>();
         var markers = data.GetSubrowExcelSheet<MapMarker>();
+
+        // Every map a zone has, not just its main one: Eulmore is drawn on three — the Buttress, the
+        // Understory and the Canopy — and the Mainstay shard is only on the Understory, the Eulmore
+        // aetheryte only on the Canopy. Reading the main map alone left both unplaced, and an attune
+        // step for the Mainstay faulted "not on any map" (A Blessed Instrument, 3289).
+        var mapsByTerritory = data.GetExcelSheet<Map>()
+            .Where(m => m.SizeFactor != 0 && m.TerritoryType.RowId != 0)
+            .GroupBy(m => m.TerritoryType.RowId)
+            .ToDictionary(g => g.Key, g => g.ToList());
+        IEnumerable<(Map Map, MapMarker Marker)> MarkersOf(uint territory)
+        {
+            if (!mapsByTerritory.TryGetValue(territory, out var maps))
+                yield break;
+            foreach (var map in maps)
+                if (markers.TryGetRow(map.MapMarkerRange, out var rows))
+                    foreach (var marker in rows)
+                        yield return (map, marker);
+        }
+        static System.Numerics.Vector2 WorldOf(Map map, MapMarker marker)
+        {
+            var scale = map.SizeFactor / 100f;
+            return new System.Numerics.Vector2((marker.X - 1024f) / scale - map.OffsetX, (marker.Y - 1024f) / scale - map.OffsetY);
+        }
 
         // The aetherytes themselves: marker type 3, keyed by their Aetheryte row.
         foreach (var territory in _byId.Values.Select(v => v.TerritoryId).Concat(_shards.Select(s => s.TerritoryId)).Distinct())
         {
-            if (territories.GetRowOrDefault(territory)?.Map.ValueNullable is not { } zoneMap || zoneMap.SizeFactor == 0)
-                continue;
-            if (!markers.TryGetRow(zoneMap.MapMarkerRange, out var zoneRows))
-                continue;
-            var zoneScale = zoneMap.SizeFactor / 100f;
-            foreach (var marker in zoneRows)
+            foreach (var (zoneMap, marker) in MarkersOf(territory))
             {
                 if (marker.DataType != 3 || !_byId.TryGetValue(marker.DataKey.RowId, out var aetheryte) || aetheryte.TerritoryId != territory)
                     continue;
-                var at = new System.Numerics.Vector2((marker.X - 1024f) / zoneScale - zoneMap.OffsetX, (marker.Y - 1024f) / zoneScale - zoneMap.OffsetY);
+                var at = WorldOf(zoneMap, marker);
                 if (!_attunables.TryGetValue(territory, out var list))
                     _attunables[territory] = list = [];
                 if (!list.Any(a => a.Id == marker.DataKey.RowId))
@@ -164,21 +181,15 @@ public sealed class AetheryteCatalog
 
         foreach (var byTerritory in _shards.GroupBy(s => s.TerritoryId))
         {
-            if (territories.GetRowOrDefault(byTerritory.Key)?.Map.ValueNullable is not { } map || map.SizeFactor == 0)
-                continue;
-            if (!markers.TryGetRow(map.MapMarkerRange, out var rows))
-                continue;
-            var scale = map.SizeFactor / 100f;
-            foreach (var marker in rows)
+            foreach (var (map, marker) in MarkersOf(byTerritory.Key))
             {
                 if (marker.DataType != 4) continue;   // 4: an aetheryte or shard, keyed by its PlaceName
                 if (byTerritory.FirstOrDefault(s => s.PlaceNameId == marker.DataKey.RowId) is not { } shard) continue;
-                var at = new System.Numerics.Vector2(
-                    (marker.X - 1024f) / scale - map.OffsetX,
-                    (marker.Y - 1024f) / scale - map.OffsetY);
+                var at = WorldOf(map, marker);
                 if (!_mappedShards.TryGetValue(byTerritory.Key, out var list))
                     _mappedShards[byTerritory.Key] = list = [];
-                list.Add((shard.Id, shard.Name, at));
+                if (!list.Any(m => m.Id == shard.Id))
+                    list.Add((shard.Id, shard.Name, at));
                 if (!_attunables.TryGetValue(byTerritory.Key, out var attunables))
                     _attunables[byTerritory.Key] = attunables = [];
                 if (!attunables.Any(a => a.Id == shard.Id))

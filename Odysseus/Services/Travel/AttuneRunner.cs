@@ -18,7 +18,8 @@ public sealed class AttuneRunner
     private readonly StepExecutor _executor;
     private readonly Action<string> _log;
 
-    private Queue<(uint Id, string Name, bool IsShard)> _queue = new();
+    /// <summary>What is left, taken nearest-first from wherever the last one left us.</summary>
+    private List<(uint Id, string Name, bool IsShard)> _queue = new();
     private (uint Id, string Name, bool IsShard)? _current;
     private readonly List<string> _missed = [];
     private uint _territory;
@@ -48,7 +49,7 @@ public sealed class AttuneRunner
             StatusLine = "Everything in this zone is attuned.";
             return false;
         }
-        _queue = new Queue<(uint, string, bool)>(missing);
+        _queue = new List<(uint, string, bool)>(missing);
         _current = null;
         _missed.Clear();
         _territory = _world.TerritoryId;
@@ -102,7 +103,20 @@ public sealed class AttuneRunner
                 return;
             }
 
-            var next = _queue.Dequeue();
+            // Shards first, then the zone's aetheryte; each nearest first, chosen afresh after each.
+            // Distance is across the ground: a map marker has no height, and the guess borrows ours,
+            // so Eulmore's aetheryte three floors up measured as if on our floor and, standing near the
+            // middle of the city, came out "nearest" — newtoon2 climbed to the Canopy first and walked
+            // back down for the shards. A city's own aetheryte is also the one the story locks (Eulmore's
+            // until Paradise Fallen), so it is the right one to leave for last. Unplaceable ones go last.
+            var here = new System.Numerics.Vector2(_world.PlayerPosition.X, _world.PlayerPosition.Z);
+            var next = _queue
+                .OrderBy(q => q.IsShard ? 0 : 1)
+                .ThenBy(q => _world.AttunableAt(q.Id) is { } place
+                    ? System.Numerics.Vector2.Distance(here, new System.Numerics.Vector2(place.At.X, place.At.Z))
+                    : float.MaxValue)
+                .First();
+            _queue.Remove(next);
             _current = next;
             _executor.Begin(new QuestStep
             {

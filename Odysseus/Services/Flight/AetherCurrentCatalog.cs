@@ -11,7 +11,8 @@ namespace Odysseus.Services.Flight;
 /// <summary>One aether current, and how it is obtained.</summary>
 /// <param name="QuestId">The quest that grants it, or 0 when it is a pickup out in the world.</param>
 /// <param name="Position">Where the pickup is, when a path recorded it.</param>
-public sealed record AetherCurrent(uint Id, ushort QuestId, Vector3? Position)
+/// <param name="DataId">The pickup's own object, from the same path step — what the attune presses.</param>
+public sealed record AetherCurrent(uint Id, ushort QuestId, Vector3? Position, uint? DataId = null)
 {
     public bool FromQuest => QuestId != 0;
     /// <summary>A pickup we know how to walk to.</summary>
@@ -67,7 +68,8 @@ public sealed class AetherCurrentCatalog
                     var questId = questRow >= Quest.QuestCatalog.RowIdBase
                         ? (ushort)(questRow - Quest.QuestCatalog.RowIdBase)
                         : (ushort)0;
-                    currents.Add(new AetherCurrent(id, questId, positions.GetValueOrDefault(id)));
+                    var seen = positions.TryGetValue(id, out var where) ? where : default;
+                    currents.Add(new AetherCurrent(id, questId, seen.Position, seen.DataId));
                 }
                 if (currents.Count == 0) continue;
 
@@ -96,16 +98,19 @@ public sealed class AetherCurrentCatalog
     /// Where the loose currents are, taken from every converted path. A current can appear in more
     /// than one path; the first position wins, since they are all the same object in the world.
     /// </summary>
-    private static Dictionary<uint, Vector3> HarvestPositions(PathStore paths)
+    private static Dictionary<uint, (Vector3? Position, uint? DataId)> HarvestPositions(PathStore paths)
     {
-        var found = new Dictionary<uint, Vector3>();
+        // The object too: a step built without it had nothing to press, walked to the spot, called
+        // itself done and left the current locked (Lakeland, 0 of 2 collected).
+        var found = new Dictionary<uint, (Vector3? Position, uint? DataId)>();
         foreach (var path in paths.All)
             foreach (var sequence in path.Sequences)
                 foreach (var step in sequence.Steps)
                 {
                     if (step.Kind != StepKind.AttuneAetherCurrent) continue;
                     if (step.AetherCurrentId is not { } id || step.Position is not { } position) continue;
-                    found.TryAdd(id, position);
+                    if (!found.TryGetValue(id, out var have) || (have.DataId is null && step.DataId is not null))
+                        found[id] = (position, step.DataId);
                 }
         return found;
     }

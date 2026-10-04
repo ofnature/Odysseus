@@ -137,6 +137,12 @@ public interface IStepWorld
     /// </summary>
     float NavmeshBuildProgress { get; }
 
+    /// <summary>
+    /// The pathing plugin is still working on the move — planning the route, waiting for the zone's
+    /// mesh, or running a teleport leg it chose (Ariadne's TaskInProgress). Not moving yet is not stuck.
+    /// </summary>
+    bool IsPathfinding { get; }
+
     /// <summary>A path is being computed or followed.</summary>
     bool IsMoving { get; }
 
@@ -240,10 +246,13 @@ public interface IStepWorld
     TravelRoute? RouteTo(uint territoryId, Vector3? near);
 
     /// <summary>
-    /// A door into a territory with no aetheryte of its own (the Rising Stones, from Mor Dhona) —
-    /// one in the zone the character stands in first. Null when no path in the library uses one.
+    /// Every door into a territory with no way in by aetheryte (the Rising Stones from Mor Dhona,
+    /// Kholusia on the Crystarium's amaro), most used first. Empty when the library knows none.
     /// </summary>
-    Travel.Doorways.Door? DoorInto(uint territoryId);
+    System.Collections.Generic.IReadOnlyList<Travel.Doorways.Door> DoorsInto(uint territoryId);
+
+    /// <summary>Gates inside a zone — an interact across a wall that stays in the zone (the Peaks' gate guards).</summary>
+    System.Collections.Generic.IReadOnlyList<Travel.Doorways.Door> GatesIn(uint territoryId);
 
     /// <summary>The Beastmaster pet on a battlehorn (1–3), by name; null when empty.</summary>
     string? BattlehornPet(int slot);
@@ -454,9 +463,28 @@ public interface IStepWorld
     /// <summary>Every aetheryte and shard in this zone not yet attuned.</summary>
     System.Collections.Generic.IReadOnlyList<(uint Id, string Name, bool IsShard)> UnattunedHere();
 
+    /// <summary>
+    /// The game would not attune this one — story-locked (Eulmore's aetheryte, early in
+    /// Shadowbringers), or out of reach. Left out of <see cref="UnattunedHere"/> and
+    /// <see cref="UnattunedNear"/> for the rest of the session; a quest's own attune step still tries.
+    /// </summary>
+    void AttuneRefused(uint aetheryteId);
+
+    /// <summary>
+    /// When the game last said an aetheryte cannot be used yet ("special permission is required to use
+    /// this aetheryte"); default when it never has. Read from chat.
+    /// </summary>
+    DateTime LastAttuneRefusal { get; }
+
     /// <summary>The aetheryte or shard object loaded nearest a spot, within reach of it, or null.</summary>
     /// <remarks>Distance across the ground: the asked point's height is a guess from a map marker.</remarks>
     Vector3? NearestAttuneObject(Vector3 near, float within);
+
+    /// <summary>
+    /// That aetheryte or shard's own object when it is loaded, by its id; else the nearest across the
+    /// ground to where the map puts it (<see cref="NearestAttuneObject"/>).
+    /// </summary>
+    Vector3? AttuneObjectFor(uint aetheryteId, Vector3 near, float within);
 
     /// <summary>Interact with the aetheryte or shard object standing at a spot.</summary>
     bool InteractAttuneObject(Vector3 at);

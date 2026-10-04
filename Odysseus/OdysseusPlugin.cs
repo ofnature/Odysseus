@@ -125,7 +125,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 ? _config.PathsDirectory
                 : System.IO.Path.Combine(PluginInterface.ConfigDirectory.FullName, "paths"),
             message => Say(message),
-            Services.Paths.PathPack.ShippedPath(PluginInterface.AssemblyLocation.DirectoryName));
+            Services.Paths.PathPack.ShippedPath(PluginInterface.AssemblyLocation.DirectoryName),
+            System.IO.Path.Combine(PluginInterface.AssemblyLocation.DirectoryName ?? string.Empty,
+                Services.Paths.PathPack.AssetFolder, "PathFixes"),
+            _config.PathEditsDirectory);
 
         var aetherytes = new Services.Travel.AetheryteCatalog(DataManager, message => Warn(message));
         var duties = new DutyCatalog(DataManager, message => Warn(message));
@@ -161,6 +164,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _world.Minerva = new MinervaIpc(PluginInterface, message => Warn(message));
         _world.Snipe = new SnipeSkipper(GameInterop, message => Warn(message));
         _world.Doors = new Services.Travel.Doorways(() => _pathStore.All);
+        _world.SavedRefusals = _config.RefusedAttunes;
+        _world.SaveRefusals = SaveConfig;
+        Service.ChatGui.ChatMessage += OnChatMessage;
         _battlehorn = new BattlehornAssigner(_world, DataManager, message => Say(message));
         _world.Battlehorn = _battlehorn;
         _recorderFeed = new RecorderFeed(_world, _quests, aetherytes, duties);
@@ -362,6 +368,27 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
         _flightWindow = new FlightWindow(currents, flightState, _collector, _priority, _catalog, unlockPlanner,
             () => ClientState.TerritoryType, _attuner);
+        _controller.BetweenQuests = () => CurrentsBetweenQuests(currents, flightState, unlockPlanner);
+        // The story moving is an MSQ quest completing: then whatever was set aside gets another try.
+        // (Read off the scenario guide, a side quest finishing had counted, and Closing Up Shop was
+        // set aside and re-queued in a loop.)
+        _controller.QuestCompleted += id =>
+        {
+            if (_catalog.ById(id)?.IsMainScenario == true)
+                _currentsSetAside.Clear();
+        };
+        _collector.StoryHasBeen = StoryHasBeen;
+        _controller.SetAside = (questId, reason) =>
+        {
+            // Only what this setting queued: a current quest whose ground the story has not opened
+            // (Kholusia keeps parts shut for a while). Off the list until the story moves on.
+            if (!_autoQueuedCurrents.Remove(questId))
+                return false;
+            _priority.Remove(questId);
+            _currentsSetAside[questId] = _quests.CurrentScenarioQuest() ?? 0;
+            Say($"{_catalog.NameOf(questId)}: set aside for now ({reason}) — tried again once the story moves on.");
+            return true;
+        };
 
         // The bill of materials for a queued line: its own steps, read against the bags and the FC
         // chest, with crafts expanded through the same recipe and ingredient lookups the deliveries
@@ -503,8 +530,113 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private CallbackRecorder? _clickRecorder;
     private BattlehornAssigner? _battlehorn;
 
+    /// <summary>Current quests this setting put on the priority list — the only ones it may set aside.</summary>
+    private readonly HashSet<ushort> _autoQueuedCurrents = [];
+
+    /// <summary>Current quests that failed, with the scenario quest the story stood at; skipped until it moves.</summary>
+    private readonly Dictionary<ushort, ushort> _currentsSetAside = new();
+
+    /// <summary>Set aside until an MSQ quest completes — side quests finishing are not the story moving.</summary>
+    private bool SetAsideStill(ushort questId) => _currentsSetAside.ContainsKey(questId);
+
+    /// <summary>Where the story's own steps stand, per territory, and in which MSQ quest — built once.</summary>
+    private Dictionary<uint, List<(System.Numerics.Vector2 At, ushort Quest)>>? _storySteps;
+
+    /// <summary>
+    /// Has the story brought this character near that spot? The MSQ paths say where it goes and in
+    /// which quest: a spot only later MSQ quests come near is on the side of the zone the story has not
+    /// opened (Shadowbringers zones are split that way). No MSQ step near it at all: unknown, so yes.
+    /// </summary>
+    private bool StoryHasBeen(uint territory, System.Numerics.Vector3 at)
+    {
+        _storySteps ??= _pathStore.All.Where(p => p.IsMainScenario)
+            .SelectMany(p => p.Sequences.SelectMany(s => s.Steps)
+                .Where(st => st.Position is not null && st.TerritoryId != 0)
+                .Select(st => (st.TerritoryId, At: new System.Numerics.Vector2(st.Position!.Value.X, st.Position.Value.Z), p.QuestId)))
+            .GroupBy(x => x.TerritoryId)
+            .ToDictionary(g => g.Key, g => g.Select(x => (x.At, x.QuestId)).ToList());
+        if (!_storySteps.TryGetValue(territory, out var steps))
+            return true;
+        var spot = new System.Numerics.Vector2(at.X, at.Z);
+        var near = steps.Where(s => System.Numerics.Vector2.Distance(s.At, spot) <= 150f).Select(s => s.Quest).Distinct().ToList();
+        if (near.Count == 0)
+            return true;
+        var current = _quests.CurrentScenarioQuest();
+        return near.Any(q => _quests.IsComplete(q) || q == current);
+    }
+
+    /// <summary>Zones whose loose aether currents were collected (or tried) this session.</summary>
+    private readonly HashSet<uint> _currentZonesDone = [];
+
+    /// <summary>
+    /// "Pick up aether currents while doing the story": at each quest boundary in a zone that cannot
+    /// be flown yet, queue its current quests that can be taken right now (the priority list runs
+    /// them before the story goes on), and collect its loose currents once. True while collecting.
+    /// </summary>
+    private bool CurrentsBetweenQuests(Services.Flight.AetherCurrentCatalog currents, Services.Flight.IFlightState flight,
+        UnlockPlanner unlock)
+    {
+        if (!_config.AutoAetherCurrents)
+            return false;
+        if (!_collector.IsFinished)
+            return true;
+
+        // Current quests already in the journal, wherever they are: the story's own paths pick them up
+        // as they pass the giver (City of Final Pleasures takes A Plankless Task and Village of Woe in
+        // Kholusia) and never come back for them. Queued here, the priority list runs them — travel
+        // and all — before the story goes on.
+        var accepted = _quests.ReadAccepted().Select(q => q.QuestId).ToHashSet();
+        foreach (var held in currents.Zones.SelectMany(z => z.Currents.Select(c => (Zone: z, Current: c)))
+                     .Where(x => x.Current.FromQuest && accepted.Contains(x.Current.QuestId)
+                                 && !flight.IsUnlocked(x.Current.Id) && !_priority.Contains(x.Current.QuestId)
+                                 && !SetAsideStill(x.Current.QuestId)))
+        {
+            if (_priority.Add(held.Current.QuestId) && _autoQueuedCurrents.Add(held.Current.QuestId))
+                Say($"{held.Zone.Name}: queued {_catalog.NameOf(held.Current.QuestId)} (in your journal) for its aether current.");
+        }
+
+        var here = ClientState.TerritoryType;
+        if (currents.ForTerritory(here) is not { } zone)
+            return false;
+        var missing = zone.Missing(flight.IsUnlocked).ToList();
+        if (missing.Count == 0)
+            return false;
+
+        // Quest currents: only one that is takeable now, nothing else needed first — anything
+        // longer would pull the story out of order. Asked again at every boundary, so they are
+        // queued as the story opens them.
+        foreach (var current in missing.Where(c => c.FromQuest))
+        {
+            if (_quests.IsComplete(current.QuestId) || _priority.Contains(current.QuestId) || SetAsideStill(current.QuestId))
+                continue;
+            var plan = unlock.Plan(current.QuestId);
+            if (plan.IsRunnable && plan.Steps.Count == 1 && _priority.Add(current.QuestId) && _autoQueuedCurrents.Add(current.QuestId))
+                Say($"{zone.Name}: queued {plan.Steps[0].Name} for its aether current.");
+        }
+
+        // Loose currents: once per zone per session.
+        if (!_currentZonesDone.Add(here) || !missing.Any(c => c.IsReachable))
+            return false;
+        Say($"{zone.Name}: collecting its loose aether currents before the next quest.");
+        return _collector.Start(zone);
+    }
+
+    /// <summary>Chat the run listens for — today only the aetheryte's "special permission is required".</summary>
+    private void OnChatMessage(Dalamud.Game.Chat.IHandleableChatMessage message)
+    {
+        try
+        {
+            _world.NoteChat(message.Message?.TextValue ?? string.Empty);
+        }
+        catch
+        {
+            // chat is never worth a fault
+        }
+    }
+
     public void Dispose()
     {
+        try { Service.ChatGui.ChatMessage -= OnChatMessage; } catch { }
         _clickRecorder?.Dispose();
         _world.Snipe?.Dispose();
         _ownLog?.Dispose();

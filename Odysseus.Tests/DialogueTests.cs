@@ -407,6 +407,31 @@ public class DialogueTests
         Assert.Contains("IconSelect 1", w.Calls);
     }
 
+    /// <summary>
+    /// A Taste of Honey (3288): two list answers, one per menu. The high/low menu was answered with
+    /// the first ("Let's play!"), which it does not offer, and fell to the first option every round.
+    /// </summary>
+    [Fact]
+    public void Each_menu_gets_the_named_answer_it_offers()
+    {
+        var texts = new Texts();
+        texts.Map[(3288, "A1")] = "Let's play!";
+        texts.Map[(3288, "A2")] = "...low!";
+        var w = new FakeStepWorld();
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w, texts);
+        var step = Interact(7);
+        step.DialogueChoices = [new DialogueChoice("List", "Q1", "A1", null), new DialogueChoice("List", "Q2", "A2", null)];
+        ex.Begin(step, questId: 3288);
+        Ticks(ex, w, 3);
+
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectString");
+        w.ListEntries.AddRange(["...high!", "...low!"]);
+        ex.Tick();
+        Assert.Contains("Select 1", w.Calls);
+    }
+
     [Fact]
     public void Unresolvable_list_choice_takes_the_first_option_and_says_why()
     {

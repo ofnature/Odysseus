@@ -33,26 +33,50 @@ public sealed class PathStore
 
     private readonly string _directory;
     private readonly string? _packFile;
+    private readonly string? _shippedFixes;
+    private readonly string? _editsDirectory;
     private readonly Action<string>? _log;
     private readonly Dictionary<ushort, QuestPath> _paths = [];
     private bool _loaded;
     private int _outdated;
     private int _fromPack;
     private int _fromFolder;
+    private int _fromFixes;
 
     /// <param name="directory">Where this client's own paths live — imported, recorded, edited.</param>
     /// <param name="packFile">
     /// The library shipped with the build, read first so a fresh install has every quest without
     /// importing anything. The folder is laid over it, so anything here can still be replaced.
     /// </param>
-    public PathStore(string directory, Action<string>? log = null, string? packFile = null)
+    /// <param name="shippedFixes">
+    /// Hand fixes that came with the build (<c>Assets/PathFixes</c>): a quest the converted data gets
+    /// wrong, fixed once and shipped to everyone. Laid over the library and the folder alike.
+    /// </param>
+    /// <param name="editsDirectory">
+    /// Where Path Editor saves go when set — the central fixes folder (the repo's own
+    /// <c>Assets/PathFixes</c> on a dev machine), read last so a fix made on one character is the one
+    /// every character runs, and ships with the next release. Blank: edits go to <paramref name="directory"/>.
+    /// </param>
+    public PathStore(string directory, Action<string>? log = null, string? packFile = null,
+        string? shippedFixes = null, string? editsDirectory = null)
     {
         _directory = directory;
         _log = log;
         _packFile = packFile;
+        _shippedFixes = shippedFixes;
+        _editsDirectory = string.IsNullOrWhiteSpace(editsDirectory) ? null : editsDirectory;
     }
 
     public string Directory => _directory;
+
+    /// <summary>Where a Path Editor save lands: the central fixes folder when one is set.</summary>
+    public string SaveDirectory => _editsDirectory ?? _directory;
+
+    /// <summary>How many paths are hand fixes, shipped or central.</summary>
+    public int FromFixes
+    {
+        get { EnsureLoaded(); return _fromFixes; }
+    }
 
     /// <summary>How many paths came with the build.</summary>
     public int FromPack
@@ -135,8 +159,8 @@ public sealed class PathStore
     public void Save(QuestPath path)
     {
         EnsureLoaded();
-        System.IO.Directory.CreateDirectory(_directory);
-        var file = FileFor(path.QuestId);
+        System.IO.Directory.CreateDirectory(SaveDirectory);
+        var file = Path.Combine(SaveDirectory, $"{path.QuestId}.json");
         File.WriteAllText(file, JsonSerializer.Serialize(path, JsonOptions));
         if (_paths.TryGetValue(path.QuestId, out var replaced) && replaced.NeedsReconvert)
             _outdated--;
@@ -163,6 +187,7 @@ public sealed class PathStore
         _outdated = 0;
         _fromPack = 0;
         _fromFolder = 0;
+        _fromFixes = 0;
         _loaded = false;
     }
 
@@ -198,6 +223,35 @@ public sealed class PathStore
             }
         }
 
+        LoadFolder();
+
+        // Hand fixes last: the shipped ones, then the central folder edits are saved to. A fix is
+        // the answer for its quest on every character, over the library and over an import alike.
+        var fixedQuests = new HashSet<ushort>();
+        foreach (var fixes in new[] { _shippedFixes, _editsDirectory })
+        {
+            if (fixes is null || !System.IO.Directory.Exists(fixes))
+                continue;
+            foreach (var file in System.IO.Directory.EnumerateFiles(fixes, "*.json"))
+            {
+                try
+                {
+                    var path = JsonSerializer.Deserialize<QuestPath>(File.ReadAllText(file), JsonOptions);
+                    if (path is null || path.QuestId == 0) continue;
+                    fixedQuests.Add(path.QuestId);
+                    _paths[path.QuestId] = path;
+                }
+                catch (Exception ex)
+                {
+                    _log?.Invoke($"Path fix {Path.GetFileName(file)} unreadable: {ex.Message}");
+                }
+            }
+        }
+        _fromFixes = fixedQuests.Count;   // one quest, once — a dev build reads the repo folder and its copy
+    }
+
+    private void LoadFolder()
+    {
         if (!System.IO.Directory.Exists(_directory)) return;
 
         var failed = 0;

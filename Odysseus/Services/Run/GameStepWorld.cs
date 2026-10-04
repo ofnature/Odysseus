@@ -101,6 +101,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public float NavmeshBuildProgress => _vnav.BuildProgress;
 
+    public bool IsPathfinding => _vnav.IsPathfinding;
+
     public bool IsMoving => _vnav.IsBusy;
 
     public int PathWaypointCount => _vnav.WaypointCount;
@@ -339,6 +341,60 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         return territoryId == TerritoryId ? NearestReachablePoint(flat, 60f) ?? flat : flat;
     }
 
+    /// <summary>Attunes the game refused this session (story-locked).</summary>
+    private readonly HashSet<uint> _refusedAttunes = [];
+
+    /// <summary>
+    /// The saved refusals (config), per character: an aetheryte refused while the story stood at the
+    /// same scenario quest is skipped across sessions; once the story has moved it is tried again.
+    /// </summary>
+    public Dictionary<ulong, Dictionary<uint, ushort>>? SavedRefusals { get; set; }
+    public System.Action? SaveRefusals { get; set; }
+
+    private Dictionary<uint, ushort>? MyRefusals(bool create)
+    {
+        ulong who;
+        try
+        {
+            var state = PlayerState.Instance();
+            who = state == null ? 0 : state->ContentId;
+        }
+        catch
+        {
+            who = 0;
+        }
+        if (SavedRefusals is null || who == 0)
+            return null;
+        if (!SavedRefusals.TryGetValue(who, out var mine) && create)
+            SavedRefusals[who] = mine = [];
+        return mine;
+    }
+
+    public void AttuneRefused(uint aetheryteId)
+    {
+        _refusedAttunes.Add(aetheryteId);
+        if (MyRefusals(create: true) is { } mine)
+        {
+            mine[aetheryteId] = _quests.CurrentScenarioQuest() ?? 0;
+            SaveRefusals?.Invoke();
+        }
+    }
+
+    private bool IsRefused(uint aetheryteId)
+        => _refusedAttunes.Contains(aetheryteId)
+           || (MyRefusals(create: false) is { } mine && mine.TryGetValue(aetheryteId, out var at)
+               && at == (_quests.CurrentScenarioQuest() ?? 0));
+
+    /// <summary>The game's "special permission is required to use this aetheryte", when last seen in chat.</summary>
+    public DateTime LastAttuneRefusal { get; private set; }
+
+    /// <summary>Fed every chat line by the plugin; only the aetheryte refusal is kept.</summary>
+    public void NoteChat(string text)
+    {
+        if (text.Contains("special permission is required to use this aetheryte", StringComparison.OrdinalIgnoreCase))
+            LastAttuneRefusal = DateTime.UtcNow;
+    }
+
     public (uint Id, string Name, Vector3 At)? UnattunedNear(Vector3 near, float within)
     {
         try
@@ -348,7 +404,7 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
             foreach (var a in _aetherytes.AttunablesIn(TerritoryId))
             {
                 var d = Vector2.Distance(new Vector2(near.X, near.Z), a.At);
-                if (d > bestDistance || IsAttuned(a.Id)) continue;
+                if (d > bestDistance || IsAttuned(a.Id) || IsRefused(a.Id)) continue;
                 bestDistance = d;
                 best = (a.Id, a.Name, Grounded(a.At, a.TerritoryId));
             }
@@ -364,7 +420,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     {
         try
         {
-            return _aetherytes.AttunablesIn(TerritoryId).Where(a => !IsAttuned(a.Id)).Select(a => (a.Id, a.Name, a.IsShard)).ToList();
+            return _aetherytes.AttunablesIn(TerritoryId).Where(a => !IsAttuned(a.Id) && !IsRefused(a.Id))
+                .Select(a => (a.Id, a.Name, a.IsShard)).ToList();
         }
         catch
         {
@@ -372,7 +429,7 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
-    private IGameObject? AttuneObjectNear(Vector3 near, float within)
+    private IGameObject? AttuneObjectNear(Vector3 near, float within, bool acrossGround = true)
     {
         var shards = ShardObjectIds();
         IGameObject? best = null;
@@ -386,7 +443,9 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
             // guessed one, and in a city of levels it can be the wrong level entirely — the
             // Crystarium's Cabinet of Curiosity shard sits ~57y below where it was guessed, and a 3D
             // test never found it from the level above.
-            var d = Vector2.Distance(new Vector2(obj.Position.X, obj.Position.Z), new Vector2(near.X, near.Z));
+            var d = acrossGround
+                ? Vector2.Distance(new Vector2(obj.Position.X, obj.Position.Z), new Vector2(near.X, near.Z))
+                : Vector3.Distance(obj.Position, near);
             if (d > bestDistance) continue;
             bestDistance = d;
             best = obj;
@@ -406,11 +465,32 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
+    /// <summary>
+    /// The aetheryte or shard itself, by its own id when it is loaded — an Aetheryte-kind object's
+    /// BaseId is its Aetheryte row. Matching across the ground alone took Eulmore's Mainstay shard,
+    /// directly beneath the city aetheryte, for the aetheryte, and walked back down to it.
+    /// </summary>
+    public Vector3? AttuneObjectFor(uint aetheryteId, Vector3 near, float within)
+    {
+        try
+        {
+            foreach (var obj in _objectTable)
+                if (obj.ObjectKind == ObjectKind.Aetheryte && obj.BaseId == aetheryteId)
+                    return obj.Position;
+        }
+        catch
+        {
+            // fall back to where the map puts it
+        }
+        return NearestAttuneObject(near, within);
+    }
+
     public bool InteractAttuneObject(Vector3 at)
     {
         try
         {
-            if (AttuneObjectNear(at, 2f) is not { } obj) return false;
+            // The exact object at that spot: in 3D, so the shard a floor below is never the one pressed.
+            if (AttuneObjectNear(at, 2f, acrossGround: false) is not { } obj) return false;
             SetTarget(obj);
             return Interact(obj);
         }
@@ -948,7 +1028,9 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// <summary>The doors the path library walks through. Null means none are known.</summary>
     public Travel.Doorways? Doors { get; set; }
 
-    public Travel.Doorways.Door? DoorInto(uint territoryId) => Doors?.Into(territoryId, _clientState.TerritoryType);
+    public IReadOnlyList<Travel.Doorways.Door> DoorsInto(uint territoryId) => Doors?.Into(territoryId) ?? [];
+
+    public IReadOnlyList<Travel.Doorways.Door> GatesIn(uint territoryId) => Doors?.GatesIn(territoryId) ?? [];
 
     /// <summary>The battlehorn assigner the command uses too. Null means no battlehorns are reached.</summary>
     public BattlehornAssigner? Battlehorn { get; set; }
@@ -2343,6 +2425,17 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
                     if (!byTerritory.TryGetValue(warp.TerritoryType.RowId, out var list))
                         byTerritory[warp.TerritoryType.RowId] = list = [];
                     list.Add(question);
+                }
+                // A ride that is no warp asks plainly: "Travel to Kholusia?" (the Crystarium's
+                // aspiring amaro tamer). The zone's own name in that wording is its question too.
+                foreach (var territory in _data.GetExcelSheet<TerritoryType>())
+                {
+                    var place = territory.PlaceName.ValueNullable?.Name.ExtractText();
+                    if (string.IsNullOrEmpty(place))
+                        continue;
+                    if (!byTerritory.TryGetValue(territory.RowId, out var list))
+                        byTerritory[territory.RowId] = list = [];
+                    list.Add($"Travel to {place}?");
                 }
                 _travelPrompts = byTerritory;
             }

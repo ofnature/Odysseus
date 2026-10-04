@@ -33,6 +33,48 @@ public class PathPackTests : IDisposable
         Assert.Equal(7u, read[1].Sequences[0].Steps[0].DataId);
     }
 
+    /// <summary>
+    /// A hand fix is the answer for its quest everywhere: over the shipped library and over a
+    /// client's own import alike. A Taste of Honey's spiral staircase, fixed once on newtoon1.
+    /// </summary>
+    [Fact]
+    public void Hand_fixes_win_over_the_library_and_the_folder()
+    {
+        var pack = System.IO.Path.Combine(_dir, PathPack.FileName);
+        PathPack.WriteFile(pack, [Path1(3288, "Shipped"), Path1(2, "Shipped two")]);
+        var folder = System.IO.Path.Combine(_dir, "paths");
+        var shipped = System.IO.Path.Combine(_dir, "fixes");
+        new PathStore(folder).Save(Path1(3288, "Imported"));
+        new PathStore(shipped).Save(Path1(3288, "Fixed"));
+
+        var store = new PathStore(folder, packFile: pack, shippedFixes: shipped);
+        Assert.Equal("Fixed", store.ForQuest(3288)!.Name);
+        Assert.Equal("Shipped two", store.ForQuest(2)!.Name);
+        Assert.Equal(1, store.FromFixes);
+    }
+
+    /// <summary>
+    /// With a central fixes folder set, a Path Editor save goes there — and the same quest read from
+    /// both it and the build's shipped copy is counted once.
+    /// </summary>
+    [Fact]
+    public void Edits_save_to_the_central_fixes_folder()
+    {
+        var folder = System.IO.Path.Combine(_dir, "paths");
+        var central = System.IO.Path.Combine(_dir, "central");
+        var shipped = System.IO.Path.Combine(_dir, "fixes");
+        new PathStore(shipped).Save(Path1(3288, "Fixed v1"));
+
+        var store = new PathStore(folder, shippedFixes: shipped, editsDirectory: central);
+        store.Save(Path1(3288, "Fixed v2"));
+        Assert.True(File.Exists(System.IO.Path.Combine(central, "3288.json")));
+        Assert.False(File.Exists(System.IO.Path.Combine(folder, "3288.json")));
+
+        store.Reload();
+        Assert.Equal("Fixed v2", store.ForQuest(3288)!.Name);   // central read after the shipped copy
+        Assert.Equal(1, store.FromFixes);
+    }
+
     [Fact]
     public void The_shipped_library_is_read_first_and_this_clients_own_paths_win()
     {

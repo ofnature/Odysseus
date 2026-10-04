@@ -10,6 +10,7 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public Vector3 PlayerPosition { get; set; }
     public uint TerritoryId { get; set; } = 400;
     public bool NavmeshReady { get; set; } = true;
+    public bool IsPathfinding { get; set; }
     /// <summary>Null = everything is on the mesh (the point itself comes back); otherwise answers per point.</summary>
     public Func<Vector3, float, Vector3?>? NearestReachableFn { get; set; }
     public Vector3? NearestReachablePoint(Vector3 near, float within) => NearestReachableFn is { } f ? f(near, within) : near;
@@ -239,9 +240,11 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     }
     public bool BattlehornBusy => false;
     public string BattlehornMessage => BattlehornLands ? "assigned" : "did not land";
-    /// <summary>Territory → the door into it.</summary>
-    public Dictionary<uint, Odysseus.Services.Travel.Doorways.Door> Doors { get; } = new();
-    public Odysseus.Services.Travel.Doorways.Door? DoorInto(uint territoryId) => Doors.GetValueOrDefault(territoryId);
+    /// <summary>Territory → the doors into it, most used first.</summary>
+    public Dictionary<uint, List<Odysseus.Services.Travel.Doorways.Door>> Doors { get; } = new();
+    public IReadOnlyList<Odysseus.Services.Travel.Doorways.Door> DoorsInto(uint territoryId) => Doors.GetValueOrDefault(territoryId) ?? [];
+    public List<Odysseus.Services.Travel.Doorways.Door> Gates { get; } = [];
+    public IReadOnlyList<Odysseus.Services.Travel.Doorways.Door> GatesIn(uint territoryId) => Gates.Where(g => g.From == territoryId).ToList();
     public TravelRoute? RouteTo(uint territoryId, Vector3? near)
     {
         if (AttunedByTerritory.TryGetValue(territoryId, out var id))
@@ -365,14 +368,25 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public (uint Id, string Name, Vector3 At)? UnattunedNear(Vector3 near, float within)
     {
         foreach (var (id, a) in Attunables)
-            if (!AttunedIds.Contains(id) && Vector3.Distance(near, a.At) <= within) return (id, a.Name, a.At);
+            if (!AttunedIds.Contains(id) && !RefusedAttunes.Contains(id) && Vector3.Distance(near, a.At) <= within) return (id, a.Name, a.At);
         return null;
     }
+    /// <summary>Which of <see cref="Attunables"/> are shards (the rest are aetherytes).</summary>
+    public HashSet<uint> ShardIds { get; } = [];
     public IReadOnlyList<(uint Id, string Name, bool IsShard)> UnattunedHere()
-        => Attunables.Where(kv => !AttunedIds.Contains(kv.Key)).Select(kv => (kv.Key, kv.Value.Name, false)).ToList();
+        => Attunables.Where(kv => !AttunedIds.Contains(kv.Key) && !RefusedAttunes.Contains(kv.Key))
+            .Select(kv => (kv.Key, kv.Value.Name, ShardIds.Contains(kv.Key))).ToList();
+    public HashSet<uint> RefusedAttunes { get; } = [];
+    public void AttuneRefused(uint aetheryteId) => RefusedAttunes.Add(aetheryteId);
+    public DateTime LastAttuneRefusal { get; set; }
+    public Vector3? AttuneObjectFor(uint aetheryteId, Vector3 near, float within)
+        => Attunables.TryGetValue(aetheryteId, out var a) ? a.At : NearestAttuneObject(near, within);
     public Vector3? NearestAttuneObject(Vector3 near, float within)
-        => Attunables.Values.Select(a => (Vector3?)a.At)
-            .FirstOrDefault(a => Vector2.Distance(new Vector2(a!.Value.X, a.Value.Z), new Vector2(near.X, near.Z)) <= within);
+    {
+        float Across(Vector3 at) => Vector2.Distance(new Vector2(at.X, at.Z), new Vector2(near.X, near.Z));
+        var closest = Attunables.Values.Select(a => a.At).Where(at => Across(at) <= within).OrderBy(Across).ToList();
+        return closest.Count == 0 ? null : closest[0];   // the nearest, as the game's lookup does
+    }
     public bool InteractAttuneObject(Vector3 at)
     {
         Calls.Add("InteractAetheryte");
