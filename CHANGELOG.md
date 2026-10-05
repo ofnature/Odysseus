@@ -1,6 +1,16 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.16 — 2026-10-04
+
+### Getting there
+- A quest's own flying mount flies: Logistics of War (3304) puts you on an amaro in Lakeland, where you cannot fly yet, and the legs it rides were walked along the ground. On a mount this character does not own that can fly, every leg flies, currents or not. And a fight below no longer holds the trip or takes you off it — the run had dismounted at every mob, the amaro was gone, and the sequence faulted after three replays
+
+### Running
+- Stop stops the trip: an aethernet hop Lifestream has under way is aborted along with the path, and between quests the main Stop also stops the aether current collector and "Attune this zone" — the walk to the next current had carried on after the stop
+
+<!-- LATEST-END -->
+
 ## v0.2.15 — 2026-10-04
 
 ### Aether currents
@@ -9,7 +19,6 @@
 ### Getting there
 - Back into Eulmore without its aetheryte: from Kholusia, Odysseus walks in through the zone line into the Gatetown instead of faulting "no aetheryte there that you have attuned". Every path into Eulmore teleports to its aetheryte, so the library knew no other way in; a door can now be a zone line walked into as well as something to interact with
 
-<!-- LATEST-END -->
 
 ## v0.2.14 — 2026-10-04
 
