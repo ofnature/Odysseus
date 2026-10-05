@@ -44,7 +44,8 @@ public sealed record MainWindowDeps(
     Action ToggleGather,
     Func<IReadOnlyList<Services.Quest.TrackedObjectives>> Objectives,
     Services.Travel.AttuneRunner Attuner,
-    Action OpenFlight);
+    Action OpenFlight,
+    Services.Flight.CurrentCollector Collector);
 
 /// <summary>
 /// The main window: a compact vertical panel in the QST style — state chip in the title, quest
@@ -279,7 +280,14 @@ public sealed class MainWindow : OdysseusWindow
 
         if (Running)
         {
-            if (OdysseusTheme.IconButton("stop", FontAwesomeIcon.Stop, "Stop. Nothing is lost — Start resumes from the game's own quest state.", sq)) Ctl.Stop();
+            if (OdysseusTheme.IconButton("stop", FontAwesomeIcon.Stop, "Stop. Nothing is lost — Start resumes from the game's own quest state.", sq))
+            {
+                Ctl.Stop();
+                // Between quests the collector or the attuner has the wheel, not the run: stop
+                // means them too, or the walk to the next current went on after the stop.
+                if (!_d.Collector.IsFinished) _d.Collector.Stop();
+                if (_d.Attuner.Running) _d.Attuner.Stop();
+            }
             ImGui.SameLine();
             var pausing = Ctl.PauseAfterStep;
             if (OdysseusTheme.IconTextButton(FontAwesomeIcon.StepForward, pausing ? "Step armed" : "Step",

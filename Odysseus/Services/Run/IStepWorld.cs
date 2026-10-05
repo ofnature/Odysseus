@@ -178,8 +178,23 @@ public interface IStepWorld
     /// </summary>
     void Dismount();
 
-    /// <summary>Flying is available in the current zone (aether currents attuned).</summary>
+    /// <summary>
+    /// Flying is available here: the zone's aether currents attuned, or riding a quest's own flying
+    /// mount (see <see cref="OnQuestMount"/>), which flies wherever it is given.
+    /// </summary>
     bool CanFlyHere { get; }
+
+    /// <summary>
+    /// Riding a mount this character does not own — one a quest put it on (Logistics of War's amaro,
+    /// 3304). Getting off loses it for good.
+    /// </summary>
+    bool OnQuestMount { get; }
+
+    /// <summary>
+    /// Abort a trip under way that walking cannot stop — Lifestream walking to a shard and taking
+    /// the aethernet. For a stop: stopping the path alone left the hop to finish on its own.
+    /// </summary>
+    void AbortTravel();
 
     /// <summary>A zone from the base game, where the path data's flying gets caught on the scenery.</summary>
     bool InBaseGameZone { get; }

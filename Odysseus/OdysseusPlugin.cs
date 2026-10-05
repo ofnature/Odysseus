@@ -444,7 +444,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => _gatherWindow.IsOpen = !_gatherWindow.IsOpen,
             () => _objectives.Read(),
             _attuner,
-            () => _flightWindow.IsOpen = true));
+            () => _flightWindow.IsOpen = true,
+            _collector));
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);

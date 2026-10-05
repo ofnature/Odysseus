@@ -61,6 +61,8 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool IsMounted { get; set; }
     public bool IsInFlight { get; set; }
     public bool CanFlyHere { get; set; }
+    public bool OnQuestMount { get; set; }
+    public void AbortTravel() => Calls.Add("AbortTravel");
     public bool InBaseGameZone { get; set; }
     /// <summary>Cities forbid mounts; the sheet says which.</summary>
     public bool CanMountHere { get; set; } = true;

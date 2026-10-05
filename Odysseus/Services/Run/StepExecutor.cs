@@ -752,7 +752,10 @@ public sealed class StepExecutor
     public void Cancel()
     {
         if (Status == StepStatus.Running)
+        {
             _world.StopMoving();
+            _world.AbortTravel();   // an aethernet hop under way finished on its own otherwise
+        }
         // A handoff we switched on outlives the step unless it is switched back off.
         if ((_makeAsked || _craftAsked != 0) && _step is { } running)
         {
@@ -2295,11 +2298,13 @@ public sealed class StepExecutor
     /// every clock with it, off the mount (nobody fights from the saddle), and carry on when it is
     /// over — remounting for a walk the fight took us off, or one long enough to ride. Daedalus
     /// switched off means nobody fights: then moving on is the better answer, and nothing holds.
+    /// Nor on a quest's own mount: off it is off for good (Logistics of War's amaro was dismounted
+    /// at every mob on the ground below, and the sequence never advanced), and flying on outruns it.
     /// True while held, or when the step moved on to remount.
     /// </summary>
     private bool HoldForFight(QuestStep step, DateTime now)
     {
-        if (_world.InCombat && step.Kind != StepKind.Combat && !_world.DaedalusDisabledByUser)
+        if (_world.InCombat && step.Kind != StepKind.Combat && !_world.DaedalusDisabledByUser && !_world.OnQuestMount)
         {
             if (!_combatPauseSaid)
             {

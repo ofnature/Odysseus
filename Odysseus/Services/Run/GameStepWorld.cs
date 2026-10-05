@@ -115,6 +115,12 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
 
     public void StopMoving() => _vnav.Stop();
 
+    public void AbortTravel()
+    {
+        if (_lifestream.IsBusy)
+            _lifestream.Abort();
+    }
+
     public bool IsMounted => _condition[ConditionFlag.Mounted];
 
     public bool IsInFlight => _condition[ConditionFlag.InFlight];
@@ -568,12 +574,34 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         }
     }
 
+    public bool OnQuestMount => QuestMount() is not null;
+
+    /// <summary>The quest mount ridden now, or null when on none (or on one of your own).</summary>
+    private Lumina.Excel.Sheets.Mount? QuestMount()
+    {
+        try
+        {
+            if (!IsMounted || _objectTable.LocalPlayer is not { } player) return null;
+            var id = ((FFXIVClientStructs.FFXIV.Client.Game.Character.Character*)player.Address)->Mount.MountId;
+            var state = PlayerState.Instance();
+            if (id == 0 || state == null || state->IsMountUnlocked(id)) return null;
+            return _data.GetExcelSheet<Lumina.Excel.Sheets.Mount>().GetRowOrDefault(id);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     public bool CanFlyHere
     {
         get
         {
             try
             {
+                // A quest's flying mount flies with or without the zone's currents.
+                if (QuestMount() is { IsFlying: > 0 })
+                    return true;
                 var territory = _data.GetExcelSheet<TerritoryType>().GetRowOrDefault(_clientState.TerritoryType);
                 if (territory is not { } t)
                     return false;

@@ -982,6 +982,39 @@ public class StepDismountTests
         Assert.DoesNotContain("Mount", w.Calls);
     }
 
+    /// <summary>A stop mid-trip stops the trip: the path, and an aethernet hop Lifestream has under way.</summary>
+    [Fact]
+    public void Cancelling_a_step_aborts_the_trip_under_way()
+    {
+        var w = new FakeStepWorld { TerritoryId = 132, ArriveOnMove = false };
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 132, Position = new Vector3(0, 0, 200) });
+        for (var i = 0; i < 4; i++) { ex.Tick(); w.Advance(0.5); }
+        ex.Cancel();
+        Assert.Contains("AbortTravel", w.Calls);
+    }
+
+    /// <summary>
+    /// Logistics of War (3304) puts you on an amaro that flies, in a zone you cannot fly in yet. The
+    /// path's legs say fly; on the quest's mount they fly, and a mob below neither holds the trip
+    /// nor takes you off it — off the amaro was off for good, and the sequence never advanced.
+    /// </summary>
+    [Fact]
+    public void A_quest_mount_flies_and_is_never_dismounted_for_a_fight()
+    {
+        var w = new FakeStepWorld { TerritoryId = 813, ArriveOnMove = false, IsMounted = true, OnQuestMount = true, CanFlyHere = true };
+        w.PlayerPosition = new Vector3(588, 9, 342);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 813, Position = new Vector3(-163, 6, -84), Fly = true });
+        for (var i = 0; i < 6; i++) { ex.Tick(); w.Advance(0.5); }
+        w.InCombat = true;
+        for (var i = 0; i < 12; i++) { ex.Tick(); w.Advance(0.5); }
+
+        Assert.Contains(w.Calls, c => c.StartsWith("Move") && c.EndsWith("fly=True"));
+        Assert.DoesNotContain("Dismount", w.Calls);
+        Assert.DoesNotContain("Mount", w.Calls);
+    }
+
     /// <summary>
     /// The Rising Stones (351) has no aetheryte: it is entered by a door in Mor Dhona. Prelude in
     /// Violet (3149) faulted "no aetheryte there" with Saar standing in Mor Dhona.
