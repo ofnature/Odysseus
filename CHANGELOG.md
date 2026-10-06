@@ -1,6 +1,18 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.17 — 2026-10-05
+
+### Getting there
+- An aethernet hop Lifestream will not start is walked up to: Lifestream only hops from a shard it counts you as at, and a few yalms off it says "Destination could not be found" in its own log and goes idle. Slings and Arrows (2016) stood beside the Fisherman's Bottom shard, asked twice from the same spot and faulted after ninety seconds; now Odysseus walks right up to the shard and asks again
+
+### Quests
+- A step that says only when to skip it is not taken as done: resuming a sequence goes to the first step whose own skip flags are still unmet. Slings and Arrows (2016) started its third sequence at the Aftcastle — the first step tagged with flags — and never had the Fisherman's Bottom talk before it, whose only rule is "skip once that flag is set"; the sequence then could not advance
+- An Action step gets off the mount first: the game refuses an action from the saddle, and Conviction (2022) rode up to its Aspected Benefic and faulted "refused"
+- A solo duty the path data marks as not runnable unattended ("no bossmod module yet") is run when Minerva has a module for it — Spearheading Initiatives (2019) waited at the entrance with Minerva's port of its battle loaded. Needs a Minerva with the new `Minerva.CoversQuestBattle` call; without one it waits as before
+
+<!-- LATEST-END -->
+
 ## v0.2.16 — 2026-10-04
 
 ### Getting there
@@ -9,7 +21,6 @@
 ### Running
 - Stop stops the trip: an aethernet hop Lifestream has under way is aborted along with the path, and between quests the main Stop also stops the aether current collector and "Attune this zone" — the walk to the next current had carried on after the stop
 
-<!-- LATEST-END -->
 
 ## v0.2.15 — 2026-10-04
 
