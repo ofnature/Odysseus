@@ -85,6 +85,26 @@ public class QuestControllerTests : IDisposable
 
     // ── SelectResumeIndex ──
 
+    /// <summary>
+    /// Slings and Arrows (2016), sequence 3: the Fisherman's Bottom talk says only "skip once 128 is
+    /// set", then a walk, then the Aftcastle (tagged 64) and the Coral Tower (32). Nothing set: start
+    /// at the Fisherman's Bottom, not the Aftcastle. With 128 set, the Aftcastle as before.
+    /// </summary>
+    [Fact]
+    public void Resume_does_not_pass_a_step_whose_skip_flags_are_unmet()
+    {
+        var fishermans = Interact(1014947);
+        fishermans.SkipConditions = new SkipConditions { StepIf = new StepCondition { CompletionQuestVariablesFlags = [null, null, null, null, null, 128] } };
+        var block = new QuestSequence
+        {
+            Sequence = 3,
+            Steps = [fishermans, new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 128 },
+                     Interact(1003282, [null, null, null, null, null, 64]), Interact(1002680, [null, null, null, null, null, 32])],
+        };
+        Assert.Equal(0, QuestController.SelectResumeIndex(block, new QuestSnapshot(2016, 3, new byte[6])));
+        Assert.Equal(2, QuestController.SelectResumeIndex(block, new QuestSnapshot(2016, 3, new byte[] { 0, 0, 0, 0, 0, 128 })));
+    }
+
     [Fact]
     public void Resume_picks_the_first_unsatisfied_tagged_step()
     {

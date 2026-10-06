@@ -211,6 +211,28 @@ public class HandoffTests
     }
 
     /// <summary>
+    /// The mark is "no bossmod module yet": Spearheading Initiatives (2019) waited at the entrance
+    /// with a Minerva port of its battle loaded. A module there means going in.
+    /// </summary>
+    [Fact]
+    public void A_duty_marked_not_runnable_goes_in_when_Minerva_has_a_module_for_it()
+    {
+        var w = new FakeStepWorld { PlayerPosition = Vector3.Zero };
+        w.Spawned.Add(Mistress);
+        w.QuestStates[KeyToVictory] = Before();
+        w.MinervaSoloDuties.Add(KeyToVictory);
+        var step = Step(StepKind.SinglePlayerDuty, dataId: Mistress);
+        step.DutyEnabled = false;
+        var ex = new StepExecutor(w);
+        ex.Begin(step, questId: KeyToVictory);
+
+        Ticks(ex, w, 40);
+
+        Assert.Contains(w.Calls, c => c.StartsWith("Interact"));
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Notify") && c.Contains("not runnable unattended"));
+    }
+
+    /// <summary>
     /// "Duty calls — begin?" is the step's own purpose. Held as an undeclared question, it would stop
     /// every solo duty — and every retry — at the door.
     /// </summary>

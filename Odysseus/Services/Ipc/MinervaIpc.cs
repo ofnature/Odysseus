@@ -38,6 +38,7 @@ public sealed class MinervaIpc
     private ICallGateSubscriber<bool>? _isAutoDodgeEnabled;
     private ICallGateSubscriber<string, string, bool>? _applyPreset;
     private ICallGateSubscriber<string, bool>? _releasePreset;
+    private ICallGateSubscriber<uint, bool>? _coversQuestBattle;
     private bool _warned;
     private bool _holding;
 
@@ -45,6 +46,23 @@ public sealed class MinervaIpc
     {
         _pluginInterface = pluginInterface;
         _log = log;
+    }
+
+    /// <summary>
+    /// Whether Minerva has a module for this quest's solo duty. False when it has none, or when
+    /// Minerva is not loaded or too old to say — the safe answer for "can the fight be left to it".
+    /// </summary>
+    public bool CoversQuestBattle(ushort questId)
+    {
+        try
+        {
+            return (_coversQuestBattle ??= _pluginInterface.GetIpcSubscriber<uint, bool>("Minerva.CoversQuestBattle"))
+                .InvokeFunc(questId);
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>Whether Odysseus believes it currently holds Minerva's slot.</summary>

@@ -67,6 +67,21 @@ public class ActionStepTests
         Assert.Equal(StepStatus.Done, ex.Status);
     }
 
+    /// <summary>Conviction (2022): the game refuses an action from the saddle. Off first, then the action.</summary>
+    [Fact]
+    public void Action_step_dismounts_before_the_action()
+    {
+        var w = new FakeStepWorld { IsMounted = true };
+        w.Spawned.Add(1015169);
+        w.Actions["Aspected Benefic"] = 3595;
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.Action, KindName = "Action", DataId = 1015169, Position = Vector3.Zero, TerritoryId = 400, ActionName = "Aspected Benefic" });
+        Ticks(ex, w, 16);
+        var off = w.Calls.IndexOf("Dismount");
+        var used = w.Calls.IndexOf("UseAction 3595");
+        Assert.True(off >= 0 && used > off, string.Join(" | ", w.Calls));
+    }
+
     [Fact]
     public void Ground_target_action_uses_the_position_and_no_target()
     {

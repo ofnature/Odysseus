@@ -1976,6 +1976,8 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// <summary>The Minerva handoff, when that is the chosen duty AI. Null changes nothing.</summary>
     public Ipc.MinervaIpc? Minerva { get; set; }
 
+    public bool MinervaCoversSoloDuty(ushort questId) => Minerva?.CoversQuestBattle(questId) == true;
+
     /// <summary>
     /// Hand the fight to the duty AI, or take it back. A provider with no such switch — see
     /// <see cref="Ipc.PluginPresence.DutyAiCommand"/> — is left to its own settings.

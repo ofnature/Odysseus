@@ -418,6 +418,10 @@ public sealed class StepExecutor
 
     /// <summary>This step already walked toward a shard from the map — a second look does not walk again.</summary>
     private bool _shardApproached;
+    /// <summary>Walked right up to the shard after Lifestream would not start from where we stood.</summary>
+    private bool _shardClosedIn;
+    /// <summary>Close enough to a shard that Lifestream counts it as the one you are at.</summary>
+    private const float ShardTouchDistance = 2.5f;
 
     /// <summary>Close enough to a mapped shard for the object itself to be loaded and found.</summary>
     private const float ShardSightDistance = 40f;
@@ -661,6 +665,7 @@ public sealed class StepExecutor
         _daedalusOffSaid = false;
         _moveRetries = 0;
         _shardApproached = false;
+        _shardClosedIn = false;
         _hopSkipped = false;
         _doorHopTaken = false;
         _gateTried = false;
@@ -1011,6 +1016,26 @@ public sealed class StepExecutor
                 // the wrong failure two phases later.
                 var landed = !_world.IsTravelBusy && _world.IsReady
                              && (_aethernetTerritory == 0 || _world.TerritoryId == _aethernetTerritory);
+
+                // Lifestream only starts from a shard it counts you as at, and when it does not it
+                // says so in its own log ("Destination could not be found (3)") and goes idle. A few
+                // yalms off was not at it: Slings and Arrows (2016) stood beside the Fisherman's
+                // Bottom shard, asked twice, and faulted after ninety seconds. Up to the shard itself,
+                // then ask again.
+                if (!landed && !_world.IsTravelBusy && !_shardClosedIn && now - _phaseStart > AethernetRetry
+                    && _world.NearestAethernetAccess(_world.TerritoryId, _world.PlayerPosition) is { } shard
+                    && Vector3.Distance(_world.PlayerPosition, shard) > ShardTouchDistance)
+                {
+                    _shardClosedIn = true;
+                    _world.Log($"Lifestream did not start the hop to {AethernetDestination} from " +
+                               $"{Vector3.Distance(_world.PlayerPosition, shard):F1}y off the shard — walking up to it.");
+                    _detourTo = shard;
+                    _detourThen = Phase.Aethernet;
+                    _detourTolerance = ShardTouchDistance;
+                    _detourNeedsShard = false;   // "a shard in view" is where we already were
+                    Enter(Phase.Move);
+                    break;
+                }
 
                 // The two ways of asking take different routes inside Lifestream, and one has been
                 // seen to refuse a destination the other reaches. So a hop still in the air is asked
@@ -1805,7 +1830,9 @@ public sealed class StepExecutor
                     Fail($"action \"{step.ActionName ?? "?"}\" is not in the Action sheet");
                     return Phase.None;
                 }
-                return Phase.ActionUse;
+                // The game refuses an action from the saddle: Conviction (2022) rode up to its
+                // Aspected Benefic and faulted "refused". Feet first, as the action-pull fights do.
+                return _world.IsMounted ? BeginDismount(Phase.ActionUse) : Phase.ActionUse;
 
             case StepKind.Combat:
                 // Enemies that spawn from a thrown item — truesight scalebombs at suspicious
@@ -1834,8 +1861,12 @@ public sealed class StepExecutor
                 }
                 // The path data marks the quest battles known not to run unattended — 33 of the
                 // 276 in the library. Going in anyway only spends an attempt that is certain to be
-                // lost; waiting at the entrance is the same outcome without the wasted fight.
-                if (step.DutyEnabled == false)
+                // lost; waiting at the entrance is the same outcome without the wasted fight. Unless
+                // Minerva has a module for it: the mark is "no bossmod module yet", and ports have
+                // landed since (Spearheading Initiatives, 2019, waited at the entrance with one).
+                if (step.DutyEnabled == false && _world.MinervaCoversSoloDuty(_questId))
+                    _world.Log($"Quest {_questId}: its solo duty is marked not runnable unattended, but Minerva has a module for it — going in.");
+                else if (step.DutyEnabled == false)
                 {
                     _soloHoldReason = "this solo duty is marked as not runnable unattended";
                     return Phase.SoloDutyHold;

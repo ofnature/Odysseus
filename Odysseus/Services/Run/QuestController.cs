@@ -957,7 +957,8 @@ public sealed class QuestController
     /// Where in a block to (re)start, given the live variables. Steps that carry a completion
     /// mask are the landmarks: resume at the first one whose mask is not yet satisfied; if every
     /// tagged step is satisfied, resume just after the last of them; with no tags at all, replay
-    /// from the top. Public and pure so it can be pinned by tests.
+    /// from the top. A step before that point with no mask of its own can still say it is not done:
+    /// its skip-if flags unmet, it is where the run resumes. Public and pure so it can be pinned by tests.
     /// </summary>
     public static int SelectResumeIndex(QuestSequence block, QuestSnapshot snap)
     {
@@ -972,9 +973,17 @@ public sealed class QuestController
             else if (firstUnsatisfied < 0)
                 firstUnsatisfied = i;
         }
-        if (firstUnsatisfied >= 0) return firstUnsatisfied;
-        if (lastSatisfied >= 0) return Math.Min(lastSatisfied + 1, block.Steps.Count);
-        return 0;
+        var resume = firstUnsatisfied >= 0 ? firstUnsatisfied
+            : lastSatisfied >= 0 ? Math.Min(lastSatisfied + 1, block.Steps.Count)
+            : 0;
+
+        // Slings and Arrows (2016): the Fisherman's Bottom talk carries no mask, only "skip once
+        // 128 is set", ahead of the Aftcastle talk tagged 64. With nothing set the first tagged
+        // step was the Aftcastle, the talk before it was taken as done, and it was never had.
+        for (var i = 0; i < resume; i++)
+            if (block.Steps[i].SkipConditions?.StepIf?.CompletionQuestVariablesFlags is { } skipWhen && !snap.Satisfies(skipWhen))
+                return i;
+        return resume;
     }
 
     private void Fault(string reason)

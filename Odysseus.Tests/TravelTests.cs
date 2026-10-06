@@ -982,6 +982,33 @@ public class StepDismountTests
         Assert.DoesNotContain("Mount", w.Calls);
     }
 
+    /// <summary>
+    /// Slings and Arrows (2016): beside the Fisherman's Bottom shard, but not at it — Lifestream
+    /// would not start ("Destination could not be found (3)") and went idle, asked twice from the
+    /// same spot, and the step faulted at ninety seconds. Up to the shard, and it goes.
+    /// </summary>
+    [Fact]
+    public void A_hop_Lifestream_will_not_start_walks_up_to_the_shard_and_asks_again()
+    {
+        var shard = new Vector3(-180, 16, 60);
+        var w = new FakeStepWorld { TerritoryId = 129, ArriveOnMove = true, AtAethernetShard = true, ArriveOnTeleport = false, CanMountHere = false };
+        w.PlayerPosition = new Vector3(-185, 16, 60);
+        w.AethernetAccess[129] = shard;
+        w.AethernetTerritories["The Aftcastle"] = 128;
+        w.Spawned.Add(1003282);
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 1003282, TerritoryId = 128,
+            Position = new Vector3(-3, 48, -262), AethernetShortcut = ["Fisherman's Bottom", "The Aftcastle"] });
+
+        for (var i = 0; i < 120 && ex.Status == StepStatus.Running; i++)
+        {
+            ex.Tick(); w.Advance(0.5);
+            if (Vector3.Distance(w.PlayerPosition, shard) <= 2.5f) w.ArriveOnTeleport = true;   // at it now
+        }
+        Assert.True(w.TerritoryId == 128, string.Join(" | ", w.Calls));
+        Assert.True(w.Calls.Count(c => c.StartsWith("Aethernet The Aftcastle")) >= 2, string.Join(" | ", w.Calls));
+    }
+
     /// <summary>A stop mid-trip stops the trip: the path, and an aethernet hop Lifestream has under way.</summary>
     [Fact]
     public void Cancelling_a_step_aborts_the_trip_under_way()

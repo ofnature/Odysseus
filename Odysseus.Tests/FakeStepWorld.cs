@@ -62,6 +62,8 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool IsInFlight { get; set; }
     public bool CanFlyHere { get; set; }
     public bool OnQuestMount { get; set; }
+    public HashSet<ushort> MinervaSoloDuties { get; } = [];
+    public bool MinervaCoversSoloDuty(ushort questId) => MinervaSoloDuties.Contains(questId);
     public void AbortTravel() => Calls.Add("AbortTravel");
     public bool InBaseGameZone { get; set; }
     /// <summary>Cities forbid mounts; the sheet says which.</summary>

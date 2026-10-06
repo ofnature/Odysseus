@@ -190,6 +190,9 @@ public interface IStepWorld
     /// </summary>
     bool OnQuestMount { get; }
 
+    /// <summary>Minerva has a module for this quest's solo duty (ported after the path data was written).</summary>
+    bool MinervaCoversSoloDuty(ushort questId);
+
     /// <summary>
     /// Abort a trip under way that walking cannot stop — Lifestream walking to a shard and taking
     /// the aethernet. For a stop: stopping the path alone left the hop to finish on its own.
