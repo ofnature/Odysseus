@@ -44,6 +44,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly QuestCatalog _catalog;
     private readonly PathStore _pathStore;
     private Services.Gathering.GatherGateway _gatherGateway = null!;
+    private Services.Quest.QuestGateway _questGateway = null!;
     private Services.Quest.DerivedPaths _derived = null!;
     private readonly GameStepWorld _world;
     private readonly QuestController _controller;
@@ -242,11 +243,6 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _tribeRunner = new Services.Tribes.TribeRunner(_world, _tribeState, _controller,
             new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
 
-        // Published once the controller exists, so the gate never reports on a half-built run.
-        _ipc = new OdysseusIpc(PluginInterface,
-            () => _config.Enabled && (_controller.State.IsDriving() || _gatherGateway.IsRunning),
-            _gatherGateway);
-
         _chocobo = new Services.Run.ChocoboKeeper(_world, () => _config.KeepChocoboOut, ChocoboUnlocked);
 
         _fleet = new FleetPublisher(
@@ -349,6 +345,23 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             message => Say(message)
             , _ownGatherer
             );
+
+        // A quest asked for by another plugin — Calypso, for the Island Sanctuary quests.
+        _questGateway = new Services.Quest.QuestGateway(_controller,
+            () => _config.Enabled,
+            () => _gatherGateway.IsRunning || _gatherLists.State == Services.Gathering.GatherListRunState.Running
+                  || !_deliveryRunner.IsFinished || !_collector.IsFinished || !_attuner.IsFinished,
+            _controller.HasPathFor,
+            _quests.IsComplete,
+            id => _quests.IsAccepted(id) || unlockPlanner.Plan(id).Steps.All(s => s.QuestId == id),
+            message => Say(message));
+
+        // Published once the controller and both gateways exist, so no gate reports on a half-built
+        // run. (Built before the gather gateway, it had been handed null and published no Gather.*
+        // gates at all.)
+        _ipc = new OdysseusIpc(PluginInterface,
+            () => _config.Enabled && (_controller.State.IsDriving() || _gatherGateway.IsRunning),
+            _gatherGateway, _questGateway);
 #if DEBUG
         // After the catalogues and both runners exist — it takes all four, and a debug-only window
         // is exactly the sort of thing that gets built too early and hands itself nulls.

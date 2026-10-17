@@ -31,6 +31,11 @@ public sealed class OdysseusIpc : IDisposable
     public const string GatherStopGate = "Odysseus.Gather.Stop";
     public const string GatherIsRunningGate = "Odysseus.Gather.IsRunning";
     public const string GatherStatusGate = "Odysseus.Gather.GetStatusJson";
+    public const string QuestCanRunGate = "Odysseus.Quest.CanRun";
+    public const string QuestStartGate = "Odysseus.Quest.Start";
+    public const string QuestStopGate = "Odysseus.Quest.Stop";
+    public const string QuestIsRunningGate = "Odysseus.Quest.IsRunning";
+    public const string QuestStatusGate = "Odysseus.Quest.GetStatusJson";
 
     private readonly ICallGateProvider<bool> _isBusy;
     private readonly ICallGateProvider<uint, bool>? _canGather;
@@ -38,6 +43,11 @@ public sealed class OdysseusIpc : IDisposable
     private readonly ICallGateProvider<object?>? _gatherStop;
     private readonly ICallGateProvider<bool>? _gatherIsRunning;
     private readonly ICallGateProvider<string>? _gatherStatus;
+    private readonly ICallGateProvider<uint, bool>? _questCanRun;
+    private readonly ICallGateProvider<uint, bool>? _questStart;
+    private readonly ICallGateProvider<object?>? _questStop;
+    private readonly ICallGateProvider<bool>? _questIsRunning;
+    private readonly ICallGateProvider<string>? _questStatus;
 
     /// <param name="isBusy">
     /// Reads the live run state. Must never throw — an exception here surfaces inside another
@@ -48,7 +58,12 @@ public sealed class OdysseusIpc : IDisposable
     /// is what a build without the gatherer should look like from outside: a gate that is not there
     /// reads as "not available", never as "available and refusing".
     /// </param>
-    public OdysseusIpc(IDalamudPluginInterface pluginInterface, Func<bool> isBusy, Gathering.GatherGateway? gather = null)
+    /// <param name="quests">
+    /// The quest gateway — another plugin asking for one quest to be done (Calypso, for the Island
+    /// Sanctuary quests). Takes the quest's row id (70179) or Odysseus's own (4643). Null publishes none.
+    /// </param>
+    public OdysseusIpc(IDalamudPluginInterface pluginInterface, Func<bool> isBusy, Gathering.GatherGateway? gather = null,
+        Quest.QuestGateway? quests = null)
     {
         _isBusy = pluginInterface.GetIpcProvider<bool>(IsBusyGate);
         _isBusy.RegisterFunc(() =>
@@ -63,6 +78,25 @@ public sealed class OdysseusIpc : IDisposable
                 return false;
             }
         });
+
+        if (quests is not null)
+        {
+            _questCanRun = pluginInterface.GetIpcProvider<uint, bool>(QuestCanRunGate);
+            _questCanRun.RegisterFunc(id => Guard(() => quests.CanRun(id), false));
+
+            _questStart = pluginInterface.GetIpcProvider<uint, bool>(QuestStartGate);
+            _questStart.RegisterFunc(id => Guard(() => quests.Start(id), false));
+
+            _questStop = pluginInterface.GetIpcProvider<object?>(QuestStopGate);
+            _questStop.RegisterAction(() => Guard<object?>(() => { quests.Stop(); return null; }, null));
+
+            // The caller's run only, as Gather.IsRunning: a quest the player started meanwhile is not it.
+            _questIsRunning = pluginInterface.GetIpcProvider<bool>(QuestIsRunningGate);
+            _questIsRunning.RegisterFunc(() => Guard(() => quests.IsRunning, false));
+
+            _questStatus = pluginInterface.GetIpcProvider<string>(QuestStatusGate);
+            _questStatus.RegisterFunc(() => Guard(quests.StatusJson, "{}"));
+        }
 
         if (gather is null)
             return;
@@ -95,6 +129,11 @@ public sealed class OdysseusIpc : IDisposable
         _gatherStop?.UnregisterAction();
         _gatherIsRunning?.UnregisterFunc();
         _gatherStatus?.UnregisterFunc();
+        _questCanRun?.UnregisterFunc();
+        _questStart?.UnregisterFunc();
+        _questStop?.UnregisterAction();
+        _questIsRunning?.UnregisterFunc();
+        _questStatus?.UnregisterFunc();
     }
 
     /// <summary>Anything our side throws must stay our side; the caller gets the fallback.</summary>

@@ -241,6 +241,11 @@ an **Unlock** button that queues the whole prerequisite chain.
 | `Odysseus.Gather.Stop()` | — | Stops a run that came through the gate. A run you started yourself is left alone. |
 | `Odysseus.Gather.IsRunning` | `bool` | True only for runs that came through the gate. |
 | `Odysseus.Gather.GetStatusJson()` | `string` | What it is doing and what each item came to. |
+| `Odysseus.Quest.CanRun(uint questId)` | `bool` | Odysseus could run this quest now: not done, a path recorded or workable from the journal data, and nothing it needs first left undone. Busy is not "cannot". Takes the row id (70179) or Odysseus's own (4643). |
+| `Odysseus.Quest.Start(uint questId)` | `bool` | Run that one quest, as Start does, with Stop after armed: it ends at the quest's completion and never rolls on. False when switched off, busy, or `CanRun` would say no — the reason is in the log and the status. |
+| `Odysseus.Quest.Stop()` | — | Stops a quest that came through the gate. A run you started yourself is left alone. |
+| `Odysseus.Quest.IsRunning` | `bool` | True only for a quest that came through the gate. |
+| `Odysseus.Quest.GetStatusJson()` | `string` | `{schema, state, questId, sequence, step, status, reason}` — state is Idle, Refused, Running, Done, Faulted or Stopped. |
 
 Gates are extend-only: a published gate never changes its signature or meaning.
 

@@ -507,6 +507,52 @@ public class QuestControllerTests : IDisposable
         _quests.Set(1622, 1);
     }
 
+    // ── QuestGateway (Odysseus.Quest.* IPC) ──
+
+    private Odysseus.Services.Quest.QuestGateway Gateway(bool enabled = true, bool otherBusy = false, bool offered = true)
+        => new(_controller, () => enabled, () => otherBusy, _controller.HasPathFor, _quests.IsComplete,
+            _ => offered, _log.Add);
+
+    /// <summary>
+    /// Calypso asks for one quest: it runs as Start runs it, Stop after armed — done at its
+    /// completion, never rolling on into the next, and the status says Done. The row id works too.
+    /// </summary>
+    [Fact]
+    public void A_quest_asked_for_over_IPC_runs_alone_and_reports_done()
+    {
+        StoreTwoQuestChain(); // 1622 -> 1623
+        _policy.ContinueToNextQuest = true;
+        var gate = Gateway();
+
+        Assert.True(gate.CanRun(1622));
+        Assert.True(gate.Start(1622 + 65536));
+        Assert.True(gate.IsRunning);
+        Assert.Contains("\"state\":\"Running\"", gate.StatusJson());
+
+        Ticks(3);
+        _quests.Complete.Add(1622);
+        Ticks(10);
+        Assert.False(gate.IsRunning);
+        Assert.Contains("\"state\":\"Done\"", gate.StatusJson());
+        Assert.NotEqual((ushort)1623, _controller.QuestId);   // stopped after it, no roll-on
+    }
+
+    /// <summary>Refusals are a false and a reason: no path, done already, not offered yet, busy, switched off.</summary>
+    [Fact]
+    public void A_quest_asked_for_over_IPC_is_refused_with_a_reason()
+    {
+        StoreTwoQuestChain();
+        Assert.False(Gateway().CanRun(4999));                       // no path
+        Assert.False(Gateway(offered: false).Start(1622));          // prerequisites not done
+        Assert.Contains("not offered yet", Gateway(offered: false).StatusJsonAfter(g => g.Start(1622)));
+        Assert.False(Gateway(enabled: false).Start(1622));
+        Assert.False(Gateway(otherBusy: true).Start(1622));
+        Assert.True(Gateway(otherBusy: true).CanRun(1622));         // busy is not "cannot"
+        _quests.Complete.Add(1622);
+        Assert.False(Gateway().CanRun(1622));
+        Assert.Equal(RunState.Idle, _controller.State);
+    }
+
     [Fact]
     public void Rolls_into_the_next_msq_quest_when_continue_is_on()
     {
@@ -843,5 +889,14 @@ public class QuestControllerTests : IDisposable
         Assert.Equal(RunState.Idle, _controller.State);
         Assert.Contains("Stop", _world.Calls);
         Assert.Contains("ReleaseDialogue", _world.Calls);
+    }
+}
+
+internal static class QuestGatewayTestExtensions
+{
+    public static string StatusJsonAfter(this Odysseus.Services.Quest.QuestGateway gate, System.Action<Odysseus.Services.Quest.QuestGateway> act)
+    {
+        act(gate);
+        return gate.StatusJson();
     }
 }

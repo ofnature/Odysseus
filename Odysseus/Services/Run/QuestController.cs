@@ -181,6 +181,9 @@ public sealed class QuestController
     /// </summary>
     private QuestPath? PathFor(ushort questId) => _paths.ForQuest(questId) ?? _derived?.ForQuest(questId);
 
+    /// <summary>A path is stored for this quest, or can be worked out from the game's journal data.</summary>
+    public bool HasPathFor(ushort questId) => PathFor(questId) is not null;
+
     /// <summary>
     /// What to add to a fault when the path was worked out rather than recorded. A derived path
     /// stalling is the ordinary way it says "this quest wants something the sheets never carried",
