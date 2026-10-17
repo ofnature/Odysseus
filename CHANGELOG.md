@@ -1,6 +1,14 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.18 — 2026-10-17
+
+### For other plugins
+- `Odysseus.Quest.*` gates: another plugin can ask for one quest to be done — `CanRun`, `Start`, `Stop`, `IsRunning`, `GetStatusJson`, taking the quest's row id or Odysseus's own. The quest runs as Start runs it, with Stop after armed. First caller: Calypso, for the Island Sanctuary quests
+- The `Odysseus.Gather.*` gates are actually published: the IPC was built before the gather gateway existed, was handed nothing, and registered only `Odysseus.IsBusy`
+
+<!-- LATEST-END -->
+
 ## v0.2.17 — 2026-10-05
 
 ### Getting there
@@ -11,7 +19,6 @@
 - An Action step gets off the mount first: the game refuses an action from the saddle, and Conviction (2022) rode up to its Aspected Benefic and faulted "refused"
 - A solo duty the path data marks as not runnable unattended ("no bossmod module yet") is run when Minerva has a module for it — Spearheading Initiatives (2019) waited at the entrance with Minerva's port of its battle loaded. Needs a Minerva with the new `Minerva.CoversQuestBattle` call; without one it waits as before
 
-<!-- LATEST-END -->
 
 ## v0.2.16 — 2026-10-04
 
