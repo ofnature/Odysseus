@@ -81,6 +81,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly OdysseusIpc _ipc;
     private readonly ConfigWindow _configWindow;
     private readonly MainWindow _mainWindow;
+    private readonly Windows.Dock.DockLayoutShare _dockLayout;
     private readonly QuestLineOverlay _questLine;
     private readonly VnavIpc _vnav;
     private readonly GatherListsWindow _gatherWindow;
@@ -462,6 +463,14 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
+        // Minimized, the main window is a tab on the screen edge, stacked with Daedalus's and Charon's.
+        _dockLayout = new Windows.Dock.DockLayoutShare(PluginInterface, "Odysseus", order: 30);
+        _windowSystem.AddWindow(new Windows.Dock.EdgeDockWindow(
+        [
+            new Windows.Dock.EdgeDockWindow.Tab("main", "Odysseus", () => true, _mainWindow.DrawDocked, 360f, OpenMain),
+        ], () => _config.EdgeTabRightSide, () => _config.MinimizedToTab && ClientState.IsLoggedIn, _dockLayout));
+        if (_config.MinimizedToTab)
+            _mainWindow.IsOpen = false;
         _windowSystem.AddWindow(_tribesWindow);
         _windowSystem.AddWindow(_deliveriesWindow);
         _windowSystem.AddWindow(_flightWindow);
@@ -729,6 +738,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _windowSystem.RemoveAllWindows();
         _fleet.Dispose();
         _ipc.Dispose();
+        try { _dockLayout.Dispose(); } catch { }
     }
 
     /// <summary>
@@ -1053,7 +1063,16 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         }
     }
 
-    private void OpenMain() => _mainWindow.IsOpen = true;
+    /// <summary>The ordinary window — out of the edge tab, if it was minimized there.</summary>
+    private void OpenMain()
+    {
+        if (_config.MinimizedToTab)
+        {
+            _config.MinimizedToTab = false;
+            SaveConfig();
+        }
+        _mainWindow.IsOpen = true;
+    }
 
     private void OpenConfig() => _configWindow.IsOpen = true;
 

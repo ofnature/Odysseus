@@ -809,6 +809,18 @@ public sealed class ConfigWindow : OdysseusWindow
         }
         OdysseusTheme.HelpMarker("State, quest, step, progress and one control row — nothing else. The ▣/▢ button on the main window toggles it too.");
 
+        var sides = new[] { "Left edge", "Right edge" };
+        var side = _config.EdgeTabRightSide ? 1 : 0;
+        ImGui.SetNextItemWidth(180f);
+        if (ImGui.Combo("Edge tab", ref side, sides, sides.Length))
+        {
+            _config.EdgeTabRightSide = side == 1;
+            _save();
+        }
+        OdysseusTheme.HelpMarker("Where the main window goes when you minimize it (the button beside compact on its top row). " +
+                                 "Point at the tab and the window pops out; click it to keep it out; right-click it, or /od, " +
+                                 "to restore the window. It stacks with Daedalus's and Charon's tabs on the same edge.");
+
         OdysseusTheme.SectionHeader("DEBUG");
 
         var debug = _config.DebugMode;

@@ -152,6 +152,13 @@ deliberately not reimplemented; both still come from an installed TextAdvance.
 A `reference/` folder in the working tree may hold copies of third-party sources for study. It is
 gitignored: nothing in it is built, linked, or shipped.
 
+### Daedalus (`ofnature/Daedalus`, the Olympus repo) — GPL-3.0, the same author
+
+The edge tab the main window minimizes to (`Windows/Dock/`) is ported from Daedalus's edge dock —
+`DockHover`, `DockMath`, `DockLayout`/`DockLayoutShare` unchanged, the window redrawn in Odysseus's
+colours. GPL-3.0 code combines with AGPL-3.0. The layout share tag (`EdgeDock.Layout.v1`) is shared
+with Daedalus and Charon on purpose, so all three plugins' tabs stack on one edge.
+
 ## Handoffs, not data
 
 Artisan, GatherBuddy Reborn, vnavmesh, Lifestream, TextAdvance, BossMod Reborn, Theseus and

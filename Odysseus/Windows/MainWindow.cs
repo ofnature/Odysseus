@@ -69,6 +69,31 @@ public sealed class MainWindow : OdysseusWindow
         SizeConstraints = new WindowSizeConstraints { MinimumSize = new Vector2(300, 140), MaximumSize = new Vector2(700, 1200) };
     }
 
+    /// <summary>Being drawn as the edge tab's pop-out rather than as the window itself.</summary>
+    private bool _inDock;
+
+    /// <summary>The body, drawn inside the edge tab's pop-out panel.</summary>
+    public void DrawDocked()
+    {
+        _inDock = true;
+        try
+        {
+            Draw();
+        }
+        finally
+        {
+            _inDock = false;
+        }
+    }
+
+    /// <summary>Into the edge tab, or back out to the window.</summary>
+    private void SetDocked(bool docked)
+    {
+        Cfg.MinimizedToTab = docked;
+        IsOpen = !docked;
+        _d.SaveConfig();
+    }
+
     private OdysseusConfig Cfg => _d.Config;
     private QuestController Ctl => _d.Controller;
     private bool Running => Ctl.State is not (RunState.Idle or RunState.Faulted);
@@ -135,7 +160,14 @@ public sealed class MainWindow : OdysseusWindow
 
         var right = ImGui.GetWindowContentRegionMax().X;
         var w = 26f;
-        ImGui.SameLine(right - w * 2 - 6f);
+        ImGui.SameLine(right - w * 3 - 10f);
+        if (_inDock
+                ? OdysseusTheme.IconButton("dock", FontAwesomeIcon.WindowMaximize, "Restore the window", new Vector2(w, 22))
+                : OdysseusTheme.IconButton("dock", FontAwesomeIcon.WindowMinimize,
+                    $"Minimize to a tab on the {(Cfg.EdgeTabRightSide ? "right" : "left")} edge — point at it to pop this out (side in Settings → Look)",
+                    new Vector2(w, 22)))
+            SetDocked(!_inDock);
+        ImGui.SameLine(0f, 4f);
         if (OdysseusTheme.IconButton("compact", Cfg.CompactMode ? FontAwesomeIcon.Expand : FontAwesomeIcon.Compress,
                 Cfg.CompactMode ? "Full view" : "Compact view", new Vector2(w, 22)))
         {

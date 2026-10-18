@@ -259,6 +259,12 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// </summary>
     public bool CompactMode { get; set; }
 
+    /// <summary>The main window is minimized to its edge tab (it pops out while pointed at).</summary>
+    public bool MinimizedToTab { get; set; }
+
+    /// <summary>The edge tab sits on the right edge of the screen instead of the left.</summary>
+    public bool EdgeTabRightSide { get; set; }
+
     // ── Diagnostics ──
 
     /// <summary>Show the debug section and verbose step logging.</summary>
