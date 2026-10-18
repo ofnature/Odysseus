@@ -1,13 +1,19 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.19 — 2026-10-18
+
+### Window
+- Minimize to an edge tab: the new button beside compact on the main window's top row folds it into an "Odysseus" tab on the left or right edge of the screen (Settings → Look → Edge tab). Point at the tab and the window pops out beside it; click to keep it out; right-click it, the same button in the pop-out, or /od restores the window. It stacks with Daedalus's and Charon's edge tabs on the same side instead of overlapping them
+
+<!-- LATEST-END -->
+
 ## v0.2.18 — 2026-10-17
 
 ### For other plugins
 - `Odysseus.Quest.*` gates: another plugin can ask for one quest to be done — `CanRun`, `Start`, `Stop`, `IsRunning`, `GetStatusJson`, taking the quest's row id or Odysseus's own. The quest runs as Start runs it, with Stop after armed. First caller: Calypso, for the Island Sanctuary quests
 - The `Odysseus.Gather.*` gates are actually published: the IPC was built before the gather gateway existed, was handed nothing, and registered only `Odysseus.IsBusy`
 
-<!-- LATEST-END -->
 
 ## v0.2.17 — 2026-10-05
 
