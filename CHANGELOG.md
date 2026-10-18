@@ -1,12 +1,19 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.20 — 2026-10-18
+
+### Window
+- The edge tab's pop-out is wider (460, was 360), so the quest line and the priority row are no longer cut off, and the tab no longer shows a tooltip over the top of the panel that pops out with it
+- The main window's top card wraps: its row of tool buttons (Skip, edit, locate, Log, Fleet, Gather, societies, deliveries, journal, attune, flight) goes onto a second line when it does not fit instead of running off the card's edge, and the card grows to hold it. The quest line's last note wraps the same way
+
+<!-- LATEST-END -->
+
 ## v0.2.19 — 2026-10-18
 
 ### Window
 - Minimize to an edge tab: the new button beside compact on the main window's top row folds it into an "Odysseus" tab on the left or right edge of the screen (Settings → Look → Edge tab). Point at the tab and the window pops out beside it; click to keep it out; right-click it, the same button in the pop-out, or /od restores the window. It stacks with Daedalus's and Charon's edge tabs on the same side instead of overlapping them
 
-<!-- LATEST-END -->
 
 ## v0.2.18 — 2026-10-17
 
