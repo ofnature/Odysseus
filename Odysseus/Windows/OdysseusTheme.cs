@@ -184,6 +184,7 @@ internal static class OdysseusTheme
     // border underneath on the bottom one. Not nestable, which no window here needs.
     private static Vector2 _cardOrigin;
     private static float _cardRight;
+    private static bool _inCard;
     private const float CardPadX = 10f;
     private const float CardPadY = 8f;
 
@@ -198,10 +199,29 @@ internal static class OdysseusTheme
         ImGui.SetCursorScreenPos(_cardOrigin + new Vector2(CardPadX, CardPadY));
         ImGui.BeginGroup();
         ImGui.PushID(id);
+        _inCard = true;
     }
+
+    /// <summary>
+    /// Same line as the last item when the next one, this wide, still fits inside the card (or the
+    /// window, outside one); otherwise it starts the next line. A row of buttons wraps instead of
+    /// running off the card's edge in a narrow window or the edge tab's pop-out.
+    /// </summary>
+    public static void FlowSameLine(float nextWidth, float spacing = -1f)
+    {
+        var gap = spacing >= 0f ? spacing : ImGui.GetStyle().ItemSpacing.X;
+        var right = _inCard ? _cardRight - CardPadX : ImGui.GetWindowPos().X + ImGui.GetWindowContentRegionMax().X;
+        if (ImGui.GetItemRectMax().X + gap + nextWidth <= right)
+            ImGui.SameLine(0f, gap);
+    }
+
+    /// <summary>How wide an <see cref="IconTextButton"/> with no fixed size comes out.</summary>
+    public static float IconTextWidth(Dalamud.Interface.FontAwesomeIcon icon, string text)
+        => Dalamud.Interface.Components.ImGuiComponents.GetIconButtonWithTextWidth(icon, text);
 
     public static void EndCard()
     {
+        _inCard = false;
         ImGui.PopID();
         ImGui.EndGroup();
         var bottom = ImGui.GetItemRectMax().Y + CardPadY;

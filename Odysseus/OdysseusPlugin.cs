@@ -467,7 +467,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _dockLayout = new Windows.Dock.DockLayoutShare(PluginInterface, "Odysseus", order: 30);
         _windowSystem.AddWindow(new Windows.Dock.EdgeDockWindow(
         [
-            new Windows.Dock.EdgeDockWindow.Tab("main", "Odysseus", () => true, _mainWindow.DrawDocked, 360f, OpenMain),
+            new Windows.Dock.EdgeDockWindow.Tab("main", "Odysseus", () => true, _mainWindow.DrawDocked, 460f, OpenMain),
         ], () => _config.EdgeTabRightSide, () => _config.MinimizedToTab && ClientState.IsLoggedIn, _dockLayout));
         if (_config.MinimizedToTab)
             _mainWindow.IsOpen = false;

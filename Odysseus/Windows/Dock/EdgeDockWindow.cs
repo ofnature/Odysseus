@@ -105,12 +105,9 @@ public sealed unsafe class EdgeDockWindow : Window
                 _hover.Click(tab.Id);
             if (ImGui.IsItemClicked(ImGuiMouseButton.Right) && tab.Restore is { } restore)
                 restore();
+            // No tooltip: it sat over the top of the panel that pops out at the same moment.
             if (ImGui.IsItemHovered())
-            {
                 hovered = tab.Id;
-                if (tab.Restore is not null)
-                    ImGui.SetTooltip("Click to keep it out · right-click to restore the window");
-            }
 
             var isOpen = _hover.Open == tab.Id;
             var pinned = _hover.Pinned == tab.Id;

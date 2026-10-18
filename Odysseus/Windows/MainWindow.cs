@@ -260,8 +260,9 @@ public sealed class MainWindow : OdysseusWindow
         ImGui.TextColored(OdysseusTheme.TextSecondary, seqText + stepText + doneText + levelText);
         if (!snap.IsAvailable && !Running)
         {
-            ImGui.SameLine();
-            ImGui.TextColored(OdysseusTheme.TextDisabled, $"({_d.Frontier.LastSource})");
+            var source = $"({_d.Frontier.LastSource})";
+            OdysseusTheme.FlowSameLine(ImGui.CalcTextSize(source).X);
+            ImGui.TextColored(OdysseusTheme.TextDisabled, source);
         }
 
         // Step kind + target, progress
@@ -381,7 +382,7 @@ public sealed class MainWindow : OdysseusWindow
         {
             if (OdysseusTheme.IconTextButton(FontAwesomeIcon.FastForward, "Skip", neutral, "Skip the current step and move on.")) Ctl.SkipStep();
         }
-        ImGui.SameLine();
+        OdysseusTheme.FlowSameLine(sq.X);
         // A quest with no path yet is exactly the one the editor's recorder is for.
         using (ImRaii.Disabled(_selectedQuest == 0))
         {
@@ -390,28 +391,28 @@ public sealed class MainWindow : OdysseusWindow
                     hasPath ? "Edit this quest's path." : "No path yet — open the editor and record one from play.", sq))
                 _d.OpenEditor(_selectedQuest);
         }
-        ImGui.SameLine();
+        OdysseusTheme.FlowSameLine(sq.X);
         using (ImRaii.Disabled(!Running || Ctl.CurrentStep?.Position is null))
         {
             if (OdysseusTheme.IconButton("locate", FontAwesomeIcon.MapMarkerAlt, "Walk to the current step's position on its own.", sq) && Ctl.CurrentStep is { Position: { } p })
                 _d.Controller.StepOnce(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", Position = p, TerritoryId = _d.Territory(), Comment = "walk to current step" });
         }
-        ImGui.SameLine();
+        OdysseusTheme.FlowSameLine(OdysseusTheme.IconTextWidth(FontAwesomeIcon.List, "Log"));
         if (OdysseusTheme.IconTextButton(FontAwesomeIcon.List, "Log", neutral, "Step log.")) _d.OpenLog();
-        ImGui.SameLine();
+        OdysseusTheme.FlowSameLine(OdysseusTheme.IconTextWidth(FontAwesomeIcon.Users, "Fleet"));
         if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Users, "Fleet", neutral, "Fleet dashboard.")) _d.OpenFleet();
-        ImGui.SameLine();
+        OdysseusTheme.FlowSameLine(OdysseusTheme.IconTextWidth(FontAwesomeIcon.Leaf, "Gather"));
         if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Leaf, "Gather", neutral, "Gather lists — open or close the window.")) _d.ToggleGather();
 
         // Icon-only here so the row still fits a narrow window; the same two are spelled out in
         // Quick access for anyone who does not want to learn the glyphs.
-        ImGui.SameLine();
+        OdysseusTheme.FlowSameLine(sq.X);
         if (OdysseusTheme.IconButton("societies", FontAwesomeIcon.Handshake,
                 "Allied society dailies, ranks and unlock chains.", sq)) _d.OpenTribes();
-        ImGui.SameLine();
+        OdysseusTheme.FlowSameLine(sq.X);
         if (OdysseusTheme.IconButton("deliveries", FontAwesomeIcon.Box,
                 "Custom deliveries, this week's bonuses and the scrip cap.", sq)) _d.OpenDeliveries();
-        ImGui.SameLine();
+        OdysseusTheme.FlowSameLine(sq.X);
         if (OdysseusTheme.IconButton("journal", FontAwesomeIcon.Book,
                 "Journal — find a quest line and queue its chain.", sq)) _d.OpenJournal();
 
@@ -423,7 +424,7 @@ public sealed class MainWindow : OdysseusWindow
             _attuneCountedAt = DateTime.UtcNow;
             _attuneMissing = _d.Attuner.MissingHere;
         }
-        ImGui.SameLine();
+        OdysseusTheme.FlowSameLine(sq.X);
         if (_d.Attuner.Running)
         {
             if (OdysseusTheme.IconButton("attune", FontAwesomeIcon.Stop, $"Stop attuning — {_d.Attuner.StatusLine}", sq))
@@ -444,7 +445,7 @@ public sealed class MainWindow : OdysseusWindow
             if (disabled && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                 ImGui.SetTooltip(tip);
         }
-        ImGui.SameLine();
+        OdysseusTheme.FlowSameLine(sq.X);
         if (OdysseusTheme.IconButton("flight", FontAwesomeIcon.Plane,
                 "Flight — aether currents and flying per zone.", sq)) _d.OpenFlight();
     }
