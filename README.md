@@ -41,7 +41,7 @@ dotnet build Odysseus.sln -c Release
 |---|---|---|
 | **vnavmesh** | walking and flying | movement stops; the step says so |
 | **Lifestream** | teleports and aethernet hops | travel steps fail with the aetheryte named |
-| **TextAdvance** | the ESC press during a cutscene, and picking an optional quest reward | cutscenes play in full; a quest offering a choice of rewards stops at the window |
+| **TextAdvance** | the ESC press during a cutscene | cutscenes play in full |
 | **BossMod Reborn** or **Minerva** | solo instanced duties — whichever Settings names | stops at the entrance and waits for you |
 | **Theseus** | full dungeons inside a quest | stops at the entrance and waits for you |
 | **Artisan** | crafting for custom deliveries | the delivery stops and says what to craft |
@@ -186,7 +186,7 @@ an **Unlock** button that queues the whole prerequisite chain.
 | **Enable Odysseus** | off | the master switch; nothing moves until this is on |
 | **Continue into the next MSQ quest** | on | off = finish the current quest and stop |
 | **Stop at level** | 0 (off) | park before a level cap or a duty sync level |
-| **Pick quest rewards** | on | TextAdvance chooses; Odysseus presses Complete |
+| **Pick quest rewards** | on | Odysseus chooses by your rule order (role gear coffer, HQ gear, vendor value, gil, gear for your job — the first that matches, else the first reward) and presses Complete |
 | **Skip optional side-quest pick-ups** | off | leave the side quests a story path collects on the way, and the walk to them — unless the story or the priority list needs one |
 | **Preferred Grand Company** | — | which company the story joins when it asks |
 

@@ -571,6 +571,28 @@ public class DialogueTests
         Assert.Equal(1, w.Calls.Count(c => c.StartsWith("Log") && c.Contains("optional reward"))); // said once
     }
 
+    /// <summary>Complete greyed for a choice: the picker chooses, Complete goes through, the step is done.</summary>
+    [Fact]
+    public void Reward_window_needing_a_choice_is_picked_then_completed()
+    {
+        var w = new FakeStepWorld { RewardCompleteEnabled = false, RewardPick = "Gil × 500 — gil" };
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w);
+        var step = Interact(7);
+        step.Kind = StepKind.CompleteQuest;
+        ex.Begin(step, questId: 1);
+        Ticks(ex, w, 3);
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("JournalResult");
+        Ticks(ex, w, 30);
+
+        var picked = w.Calls.IndexOf("PickReward");
+        Assert.True(picked >= 0 && w.Calls.LastIndexOf("CompleteReward") > picked, string.Join(" | ", w.Calls));
+        Assert.Single(w.Calls, c => c == "PickReward");
+        Assert.Contains(w.Calls, c => c.StartsWith("Log Optional reward: Gil"));
+        Assert.Equal(StepStatus.Done, Run(ex, w));
+    }
+
     private static StepStatus Run(StepExecutor ex, FakeStepWorld w)
     {
         for (var i = 0; i < 40 && ex.Status == StepStatus.Running; i++) { ex.Tick(); w.Advance(0.5); }

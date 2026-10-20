@@ -366,6 +366,8 @@ public sealed class StepExecutor
     private DateTime _rewardWindowSince;
     private DateTime _rewardLastTry;
     private bool _rewardNeedsChoiceLogged;
+    /// <summary>An optional reward was clicked for this window; Complete is what is left.</summary>
+    private bool _rewardPicked;
     private DateTime _handOverSince;
     private DateTime _handOverLastTry;
     /// <summary>The shop the current PurchaseItem step buys from; learned from the window when the step names none.</summary>
@@ -4488,6 +4490,7 @@ public sealed class StepExecutor
         {
             _rewardWindowSince = now;
             _rewardLastTry = default;
+            _rewardPicked = false;
             return;
         }
         if (now - _rewardWindowSince < RewardWindowGrace || now - _rewardLastTry < RewardCompleteRetry)
@@ -4499,11 +4502,19 @@ public sealed class StepExecutor
             _rewardNeedsChoiceLogged = false;
             return;
         }
+        // Complete is greyed until an optional reward is chosen: choose one by the player's rules,
+        // and Complete goes through on the next try.
+        if (!_rewardPicked && _world.PickBestReward() is { } picked)
+        {
+            _rewardPicked = true;
+            _world.Log($"Optional reward: {picked}.");
+            return;
+        }
         if (!_rewardNeedsChoiceLogged)
         {
             _rewardNeedsChoiceLogged = true;
             _world.Log("Quest reward window is up and Complete is not available — an optional reward needs choosing. " +
-                       "Waiting for TextAdvance or you.");
+                       "Waiting for you.");
         }
     }
 

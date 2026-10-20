@@ -2592,8 +2592,97 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
     /// <summary>
     /// Clicks the Complete button the way a mouse would: replay the button's own click event into
     /// the addon (the ECommons <c>ClickAddonButton</c> mechanism). No signature needed. Reward
-    /// <i>selection</i> is a native call TextAdvance sig-scans for; that stays with TextAdvance.
+    /// <i>selection</i> is <see cref="PickBestReward"/>, also signature-free.
     /// </summary>
+    /// <summary>Whether to pick optional rewards at all, and in which rule order — the player's settings.</summary>
+    public Func<bool>? PickRewards { get; set; }
+    public Func<IReadOnlyList<RewardRule>>? RewardOrder { get; set; }
+    private bool _rewardLayoutReported;
+
+    // Where JournalResult keeps its optional rewards: five slots from value 82 — the item (HQ adds a
+    // million), then at +6 the icon, +11 the amount, +16 the name. Read off the window, never trusted
+    // blind: every slot must name an item the sheet knows, by the name the window shows.
+    private const int RewardSlots = 5, RewardItemAt = 82, RewardAmountAt = 93, RewardNameAt = 98;
+
+    public string? PickBestReward()
+    {
+        if (PickRewards?.Invoke() != true)
+            return null;
+        try
+        {
+            var addon = _gameGui.GetAddonByName("JournalResult");
+            if (addon.IsNull || !addon.IsVisible)
+                return null;
+            var journal = (FFXIVClientStructs.FFXIV.Client.UI.AddonJournalResult*)addon.Address;
+            var unit = &journal->AtkUnitBase;
+            if (unit->AtkValuesCount <= RewardNameAt + RewardSlots - 1)
+                return ReportLayout("the window carries fewer values than the reward slots need");
+
+            var items = _data.GetExcelSheet<Item>();
+            var options = new List<RewardOption>();
+            for (var i = 0; i < RewardSlots; i++)
+            {
+                var raw = ValueUInt(unit->AtkValues[RewardItemAt + i]);
+                if (raw == 0) break;
+                var id = raw % 1_000_000;
+                var name = ValueText(unit->AtkValues[RewardNameAt + i]);
+                if (items.GetRowOrDefault(id) is not { } row || string.IsNullOrEmpty(name)
+                    || !string.Equals(row.Name.ExtractText(), name, StringComparison.OrdinalIgnoreCase))
+                    return ReportLayout($"slot {i} reads item {id} \"{name}\", which the item sheet does not match");
+                options.Add(new RewardOption(i, id, raw > 1_000_000, ValueUInt(unit->AtkValues[RewardAmountAt + i]), name));
+            }
+            if (options.Count == 0)
+                return null;
+
+            var job = _objectTable.LocalPlayer?.ClassJob.ValueNullable;
+            var abbreviation = job?.Abbreviation.ExtractText() ?? string.Empty;
+            var facts = new RewardFacts(abbreviation,
+                id => items.GetRowOrDefault(id) is { } it && it.ClassJobCategory.ValueNullable is { } cat
+                      && typeof(ClassJobCategory).GetProperty(abbreviation)?.GetValue(cat) is true,
+                id => items.GetRowOrDefault(id)?.EquipSlotCategory.RowId is > 0,
+                id => items.GetRowOrDefault(id)?.PriceLow ?? 0);
+            if (RewardPicker.Choose(options, RewardOrder?.Invoke() ?? RewardPicker.DefaultOrder, facts) is not { } choice)
+                return null;
+
+            // The reward canvas takes the choice as its own click: event 9, parameter 7 + the slot.
+            var canvas = journal->AtkComponentJournalCanvas268;
+            if (canvas == null)
+                return ReportLayout("the window has no reward canvas");
+            var atkEvent = stackalloc byte[64];
+            var eventData = stackalloc byte[64];
+            new Span<byte>(atkEvent, 64).Clear();
+            new Span<byte>(eventData, 64).Clear();
+            ((AtkEventListener*)canvas)->ReceiveEvent((AtkEventType)9, 7 + choice.Option.Index,
+                (AtkEvent*)atkEvent, (AtkEventData*)eventData);
+            return $"{choice.Option.Name}{(choice.Option.Hq ? " (HQ)" : "")}" +
+                   $"{(choice.Option.Amount > 1 ? $" × {choice.Option.Amount}" : "")} — {choice.Why} " +
+                   $"(of {string.Join(", ", options.Select(o => o.Name))})";
+        }
+        catch (Exception ex)
+        {
+            _log($"Picking an optional reward failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    private string? ReportLayout(string what)
+    {
+        if (!_rewardLayoutReported)
+        {
+            _rewardLayoutReported = true;
+            _log($"The quest reward window did not read as expected ({what}) — not picking; choose a reward yourself. " +
+                 "\"/od values JournalResult\" with the window up shows what it holds.");
+        }
+        return null;
+    }
+
+    private static uint ValueUInt(AtkValue value)
+        => value.Type == AtkValueType.Int ? (uint)Math.Max(0, value.Int) : value.Type == AtkValueType.UInt ? value.UInt : 0u;
+
+    private static string ValueText(AtkValue value)
+        => value.String.Value == null ? string.Empty
+            : Dalamud.Memory.MemoryHelper.ReadSeStringNullTerminated((nint)value.String.Value).TextValue;
+
     public bool CompleteQuestRewardWindow()
     {
         try

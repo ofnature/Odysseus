@@ -146,8 +146,11 @@ BSD-3-Clause permits this with its notice kept, reproduced here in full:
 
 Studied, never copied: it publishes no licence file, so only the game-interface facts it
 demonstrates are used — which addon, which button id, which condition flags — and every
-implementation here is our own. Its cutscene-ESC (a code hook and patch) and reward picking are
-deliberately not reimplemented; both still come from an installed TextAdvance.
+implementation here is our own. Its cutscene-ESC (a code hook and patch) is deliberately not
+reimplemented and still comes from an installed TextAdvance. Reward picking is Odysseus's own
+(`RewardPicker`): the same five choices a player of TextAdvance knows, decided from the game's sheets,
+and the choice made by sending the reward window's own canvas its click event through ClientStructs —
+no signature. The facts used are the window's value slots (rewards from value 82) and that event.
 
 A `reference/` folder in the working tree may hold copies of third-party sources for study. It is
 gitignored: nothing in it is built, linked, or shipped.

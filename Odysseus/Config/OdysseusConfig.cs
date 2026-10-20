@@ -64,11 +64,23 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     public byte PreferredGrandCompany { get; set; }
 
     /// <summary>
-    /// Let TextAdvance choose optional quest rewards (its own priority: gil, vendor value, gear
-    /// coffers, gear for the current job). Off means the reward window waits for you — the run
-    /// pauses there and says so.
+    /// Choose optional quest rewards by <see cref="RewardPickOrder"/>. Off means the reward window
+    /// waits for you — the run pauses there and says so.
     /// </summary>
     public bool PickQuestRewards { get; set; } = true;
+
+    /// <summary>
+    /// Watch cutscenes instead of skipping them — the roleplay choice. TextAdvance and Charon are told
+    /// not to skip during runs, and the "Skip cutscene?" prompt is left to the player (Esc, then Yes,
+    /// skips the one in front of you). Off skips them, as before.
+    /// </summary>
+    public bool WatchCutscenes { get; set; }
+
+    /// <summary>
+    /// The rules for an optional reward, first that matches wins. Empty is the default order
+    /// (gear coffer, HQ gear, vendor value, gil, gear for the job); read through RewardPicker.Normalise.
+    /// </summary>
+    public List<Services.Run.RewardRule> RewardPickOrder { get; set; } = [];
 
     /// <summary>Answer the "you will not be able to receive all the…" warning with Yes and keep going.</summary>
     public bool AcceptRewardOvercap { get; set; } = true;

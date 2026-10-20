@@ -104,6 +104,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly LogWindow _logWindow;
     private readonly PathRecorder _recorder = new();
     private readonly Services.Run.DialogueStagehand _stagehand = new();
+    private Services.Ipc.CharonCutsceneIpc _charonCutscenes = null!;
     private readonly RecorderFeed _recorderFeed;
 
     public OdysseusPlugin(IDalamudPluginInterface pluginInterface)
@@ -159,7 +160,9 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             ClientState, ObjectTable, Condition, GameGui, TargetManager, DataManager,
             vnav,
             new DaedalusIpc(PluginInterface, message => Warn(message)),
-            new TextAdvanceIpc(PluginInterface, () => _config.PickQuestRewards, message => Warn(message)),
+            // Odysseus picks optional rewards itself now (RewardPicker): TextAdvance is told not to, so
+            // the two never act on the same window.
+            new TextAdvanceIpc(PluginInterface, () => false, message => Warn(message), () => !_config.WatchCutscenes),
             new LifestreamIpc(PluginInterface, message => Warn(message)),
             aetherytes,
             new TheseusIpc(PluginInterface, message => Warn(message)),
@@ -172,6 +175,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _world.Snipe = new SnipeSkipper(GameInterop, message => Warn(message));
         _world.Doors = new Services.Travel.Doorways(() => _pathStore.All);
         _world.SavedRefusals = _config.RefusedAttunes;
+        _world.PickRewards = () => _config.PickQuestRewards;
+        _stagehand.SkipCutscenes = () => !_config.WatchCutscenes;
+        _charonCutscenes = new Services.Ipc.CharonCutsceneIpc(PluginInterface);
+        _world.RewardOrder = () => Services.Run.RewardPicker.Normalise(_config.RewardPickOrder);
         _world.SaveRefusals = SaveConfig;
         Service.ChatGui.ChatMessage += OnChatMessage;
         _battlehorn = new BattlehornAssigner(_world, DataManager, message => Say(message));
@@ -771,6 +778,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
 
         _chocobo.Tick();
         _battlehorn?.Tick();
+        // Charon skips or holds cutscenes for the run, as chosen; released when the run ends.
+        _charonCutscenes.Tick(_config.Enabled && _controller.State.IsDriving(), !_config.WatchCutscenes, System.DateTime.UtcNow);
 
         // Auto-remove completed priority entries — quests finished by hand count too, so poll.
         var now = System.DateTime.UtcNow;

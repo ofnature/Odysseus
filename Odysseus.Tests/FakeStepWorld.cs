@@ -62,6 +62,15 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
     public bool IsInFlight { get; set; }
     public bool CanFlyHere { get; set; }
     public bool OnQuestMount { get; set; }
+    public string? RewardPick { get; set; }
+    /// <summary>What the picker says it chose; null = nothing picked. A pick enables Complete, as the game does.</summary>
+    public string? PickBestReward()
+    {
+        if (RewardPick is null) return null;
+        Calls.Add("PickReward");
+        RewardCompleteEnabled = true;
+        return RewardPick;
+    }
     public HashSet<ushort> MinervaSoloDuties { get; } = [];
     public bool MinervaCoversSoloDuty(ushort questId) => MinervaSoloDuties.Contains(questId);
     public void AbortTravel() => Calls.Add("AbortTravel");

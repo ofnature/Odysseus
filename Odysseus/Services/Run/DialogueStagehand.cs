@@ -11,9 +11,8 @@ namespace Odysseus.Services.Run;
 ///
 /// <para>
 /// Deliberately not here: the cutscene ESC press (a code hook and patch in TextAdvance's stack —
-/// not worth owning), and reward picking (TextAdvance's memory call; without it a quest with
-/// optional rewards stops at the window and says so). Quest accept/complete and request
-/// fill/hand-over are the step machinery's own, elsewhere.
+/// not worth owning). Reward picking, quest accept/complete and request fill/hand-over are the step
+/// machinery's own, elsewhere (RewardPicker and the reward window in the executor).
 /// </para>
 /// </summary>
 public sealed class DialogueStagehand
@@ -29,12 +28,18 @@ public sealed class DialogueStagehand
 
     private DateTime _lastSelect;
 
+    /// <summary>
+    /// Answer "Skip cutscene?" with Yes. False is the roleplay choice: the prompt only comes up when
+    /// the player pressed Esc, and the answer is theirs.
+    /// </summary>
+    public Func<bool> SkipCutscenes { get; set; } = () => true;
+
     public void Tick(IStepWorld world)
     {
         if (world.IsAddonVisible("Talk"))
             world.AdvanceTalk();
 
-        if (!world.InCutscene || !world.IsAddonVisible("SelectString"))
+        if (!SkipCutscenes() || !world.InCutscene || !world.IsAddonVisible("SelectString"))
             return;
         if (world.UtcNow - _lastSelect < SelectThrottle)
             return;

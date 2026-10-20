@@ -51,6 +51,7 @@ public sealed class TextAdvanceIpc
     private readonly IDalamudPluginInterface _pluginInterface;
     private readonly Action<string>? _log;
     private readonly Func<bool> _pickRewards;
+    private readonly Func<bool> _skipCutscenes;
 
     private ICallGateSubscriber<string, ExternalTerritoryConfig, bool>? _enable;
     private ICallGateSubscriber<string, bool>? _disable;
@@ -64,10 +65,16 @@ public sealed class TextAdvanceIpc
     /// applies to the next hold. Picking uses TextAdvance's own priority (gil, vendor value, gear
     /// coffers, current-job gear); Odysseus does not second-guess it.
     /// </param>
-    public TextAdvanceIpc(IDalamudPluginInterface pluginInterface, Func<bool>? pickRewards = null, Action<string>? log = null)
+    /// <param name="skipCutscenes">
+    /// Whether TextAdvance presses Esc in cutscenes and confirms the skip. False is the roleplay choice:
+    /// cutscenes play, and skipping one is the player's own Esc.
+    /// </param>
+    public TextAdvanceIpc(IDalamudPluginInterface pluginInterface, Func<bool>? pickRewards = null, Action<string>? log = null,
+        Func<bool>? skipCutscenes = null)
     {
         _pluginInterface = pluginInterface;
         _pickRewards = pickRewards ?? (() => true);
+        _skipCutscenes = skipCutscenes ?? (() => true);
         _log = log;
     }
 
@@ -77,7 +84,13 @@ public sealed class TextAdvanceIpc
         try
         {
             _enable ??= _pluginInterface.GetIpcSubscriber<string, ExternalTerritoryConfig, bool>(EnableGate);
-            var ok = _enable.InvokeFunc(PluginName, new ExternalTerritoryConfig { EnableRewardPick = _pickRewards() });
+            var skip = _skipCutscenes();
+            var ok = _enable.InvokeFunc(PluginName, new ExternalTerritoryConfig
+            {
+                EnableRewardPick = _pickRewards(),
+                EnableCutsceneEsc = skip,
+                EnableCutsceneSkipConfirm = skip,
+            });
 
             // TextAdvance hands external control to one plugin at a time and refuses everyone else
             // by returning false — AutoRetainer takes it for retainer runs, and so do others. That

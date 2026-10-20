@@ -190,6 +190,13 @@ public interface IStepWorld
     /// </summary>
     bool OnQuestMount { get; }
 
+    /// <summary>
+    /// Choose an optional reward in the quest reward window, by the player's rule order, and click it.
+    /// Returns what was picked and why, or null when picking is off, nothing is offered, or the window's
+    /// contents did not read as expected (then it is left for the player).
+    /// </summary>
+    string? PickBestReward();
+
     /// <summary>Minerva has a module for this quest's solo duty (ported after the path data was written).</summary>
     bool MinervaCoversSoloDuty(ushort questId);
 

@@ -37,4 +37,19 @@ public class DialogueStagehandTests
         hand.Tick(w);
         Assert.Equal(1, w.Calls.Count(c => c.StartsWith("Select ")));
     }
+
+    /// <summary>Watching cutscenes: the skip prompt only comes from the player's own Esc, and the answer is theirs.</summary>
+    [Fact]
+    public void Watching_cutscenes_leaves_the_skip_prompt_to_the_player()
+    {
+        var w = new FakeStepWorld { InCutscene = true };
+        w.VisibleAddons.Add("SelectString");
+        w.VisibleAddons.Add("Talk");
+        w.ListEntries.AddRange(["Yes.", "No."]);
+        var hand = new DialogueStagehand { SkipCutscenes = () => false };
+
+        hand.Tick(w);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Select "));
+        Assert.Contains("AdvanceTalk", w.Calls);   // dialogue still advances
+    }
 }

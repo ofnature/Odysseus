@@ -306,7 +306,7 @@ public sealed class ConfigWindow : OdysseusWindow
             _save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Subtitle boxes advanced and cutscene skips confirmed during runs, without needing TextAdvance. Cutscene ESC and optional-reward picking still come from TextAdvance when it is installed.");
+            ImGui.SetTooltip("Subtitle boxes advanced and cutscene skips confirmed during runs, without needing TextAdvance. Cutscene ESC still comes from TextAdvance when it is installed.");
 
         var pickRewards = _config.PickQuestRewards;
         if (ImGui.Checkbox("Pick quest rewards automatically", ref pickRewards))
@@ -315,14 +315,22 @@ public sealed class ConfigWindow : OdysseusWindow
             _save();
         }
         OdysseusTheme.HelpMarker(
-            "Done by TextAdvance under Odysseus's control, using TextAdvance's own reward priority (gil, vendor " +
-            "value, gear coffers, gear for your job). Odysseus then presses Complete. Off = the reward window " +
-            "waits for you and the run says so.");
-        if (!_presence.TextAdvance)
-        {
-            ImGui.SameLine();
-            ImGui.TextColored(OdysseusTheme.StatusYellow, "(TextAdvance not loaded)");
-        }
+            "When a quest offers a choice of reward, Odysseus takes the first rule below that any reward matches " +
+            "(the first reward when none does), then presses Complete. Off = the reward window waits for you and " +
+            "the run says so. TextAdvance is not needed for this.");
+        if (pickRewards)
+            DrawRewardOrder();
+
+        var cutscene = _config.WatchCutscenes ? 1 : 0;
+        ImGui.TextUnformatted("Cutscenes");
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Skip them", ref cutscene, 0)) { _config.WatchCutscenes = false; _save(); }
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Watch them", ref cutscene, 1)) { _config.WatchCutscenes = true; _save(); }
+        OdysseusTheme.HelpMarker(
+            "Watch is for playing through the story: during a run TextAdvance and Charon are told not to skip, and " +
+            "Odysseus leaves the \"Skip cutscene?\" prompt to you — press Esc and pick Yes to skip the one in front " +
+            "of you. Skip skips them all, as before. Charon is optional; without it the same choice still holds.");
 
         var acceptOvercap = _config.AcceptRewardOvercap;
         if (ImGui.Checkbox("Proceed through reward overcap warnings", ref acceptOvercap))
@@ -784,6 +792,39 @@ public sealed class ConfigWindow : OdysseusWindow
         if (ImGui.SliderFloat("Peer stale after (s)", ref stale, 3f, 60f, "%.0f"))
         {
             _config.PeerStaleSeconds = stale;
+            _save();
+        }
+    }
+
+    /// <summary>The reward rules in order, each with up and down: first that matches wins.</summary>
+    private void DrawRewardOrder()
+    {
+        var order = Services.Run.RewardPicker.Normalise(_config.RewardPickOrder).ToList();
+        ImGui.Indent();
+        for (var i = 0; i < order.Count; i++)
+        {
+            using var id = Dalamud.Interface.Utility.Raii.ImRaii.PushId(i);
+            ImGui.TextColored(OdysseusTheme.TextSecondary, $"{i + 1}.");
+            ImGui.SameLine(28f * Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale + ImGui.GetCursorStartPos().X);
+            ImGui.TextUnformatted(Services.Run.RewardPicker.Describe(order[i]));
+            if (order[i] == Services.Run.RewardRule.GearCoffer && ImGui.IsItemHovered())
+                ImGui.SetTooltip("Read off the coffer's name (\"… of Fending Coffer\"): English client only.");
+            ImGui.SameLine(230f * Dalamud.Interface.Utility.ImGuiHelpers.GlobalScale);
+            using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(i == 0))
+            {
+                if (ImGui.ArrowButton("##up", ImGuiDir.Up)) { (order[i - 1], order[i]) = (order[i], order[i - 1]); Save(order); }
+            }
+            ImGui.SameLine();
+            using (Dalamud.Interface.Utility.Raii.ImRaii.Disabled(i == order.Count - 1))
+            {
+                if (ImGui.ArrowButton("##down", ImGuiDir.Down)) { (order[i + 1], order[i]) = (order[i], order[i + 1]); Save(order); }
+            }
+        }
+        ImGui.Unindent();
+
+        void Save(System.Collections.Generic.List<Services.Run.RewardRule> changed)
+        {
+            _config.RewardPickOrder = changed;
             _save();
         }
     }
