@@ -1,13 +1,20 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.21 — 2026-10-19
+
+### Dialogue and rewards
+- Odysseus picks optional quest rewards itself — TextAdvance is no longer needed for it. Settings → Dialogue and rewards → "Pick quest rewards automatically" now lists the rules in order, with up and down to rearrange them: the gear coffer for your role, high-quality gear, the highest vendor value (price × amount), gil, and gear your job can wear. The first rule any reward matches wins; when none does, the first reward. What was picked, and why, is logged. The coffer rule reads the role off the coffer's name ("… of Fending Coffer"), so it works on an English client only. If the reward window does not read as expected, nothing is picked and the window waits for you
+- Cutscenes: skip them or watch them (Settings → Dialogue and rewards). Watch is the roleplay choice: during a run TextAdvance is told not to press Esc or confirm, Charon gets a "watch" lease (`Charon.Cutscene.Set`), so a box whose toggle skips still plays the story, and Odysseus leaves the "Skip cutscene?" prompt to you — Esc, then Yes, skips the one in front of you. Skip (the default) skips them all, and leases Charon's skipping for the run too. The Charon lease is renewed while a run drives the character and released when it ends
+
+<!-- LATEST-END -->
+
 ## v0.2.20 — 2026-10-18
 
 ### Window
 - The edge tab's pop-out is wider (460, was 360), so the quest line and the priority row are no longer cut off, and the tab no longer shows a tooltip over the top of the panel that pops out with it
 - The main window's top card wraps: its row of tool buttons (Skip, edit, locate, Log, Fleet, Gather, societies, deliveries, journal, attune, flight) goes onto a second line when it does not fit instead of running off the card's edge, and the card grows to hold it. The quest line's last note wraps the same way
 
-<!-- LATEST-END -->
 
 ## v0.2.19 — 2026-10-18
 
