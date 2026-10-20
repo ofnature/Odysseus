@@ -471,11 +471,24 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _windowSystem.AddWindow(_configWindow);
         _windowSystem.AddWindow(_mainWindow);
         // Minimized, the main window is a tab on the screen edge, stacked with Daedalus's and Charon's.
+        // Any edge, any spot along it: dragging the tab there stores both. Odysseus orders after
+        // Daedalus (10) and Charon (20) when tabs would overlap.
+        if (_config.MigrateEdgeTab())
+            SaveConfig();
         _dockLayout = new Windows.Dock.DockLayoutShare(PluginInterface, "Odysseus", order: 30);
         _windowSystem.AddWindow(new Windows.Dock.EdgeDockWindow(
         [
             new Windows.Dock.EdgeDockWindow.Tab("main", "Odysseus", () => true, _mainWindow.DrawDocked, 460f, OpenMain),
-        ], () => _config.EdgeTabRightSide, () => _config.MinimizedToTab && ClientState.IsLoggedIn, _dockLayout));
+        ],
+            _ => (_config.EdgeTabEdge, _config.EdgeTabAlong),
+            (_, edge, along) =>
+            {
+                _config.EdgeTabEdge = edge;
+                _config.EdgeTabAlong = along;
+                SaveConfig();
+            },
+            _dockLayout,
+            () => _config.MinimizedToTab && ClientState.IsLoggedIn));
         if (_config.MinimizedToTab)
             _mainWindow.IsOpen = false;
         _windowSystem.AddWindow(_tribesWindow);

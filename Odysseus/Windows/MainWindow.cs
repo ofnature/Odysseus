@@ -164,7 +164,7 @@ public sealed class MainWindow : OdysseusWindow
         if (_inDock
                 ? OdysseusTheme.IconButton("dock", FontAwesomeIcon.WindowMaximize, "Restore the window", new Vector2(w, 22))
                 : OdysseusTheme.IconButton("dock", FontAwesomeIcon.WindowMinimize,
-                    $"Minimize to a tab on the {(Cfg.EdgeTabRightSide ? "right" : "left")} edge — point at it to pop this out (side in Settings → Look)",
+                    $"Minimize to a tab on the {Cfg.EdgeTabEdge.ToString().ToLowerInvariant()} edge — point at it to pop this out, drag it to move it",
                     new Vector2(w, 22)))
             SetDocked(!_inDock);
         ImGui.SameLine(0f, 4f);

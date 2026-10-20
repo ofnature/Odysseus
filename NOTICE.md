@@ -157,9 +157,9 @@ gitignored: nothing in it is built, linked, or shipped.
 
 ### Daedalus (`ofnature/Daedalus`, the Olympus repo) — GPL-3.0, the same author
 
-The edge tab the main window minimizes to (`Windows/Dock/`) is ported from Daedalus's edge dock —
+The edge tab the main window minimizes to (`Windows/Dock/`) is ported from Daedalus's edge dock (re-ported 2026-10-19 for its per-tab edges and layout v2) —
 `DockHover`, `DockMath`, `DockLayout`/`DockLayoutShare` unchanged, the window redrawn in Odysseus's
-colours. GPL-3.0 code combines with AGPL-3.0. The layout share tag (`EdgeDock.Layout.v1`) is shared
+colours. GPL-3.0 code combines with AGPL-3.0. The layout share tag (`EdgeDock.Layout.v2`) is shared
 with Daedalus and Charon on purpose, so all three plugins' tabs stack on one edge.
 
 ## Handoffs, not data

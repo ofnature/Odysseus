@@ -274,8 +274,27 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// <summary>The main window is minimized to its edge tab (it pops out while pointed at).</summary>
     public bool MinimizedToTab { get; set; }
 
-    /// <summary>The edge tab sits on the right edge of the screen instead of the left.</summary>
+    /// <summary>
+    /// The v0.2.19 "Right edge" setting, replaced by <see cref="EdgeTabEdge"/>. Kept only so a saved true
+    /// is carried over once at load (<see cref="MigrateEdgeTab"/>), then cleared.
+    /// </summary>
     public bool EdgeTabRightSide { get; set; }
+
+    /// <summary>Which screen edge the edge tab sits on — set by dragging the tab there.</summary>
+    public Windows.Dock.DockEdge EdgeTabEdge { get; set; } = Windows.Dock.DockEdge.Left;
+
+    /// <summary>Where along its edge the tab's centre sits, as a fraction (0.5 = the middle).</summary>
+    public float EdgeTabAlong { get; set; } = 0.5f;
+
+    /// <summary>Carries the old Right edge setting over to <see cref="EdgeTabEdge"/>. True if it changed anything.</summary>
+    public bool MigrateEdgeTab()
+    {
+        if (!EdgeTabRightSide)
+            return false;
+        EdgeTabEdge = Windows.Dock.DockEdge.Right;
+        EdgeTabRightSide = false;
+        return true;
+    }
 
     // ── Diagnostics ──
 
