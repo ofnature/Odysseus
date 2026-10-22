@@ -1,12 +1,22 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.23 — 2026-10-22
+
+### Dialogue and rewards
+- "Quest windows outside runs too" (Settings → Dialogue and rewards, off by default): with no run going, Odysseus presses Accept on a quest offer, chooses the optional reward by your rules and presses Complete — what TextAdvance was kept for when questing by hand. The same presses and guards a run uses, once a second at most, never while a run or any other Odysseus job has the windows; the settings line says what it last did, or why it is idle
+- Cutscenes has a third choice, "Leave it to Charon": Odysseus does nothing about cutscenes and the box's own Charon toggle decides. A saved "Watch them" carries over. The Charon lease is now 60 seconds, renewed every 30
+
+### Quests
+- Quest target indicators (Settings → Dialogue and rewards, off by default): a gold marker over every object the game shows a quest icon on (the same 71000–71999 test the run uses), with its name and distance, and a line from you to each, drawn only where it is in front of the camera. Main scenario and side quests are not told apart — those icon ranges are not verified in game. Hidden in cutscenes and loading screens; the overlay takes no input
+
+<!-- LATEST-END -->
+
 ## v0.2.22 — 2026-10-19
 
 ### Window
 - The edge tab goes anywhere: drag it to any edge of the screen — left, right, top or bottom — and let go where along it you want it; both are remembered (Settings → Look → Edge tab, with Reset position). On the top and bottom edges its label reads normally. Re-ported from Daedalus's updated dock, with its shared layout v2: tabs from Daedalus, Charon and Odysseus that would overlap line up end to end instead, so Odysseus's tab stacks with theirs again (the old layout no longer matched). A saved "Right edge" carries over
 
-<!-- LATEST-END -->
 
 ## v0.2.21 — 2026-10-19
 
