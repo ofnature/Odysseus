@@ -49,6 +49,12 @@ public sealed class ConfigWindow : OdysseusWindow
     private string _importStatus = string.Empty;
     private string _prioritySearch = string.Empty;
 
+    /// <summary>What the outside-runs quest window helper last did — set by the plugin.</summary>
+    public Func<string> QuestWindowsStatus { get; set; } = () => "off";
+
+    /// <summary>How many quest targets the overlay drew last frame — set by the plugin.</summary>
+    public Func<int> QuestTargetsDrawn { get; set; } = () => 0;
+
     public ConfigWindow(OdysseusConfig config, Action save, PluginPresence presence, PathStore pathStore, string defaultBundlePath,
         string? packTarget,
         PriorityList priority, IPriorityWorld priorityWorld, QuestCatalog catalog, Func<int> pendingSales)
@@ -321,16 +327,51 @@ public sealed class ConfigWindow : OdysseusWindow
         if (pickRewards)
             DrawRewardOrder();
 
-        var cutscene = _config.WatchCutscenes ? 1 : 0;
+        var cutscene = (int)_config.Cutscenes;
         ImGui.TextUnformatted("Cutscenes");
         ImGui.SameLine();
-        if (ImGui.RadioButton("Skip them", ref cutscene, 0)) { _config.WatchCutscenes = false; _save(); }
+        if (ImGui.RadioButton("Skip them", ref cutscene, 0)) { _config.Cutscenes = CutsceneChoice.Skip; _save(); }
         ImGui.SameLine();
-        if (ImGui.RadioButton("Watch them", ref cutscene, 1)) { _config.WatchCutscenes = true; _save(); }
+        if (ImGui.RadioButton("Watch them", ref cutscene, 1)) { _config.Cutscenes = CutsceneChoice.Watch; _save(); }
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Leave it to Charon", ref cutscene, 2)) { _config.Cutscenes = CutsceneChoice.LeaveToCharon; _save(); }
         OdysseusTheme.HelpMarker(
             "Watch is for playing through the story: during a run TextAdvance and Charon are told not to skip, and " +
             "Odysseus leaves the \"Skip cutscene?\" prompt to you — press Esc and pick Yes to skip the one in front " +
-            "of you. Skip skips them all, as before. Charon is optional; without it the same choice still holds.");
+            "of you. Skip skips them all. Leave it to Charon: Odysseus does nothing about cutscenes and the box's own " +
+            "Charon toggle decides. Charon is optional for the other two; without it the same choice still holds.");
+
+        var outside = _config.QuestWindowsOutsideRuns;
+        if (ImGui.Checkbox("Quest windows outside runs too", ref outside))
+        {
+            _config.QuestWindowsOutsideRuns = outside;
+            _save();
+        }
+        OdysseusTheme.HelpMarker(
+            "For questing by hand: with no run going, Odysseus presses Accept on a quest offer, chooses the reward " +
+            "(when reward picking is on, by the rules above) and presses Complete — what TextAdvance did for that. " +
+            "Never while a run or any other Odysseus job is going; those handle their own windows.");
+        if (outside)
+        {
+            ImGui.Indent();
+            ImGui.TextColored(OdysseusTheme.TextSecondary, QuestWindowsStatus());
+            ImGui.Unindent();
+        }
+
+        var targets = _config.QuestTargetIndicators;
+        if (ImGui.Checkbox("Quest target indicators", ref targets))
+        {
+            _config.QuestTargetIndicators = targets;
+            _save();
+        }
+        OdysseusTheme.HelpMarker(
+            "A marker over everything the game is showing a quest icon on, and a line from you to each — " +
+            "TextAdvance's indicators. Hidden in cutscenes and loading screens; it never takes a click.");
+        if (targets)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(OdysseusTheme.TextSecondary, $"({QuestTargetsDrawn()} on screen now)");
+        }
 
         var acceptOvercap = _config.AcceptRewardOvercap;
         if (ImGui.Checkbox("Proceed through reward overcap warnings", ref acceptOvercap))

@@ -9,6 +9,17 @@ namespace Odysseus.Config;
 /// their phases land (see the plan doc's Phases).
 /// </summary>
 [Serializable]
+/// <summary>What happens to cutscenes during a run.</summary>
+public enum CutsceneChoice
+{
+    /// <summary>Skip them: TextAdvance presses Esc, Odysseus confirms, Charon is leased to skip.</summary>
+    Skip,
+    /// <summary>Watch them: nobody skips; Esc and Yes are the player's.</summary>
+    Watch,
+    /// <summary>Odysseus does nothing about them: the box's own Charon toggle decides.</summary>
+    LeaveToCharon,
+}
+
 public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPolicy
 {
     // IRunPolicy — the controller reads these live.
@@ -70,11 +81,36 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     public bool PickQuestRewards { get; set; } = true;
 
     /// <summary>
-    /// Watch cutscenes instead of skipping them — the roleplay choice. TextAdvance and Charon are told
-    /// not to skip during runs, and the "Skip cutscene?" prompt is left to the player (Esc, then Yes,
-    /// skips the one in front of you). Off skips them, as before.
+    /// The v0.2.21 watch toggle, replaced by <see cref="Cutscenes"/>. Kept only so a saved true is
+    /// carried over once at load (<see cref="MigrateCutscenes"/>), then cleared.
     /// </summary>
     public bool WatchCutscenes { get; set; }
+
+    /// <summary>
+    /// Cutscenes during runs: skipped (the default), watched — the roleplay choice — or left to Charon's
+    /// own toggle. Watching tells TextAdvance and Charon not to skip and leaves "Skip cutscene?" to the
+    /// player (Esc, then Yes, skips the one in front of you).
+    /// </summary>
+    public CutsceneChoice Cutscenes { get; set; } = CutsceneChoice.Skip;
+
+    /// <summary>Carries the old watch toggle over to <see cref="Cutscenes"/>. True if it changed anything.</summary>
+    public bool MigrateCutscenes()
+    {
+        if (!WatchCutscenes)
+            return false;
+        Cutscenes = CutsceneChoice.Watch;
+        WatchCutscenes = false;
+        return true;
+    }
+
+    /// <summary>
+    /// Press Accept, choose the reward and press Complete on quest windows when no run is going — for
+    /// questing by hand. Off by default.
+    /// </summary>
+    public bool QuestWindowsOutsideRuns { get; set; }
+
+    /// <summary>A marker and a line to every object showing a quest icon. Off by default.</summary>
+    public bool QuestTargetIndicators { get; set; }
 
     /// <summary>
     /// The rules for an optional reward, first that matches wins. Empty is the default order

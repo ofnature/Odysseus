@@ -105,6 +105,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly PathRecorder _recorder = new();
     private readonly Services.Run.DialogueStagehand _stagehand = new();
     private Services.Ipc.CharonCutsceneIpc _charonCutscenes = null!;
+    private Services.Run.QuestWindowHelper _questWindows = null!;
+    private Windows.QuestTargetOverlay _questTargets = null!;
     private readonly RecorderFeed _recorderFeed;
 
     public OdysseusPlugin(IDalamudPluginInterface pluginInterface)
@@ -162,7 +164,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             new DaedalusIpc(PluginInterface, message => Warn(message)),
             // Odysseus picks optional rewards itself now (RewardPicker): TextAdvance is told not to, so
             // the two never act on the same window.
-            new TextAdvanceIpc(PluginInterface, () => false, message => Warn(message), () => !_config.WatchCutscenes),
+            new TextAdvanceIpc(PluginInterface, () => false, message => Warn(message), () => _config.Cutscenes == CutsceneChoice.Skip),
             new LifestreamIpc(PluginInterface, message => Warn(message)),
             aetherytes,
             new TheseusIpc(PluginInterface, message => Warn(message)),
@@ -176,7 +178,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _world.Doors = new Services.Travel.Doorways(() => _pathStore.All);
         _world.SavedRefusals = _config.RefusedAttunes;
         _world.PickRewards = () => _config.PickQuestRewards;
-        _stagehand.SkipCutscenes = () => !_config.WatchCutscenes;
+        _stagehand.SkipCutscenes = () => _config.Cutscenes == CutsceneChoice.Skip;
+        if (_config.MigrateCutscenes())
+            SaveConfig();
+        _questWindows = new Services.Run.QuestWindowHelper(_world);
         _charonCutscenes = new Services.Ipc.CharonCutsceneIpc(PluginInterface);
         _world.RewardOrder = () => Services.Run.RewardPicker.Normalise(_config.RewardPickOrder);
         _world.SaveRefusals = SaveConfig;
@@ -263,6 +268,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             Services.Paths.PathPack.SourceAssetPath(PluginInterface.AssemblyLocation.DirectoryName),
             _priority, _priorityWorld, _catalog,
             () => _rewardLedger.Pending.Sum(p => p.Quantity));
+        _configWindow.QuestWindowsStatus = () => QuestWindowsStatus;
+        _configWindow.QuestTargetsDrawn = () => QuestTargetsDrawn;
         _pathEditorWindow = new PathEditorWindow(
             _pathStore, _catalog, _controller, _recorder,
             () => ClientState.TerritoryType,
@@ -491,6 +498,15 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             () => _config.MinimizedToTab && ClientState.IsLoggedIn));
         if (_config.MinimizedToTab)
             _mainWindow.IsOpen = false;
+        // Quest target indicators: off by default; hidden in cutscenes and loading screens.
+        _questTargets = new Windows.QuestTargetOverlay(ObjectTable, GameGui, () => _config.QuestTargetIndicators
+            && ClientState.IsLoggedIn
+            && !Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.OccupiedInCutSceneEvent]
+            && !Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.WatchingCutscene]
+            && !Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.WatchingCutscene78]
+            && !Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas]
+            && !Condition[Dalamud.Game.ClientState.Conditions.ConditionFlag.BetweenAreas51]);
+        _windowSystem.AddWindow(_questTargets);
         _windowSystem.AddWindow(_tribesWindow);
         _windowSystem.AddWindow(_deliveriesWindow);
         _windowSystem.AddWindow(_flightWindow);
@@ -792,7 +808,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _chocobo.Tick();
         _battlehorn?.Tick();
         // Charon skips or holds cutscenes for the run, as chosen; released when the run ends.
-        _charonCutscenes.Tick(_config.Enabled && _controller.State.IsDriving(), !_config.WatchCutscenes, System.DateTime.UtcNow);
+        // "Leave it to Charon" holds no lease: the box's own toggle decides.
+        _charonCutscenes.Tick(_config.Enabled && _controller.State.IsDriving() && _config.Cutscenes != CutsceneChoice.LeaveToCharon,
+            _config.Cutscenes == CutsceneChoice.Skip, System.DateTime.UtcNow);
+        // Quest windows when questing by hand: only while nothing of ours is driving.
+        _questWindows.Tick(_config.Enabled && _config.QuestWindowsOutsideRuns, AnythingOfOursRunning(), System.DateTime.UtcNow);
 
         // Auto-remove completed priority entries — quests finished by hand count too, so poll.
         var now = System.DateTime.UtcNow;
@@ -1084,6 +1104,21 @@ public sealed class OdysseusPlugin : IDalamudPlugin
                 break;
         }
     }
+
+    /// <summary>A run, or any other job of Odysseus's, is driving the character.</summary>
+    private bool AnythingOfOursRunning()
+        => _controller.State.IsDriving() || !_collector.IsFinished || !_attuner.IsFinished || !_spender.IsFinished
+           || _withdrawer.Busy || _gatherGateway.IsRunning
+           || _gatherLists.State == Services.Gathering.GatherListRunState.Running
+           || !_deliveryRunner.IsFinished
+           || _tribeRunner.State is not (Services.Tribes.TribeRunState.Idle or Services.Tribes.TribeRunState.Done
+               or Services.Tribes.TribeRunState.Faulted);
+
+    /// <summary>What the outside-runs quest window helper last did, for the settings line.</summary>
+    internal string QuestWindowsStatus => _questWindows?.Status ?? "off";
+
+    /// <summary>How many quest targets the overlay drew last frame, for the settings line.</summary>
+    internal int QuestTargetsDrawn => _questTargets?.Drawn ?? 0;
 
     /// <summary>The ordinary window — out of the edge tab, if it was minimized there.</summary>
     private void OpenMain()

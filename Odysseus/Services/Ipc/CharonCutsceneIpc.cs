@@ -20,7 +20,7 @@ public sealed class CharonCutsceneIpc
 {
     private const string SetGate = "Charon.Cutscene.Set";
     private static readonly TimeSpan RenewEvery = TimeSpan.FromSeconds(30);
-    private const int LeaseSeconds = 90;
+    private const int LeaseSeconds = 60;
 
     private readonly IDalamudPluginInterface _pluginInterface;
     private ICallGateSubscriber<bool, int, bool>? _set;
