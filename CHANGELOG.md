@@ -1,7 +1,7 @@
 # Changelog
 
 <!-- LATEST-START -->
-## v0.2.24 — unreleased
+## v0.2.24 — 2026-10-25
 
 ### Gathering moved to Demeter
 - The gatherer is now a plugin of its own, **Demeter**. Quest gathers and gathered custom deliveries ask it over IPC exactly as they asked the built-in gatherer, and fall back to GatherBuddy when Demeter is not installed or "Gather with Demeter" (Settings) is off
@@ -15,6 +15,7 @@
 - Escort quests are walked with the escort: an NPC whose menu offers "Part ways with …" marks the quest as an escort, and from then its walks go on foot — no mount, no flight, off the saddle — and each waits up to 40 seconds at the end for the escort to catch up. Wit as Weaponry (5495) flew every leg ahead of Loosefrox and waited on a replay at each stop
 - Journal: a quest with no recorded path but one Odysseus can work out from the game's journal data is labelled "journal path" and can be queued — Queue had refused it as "without a path" though Start runs such paths (the Beastmaster line from Master of the Lhu on). The path walks, talks and interacts, and stops with a reason at anything else
 - The "TextAdvance not loaded" notice no longer says reward choices will stop for you — Odysseus has picked rewards itself since v0.2.21
+
 
 <!-- LATEST-END -->
 
