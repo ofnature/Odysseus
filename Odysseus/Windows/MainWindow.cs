@@ -42,6 +42,7 @@ public sealed record MainWindowDeps(
     Func<uint> Territory,
     Func<string> JobAbbreviation,
     Action ToggleGather,
+    Func<bool> GatherAvailable,
     Func<IReadOnlyList<Services.Quest.TrackedObjectives>> Objectives,
     Services.Travel.AttuneRunner Attuner,
     Action OpenFlight,
@@ -401,8 +402,12 @@ public sealed class MainWindow : OdysseusWindow
         if (OdysseusTheme.IconTextButton(FontAwesomeIcon.List, "Log", neutral, "Step log.")) _d.OpenLog();
         OdysseusTheme.FlowSameLine(OdysseusTheme.IconTextWidth(FontAwesomeIcon.Users, "Fleet"));
         if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Users, "Fleet", neutral, "Fleet dashboard.")) _d.OpenFleet();
-        OdysseusTheme.FlowSameLine(OdysseusTheme.IconTextWidth(FontAwesomeIcon.Leaf, "Gather"));
-        if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Leaf, "Gather", neutral, "Gather lists — open or close the window.")) _d.ToggleGather();
+        // The gather lists are Demeter's now; the button opens its window, and is not here without it.
+        if (_d.GatherAvailable())
+        {
+            OdysseusTheme.FlowSameLine(OdysseusTheme.IconTextWidth(FontAwesomeIcon.Leaf, "Gather"));
+            if (OdysseusTheme.IconTextButton(FontAwesomeIcon.Leaf, "Gather", neutral, "Demeter's gather lists — open or close the window.")) _d.ToggleGather();
+        }
 
         // Icon-only here so the row still fits a narrow window; the same two are spelled out in
         // Quick access for anyone who does not want to learn the glyphs.

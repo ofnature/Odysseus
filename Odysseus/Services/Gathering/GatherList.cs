@@ -12,6 +12,10 @@ public sealed class GatherListItem
 }
 
 /// <summary>
+/// Legacy: the gather lists moved to Demeter on 2026-10-22, which brings a saved list over from
+/// Odysseus's config once. This type stays only so Odysseus does not drop the saved lists before
+/// Demeter has read them; remove it with <see cref="Config.OdysseusConfig.GatherLists"/>.
+///
 /// A named list of things to gather. Several can exist; a run takes every enabled one and
 /// gathers whatever is short, grouped by zone so a three-zone list costs three teleports.
 /// </summary>

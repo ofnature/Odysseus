@@ -426,8 +426,11 @@ public sealed class DeliveriesWindow : OdysseusWindow
             : $"Wants {wanted.ItemName} (collectability {wanted.CollectabilityHigh}).";
         var sourcing = route == DeliveryRoute.Craft
             ? $"Buys ingredients from the merchant nearby, then crafts through {_artisan.Name}."
-            : $"Odysseus does not {(route == DeliveryRoute.Fish ? "fish" : "gather")} yet — have them in the bag and it\n" +
-              "handles the travel and the turn-in, or it stops and says where to find them.";
+            : route == DeliveryRoute.Fish
+                ? "Demeter fishes them at the collectability asked for (\"Gather with Demeter\" in Settings);\n" +
+                  "without it, have them in the bag — Odysseus handles the travel and the turn-in."
+                : "Demeter gathers them at the collectability asked for when it is installed; otherwise\n" +
+                  "GatherBuddy's auto-gather is switched on, or have them in the bag.";
 
         var tip = allowed
             ? $"{label}{(hasBonus ? " (bonus week)" : "")} — pays {payout} each.\n{asking}\n" +

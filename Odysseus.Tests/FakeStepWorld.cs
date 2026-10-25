@@ -336,6 +336,12 @@ public sealed class FakeStepWorld : IStepWorld, IConditionWorld
             _talkingUntil = UtcNow + TalkLength;
         return true;
     }
+    /// <summary>Enemies by name the fake can see: name → base id.</summary>
+    public Dictionary<string, uint> NamedEnemies { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public uint? NearestEnemyNamed(string name, float radius) => NamedEnemies.TryGetValue(name, out var id) ? id : null;
+    /// <summary>Objects by name and how far they are: name → distance.</summary>
+    public Dictionary<string, float> NamedDistances { get; } = new(StringComparer.OrdinalIgnoreCase);
+    public float? DistanceToNamed(string name) => NamedDistances.TryGetValue(name, out var d) ? d : null;
     public float LastAttackRadius { get; private set; }
     public bool AttackNearestEnemy(IReadOnlyCollection<uint> dataIds, float radius)
     {

@@ -1900,6 +1900,33 @@ public sealed unsafe class GameStepWorld : IStepWorld, IConditionWorld, IChocobo
         return Interact(target);
     }
 
+    public float? DistanceToNamed(string name)
+    {
+        var player = _objectTable.LocalPlayer;
+        if (player is null)
+            return null;
+        var nearest = _objectTable
+            .Where(o => o.Address != player.Address && string.Equals(o.Name.TextValue, name, StringComparison.OrdinalIgnoreCase))
+            .Select(o => Vector3.Distance(o.Position, player.Position))
+            .DefaultIfEmpty(float.NaN)
+            .Min();
+        return float.IsNaN(nearest) ? null : nearest;
+    }
+
+    public uint? NearestEnemyNamed(string name, float radius)
+    {
+        var player = _objectTable.LocalPlayer;
+        if (player is null)
+            return null;
+        return _objectTable
+            .Where(o => o.ObjectKind == ObjectKind.BattleNpc && IsAttackable(o)
+                        && string.Equals(o.Name.TextValue, name, StringComparison.OrdinalIgnoreCase)
+                        && Vector3.Distance(o.Position, player.Position) <= radius)
+            .OrderBy(o => Vector3.Distance(o.Position, player.Position))
+            .Select(o => (uint?)o.BaseId)
+            .FirstOrDefault();
+    }
+
     public bool AttackNearestEnemy(IReadOnlyCollection<uint> dataIds, float radius)
     {
         var player = _objectTable.LocalPlayer;

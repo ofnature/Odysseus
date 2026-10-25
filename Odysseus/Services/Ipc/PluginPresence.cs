@@ -121,8 +121,7 @@ public sealed class PluginPresence
     public string AdviceSummary()
         => TextAdvance
             ? string.Empty
-            : "TextAdvance not loaded — cutscenes will play in full, and a quest offering a choice of "
-              + "rewards will stop at the window for you to pick one.";
+            : "TextAdvance not loaded — cutscenes play in full unless Charon skips them.";
 
     /// <summary>
     /// Human-readable reason a run cannot start, or empty when it can. Named so the UI and the run

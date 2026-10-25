@@ -106,6 +106,52 @@ public class SnipeTests
         Assert.True(assign >= 0 && summon > assign && talk > summon, string.Join(" | ", w.Calls));
     }
 
+    [Fact]
+    public void A_capture_comment_names_the_beast_and_its_battlehorn()
+    {
+        const string comment = "Go into the crypt below, capture Geshunpest, assign to Second Battlehorn, summon, then interact with J'yhuh Tia";
+        Assert.Equal("Geshunpest", StepExecutor.CaptureAsk(comment));
+        var ask = StepExecutor.BattlehornAsk(comment, StepExecutor.CaptureAsk(comment));
+        Assert.Equal(2, ask?.Slot);
+        Assert.Equal("Geshunpest", ask?.Pet);
+    }
+
+    /// <summary>
+    /// Hearts Aligned (5492), sequence 5: capture Geshunpest in the crypt, put it on the second
+    /// battlehorn, summon, talk. Hunted by name and pulled; Daedalus captures it as it falls.
+    /// </summary>
+    [Fact]
+    public void A_beast_is_hunted_and_fought_then_put_on_its_battlehorn()
+    {
+        var w = new FakeStepWorld { TerritoryId = 148, ArriveOnMove = true };
+        w.Spawned.Add(1059327);
+        w.Actions["Second Battlehorn"] = 44891;
+        w.NamedEnemies["Geshunpest"] = 14941;
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep
+        {
+            Kind = StepKind.WaitForManualProgress, KindName = "WaitForManualProgress", DataId = 1059327, TerritoryId = 148,
+            Position = new Vector3(-38.9f, -32.3f, 326.1f),
+            Comment = "Go into the crypt below, capture Geshunpest, assign to Second Battlehorn, summon, then interact with J'yhuh Tia",
+        });
+        var fightTicks = 0;
+        for (var i = 0; i < 80 && ex.Status == StepStatus.Running; i++)
+        {
+            ex.Tick(); w.Advance(0.5);
+            if (w.Calls.Contains("Attack") && fightTicks < 4)
+            {
+                fightTicks++;
+                w.InCombat = fightTicks < 4;                 // a short fight
+                w.NamedEnemies.Remove("Geshunpest");         // and it fell
+            }
+        }
+        var hunted = w.Calls.IndexOf("Attack");
+        var assign = w.Calls.IndexOf("Battlehorn 2 Geshunpest");
+        var summon = w.Calls.IndexOf("UseAction 44891");
+        var talk = w.Calls.IndexOf("Interact 1059327");
+        Assert.True(hunted >= 0 && assign > hunted && summon > assign && talk > summon, string.Join(" | ", w.Calls));
+    }
+
     /// <summary>Already on the right battlehorn: not picked again (that would free it).</summary>
     [Fact]
     public void A_pet_already_on_its_battlehorn_is_left_there()

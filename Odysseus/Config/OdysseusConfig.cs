@@ -142,12 +142,16 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     public bool ShowQuestLine { get; set; } = true;
 
     /// <summary>
-    /// Gather with our own gatherer — quest gathers, deliveries and the gather lists — rather than
-    /// handing to GatherBuddy's auto-gather lists. Off, everything falls back to the handoff.
+    /// Gather with Demeter — quest gathers and gathered deliveries — rather than handing to
+    /// GatherBuddy's auto-gather lists. Off, or Demeter not installed, everything falls back to the
+    /// handoff. (The name is from when the gatherer was Odysseus's own; kept so the saved choice holds.)
     /// </summary>
     public bool OwnGathering { get; set; } = true;
 
-    /// <summary>The gather lists, in the order they are shown.</summary>
+    /// <summary>
+    /// Legacy: the gather lists live in Demeter now, which brings these over once on its first load.
+    /// Kept, unread, so they survive until it has; drop in a later release.
+    /// </summary>
     public List<Services.Gathering.GatherList> GatherLists { get; set; } = [];
 
     /// <summary>Which plugin paths and moves the character: "vnavmesh" (default) or "Ariadne".</summary>
@@ -166,10 +170,10 @@ public sealed class OdysseusConfig : IPluginConfiguration, Services.Run.IRunPoli
     /// </summary>
     public string MinervaPreset { get; set; } = string.Empty;
 
-    /// <summary>Repair gear during a gather run once the worst piece is at or under this percent; 0 never repairs.</summary>
+    /// <summary>Legacy, as <see cref="GatherLists"/>: Demeter's own setting now, brought over once.</summary>
     public int RepairAtPercent { get; set; } = 30;
 
-    /// <summary>Where a finished gather run takes you.</summary>
+    /// <summary>Legacy, as <see cref="GatherLists"/>: Demeter's own setting now, brought over once.</summary>
     public Services.Gathering.GatherHome GatherHome { get; set; } = Services.Gathering.GatherHome.Stay;
 
     // ── Priority quests ──

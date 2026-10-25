@@ -47,6 +47,8 @@ public sealed class StepExecutor
         Door,
         /// <summary>Beastmaster: the pet onto its battlehorn and summoned, before the interact.</summary>
         Battlehorn,
+        /// <summary>Beastmaster: a beast hunted and fought so Daedalus captures it, before the battlehorn.</summary>
+        Capture,
         Mount, Move, WaitReady, Interact, Dialogue,
         CombatWait, Combat,
         /// <summary>Solo instance: interacted, waiting to be inside.</summary>
@@ -366,6 +368,40 @@ public sealed class StepExecutor
     private DateTime _rewardWindowSince;
     private DateTime _rewardLastTry;
     private bool _rewardNeedsChoiceLogged;
+
+    /// <summary>The escort a quest's walks wait for — read off its "Part ways with …" menu; kept across the quest's steps.</summary>
+    private string? _escortName;
+    private ushort _escortQuest;
+    private DateTime _escortWaitSince;
+    /// <summary>Close enough that the escort has caught up.</summary>
+    private const float EscortNear = 8f;
+    /// <summary>How long a walk waits for its escort before going on anyway.</summary>
+    private static readonly TimeSpan EscortWaitMax = TimeSpan.FromSeconds(40);
+
+    /// <summary>
+    /// An escort's own menu says "Part ways with Loosefrox.": the quest is an escort, and that is
+    /// who its walks wait for. The quest data has no such flag; the menu is the game saying so.
+    /// </summary>
+    private void NoteEscort(System.Collections.Generic.IReadOnlyList<string> entries)
+    {
+        if (_escortName is not null && _escortQuest == _questId)
+            return;
+        foreach (var entry in entries)
+        {
+            if (!entry.StartsWith("Part ways with ", StringComparison.OrdinalIgnoreCase))
+                continue;
+            _escortName = entry["Part ways with ".Length..].Trim().TrimEnd('.').Trim();
+            _escortQuest = _questId;
+            _world.Log($"{_escortName} is an escort: quest {_questId}'s walks now go on foot and wait for them.");
+            return;
+        }
+    }
+    /// <summary>Beastmaster: the beast this step captures before its battlehorn; null when none, or once it is down.</summary>
+    private string? _capturePet;
+    private bool _captureFought;
+    private bool _captureSeenSaid;
+    /// <summary>A manual fight: pull its enemies until the quest moves, not until the area is quiet.</summary>
+    private bool _untilQuestMoves;
     /// <summary>An optional reward was clicked for this window; Complete is what is left.</summary>
     private bool _rewardPicked;
     private DateTime _handOverSince;
@@ -600,8 +636,26 @@ public sealed class StepExecutor
         // (The Wilds Call, 5491) is a manual step in the data. Run as the interact it ends in, with
         // the pet assigned and summoned first.
         _battlehorn = null;
-        if (step.Kind == StepKind.WaitForManualProgress && step.DataId is not null && BattlehornAsk(step.Comment) is { } ask)
+        _capturePet = null;
+        _captureFought = false;
+        _captureSeenSaid = false;
+        _untilQuestMoves = false;
+        var manual = step.Kind == StepKind.WaitForManualProgress;
+        // A manual step that names its enemies is a fight the player was meant to have — Hearts
+        // Aligned (5492): "use First Battlehorn, attack until both gauges are over 100, Trick, then
+        // Avalanche Axe, twice" against the quest's own enemy. Daedalus's Beastmaster rotation does
+        // exactly that, so it is fought, again and again, until the quest moves.
+        if (manual && step.KillEnemyDataIds is { Count: > 0 })
         {
+            _untilQuestMoves = true;
+            step = step.As(StepKind.Combat);
+        }
+        // "Capture Geshunpest, assign to Second Battlehorn, summon, then interact": hunt it by name,
+        // let Daedalus capture it as it falls, then the battlehorn and the interact.
+        var capture = manual && step.DataId is not null ? CaptureAsk(step.Comment) : null;
+        if (manual && step.DataId is not null && BattlehornAsk(step.Comment, capture) is { } ask)
+        {
+            _capturePet = capture;
             _battlehorn = ask;
             _battlehornAsked = false;
             _battlehornReady = false;
@@ -631,8 +685,26 @@ public sealed class StepExecutor
                     break;
             }
         }
-        _soloProgressAtStart = step.Kind == StepKind.SinglePlayerDuty ? _world.QuestState(questId) : default;
+        _soloProgressAtStart = step.Kind is StepKind.SinglePlayerDuty or StepKind.WaitForManualProgress || manual
+            ? _world.QuestState(questId) : default;
         _groundOnly = groundOnly;
+        if (questId != _escortQuest)
+        {
+            _escortQuest = 0;
+            _escortName = null;
+        }
+        _escortWaitSince = default;
+        // An escort follows on foot: no mount, no flight, and off the saddle if already in it.
+        // Wit as Weaponry (5495) flew each leg to Loosefrox's next stop, arrived alone, and every
+        // sequence waited for a replay to move.
+        if (_escortName is not null && step.Kind is StepKind.WalkTo or StepKind.Interact)
+        {
+            step = step.As(step.Kind);
+            step.Mount = false;
+            step.Fly = false;
+            step.Dismount = true;
+            _groundOnly = true;
+        }
         _step = step;
         _questId = questId;
         _listAnswered = false;
@@ -792,7 +864,7 @@ public sealed class StepExecutor
         or StepKind.EquipRecommended or StepKind.Action or StepKind.Instruction or StepKind.StatusOff
         or StepKind.PurchaseItem or StepKind.SwitchClass or StepKind.Craft or StepKind.Gather
         or StepKind.EquipItem or StepKind.CreateGearset or StepKind.UpdateGearset or StepKind.Dive
-        or StepKind.CleanUpOtherQuests or StepKind.Snipe;
+        or StepKind.CleanUpOtherQuests or StepKind.Snipe or StepKind.WaitForManualProgress;
 
     /// <summary>The step hands the character to another plugin for a whole instance.</summary>
     public static bool IsHandoff(StepKind kind) => kind is StepKind.SinglePlayerDuty or StepKind.Duty;
@@ -1179,6 +1251,11 @@ public sealed class StepExecutor
                 break;
 
             case Phase.Interact:
+                if (_capturePet is not null)
+                {
+                    Enter(Phase.Capture);
+                    break;
+                }
                 if (_battlehorn is not null)
                 {
                     Enter(Phase.Battlehorn);
@@ -1189,6 +1266,10 @@ public sealed class StepExecutor
 
             case Phase.Battlehorn:
                 TickBattlehorn(now);
+                break;
+
+            case Phase.Capture:
+                TickCapture(now);
                 break;
 
             case Phase.Dialogue:
@@ -1413,6 +1494,17 @@ public sealed class StepExecutor
                 break;
 
             case Phase.Finish:
+                if (step.Kind == StepKind.WalkTo && _escortName is { } escort
+                    && _world.DistanceToNamed(escort) is { } behind && behind > EscortNear)
+                {
+                    if (_escortWaitSince == default)
+                    {
+                        _escortWaitSince = now;
+                        _world.Log($"Waiting for {escort} to catch up ({behind:F0}y behind).");
+                    }
+                    if (now - _escortWaitSince < EscortWaitMax)
+                        break;
+                }
                 _world.ReleaseDialogue();
                 ReleaseCombatHold();
                 _world.ReleaseDescent();
@@ -1851,6 +1943,18 @@ public sealed class StepExecutor
                 // Nothing swings from the saddle: a pull made mounted targets the mob and does
                 // nothing else, and the fight never starts. Feet first, then the fight.
                 return _world.IsMounted ? BeginDismount(Phase.CombatWait) : Phase.CombatWait;
+
+            case StepKind.WaitForManualProgress:
+                // A step the path data leaves to the player. Hearts Aligned (5492): "use First
+                // Battlehorn, attack until both gauges are over 100, Trick, then Avalanche Axe —
+                // twice". It had faulted "not implemented"; now it is said, and waited on at the
+                // spot: the quest moving on is the step done, as for a solo duty run by hand.
+                if (_handoffDone)
+                    return Phase.Finish;
+                _soloHoldReason = step.Comment is { Length: > 0 } manualNote
+                    ? $"this step is yours to do — {string.Join(" · ", manualNote.Split((char)10, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))}"
+                    : "this step is one the path leaves to you";
+                return Phase.SoloDutyHold;
 
             case StepKind.SinglePlayerDuty:
                 if (_handoffDone)
@@ -3212,7 +3316,7 @@ public sealed class StepExecutor
 
     private static readonly string[] Ordinals = ["First", "Second", "Third"];
     private static readonly System.Text.RegularExpressions.Regex BattlehornWords = new(
-        @"assign\s+(?<pet>.+?)\s+to\s+(?:the\s+)?(?<slot>first|second|third)\s+battlehorn",
+        @"assign\s+(?:(?<pet>.+?)\s+)?to\s+(?:the\s+)?(?<slot>first|second|third)\s+battlehorn",
         System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     private (int Slot, string Pet)? _battlehorn;
@@ -3222,12 +3326,82 @@ public sealed class StepExecutor
     private DateTime _lastBattlehornTry;
 
     /// <summary>"Assign Cu Sith to first battlehorn" → (1, "Cu Sith"); null when a comment asks nothing of the kind.</summary>
-    internal static (int Slot, string Pet)? BattlehornAsk(string? comment)
+    /// <param name="captured">The beast the same step captures, when the comment names no pet for the horn ("assign to Second Battlehorn").</param>
+    internal static (int Slot, string Pet)? BattlehornAsk(string? comment, string? captured = null)
     {
         if (comment is null || BattlehornWords.Match(comment) is not { Success: true } m)
             return null;
         var slot = Array.FindIndex(Ordinals, o => o.Equals(m.Groups["slot"].Value, StringComparison.OrdinalIgnoreCase)) + 1;
-        return (slot, m.Groups["pet"].Value.Trim());
+        var pet = m.Groups["pet"].Value.Trim();
+        if (pet.Length == 0)
+            pet = captured ?? string.Empty;
+        return pet.Length == 0 ? null : (slot, pet);
+    }
+
+    private static readonly System.Text.RegularExpressions.Regex CaptureWords = new(
+        @"\bcapture\s+(?<pet>[A-Z][A-Za-z'\-]*(?:\s+[A-Z][A-Za-z'\-]*)*)", System.Text.RegularExpressions.RegexOptions.None);
+
+    /// <summary>The beast a manual step asks to be captured ("capture Geshunpest"), or null.</summary>
+    internal static string? CaptureAsk(string? comment)
+        => comment is not null && CaptureWords.Match(comment) is { Success: true } m ? m.Groups["pet"].Value.Trim() : null;
+
+    /// <summary>How long to look for the beast before handing the step back to the player.</summary>
+    private static readonly TimeSpan CaptureSearchMax = TimeSpan.FromSeconds(60);
+    private const float CaptureHuntRadius = 150f;
+
+    /// <summary>
+    /// Hunt the beast by name and pull it; Daedalus's Beastmaster rotation captures what it fights
+    /// (Gauge, then Capture, the kill inside the window). The fight over, it is the battlehorn's.
+    /// Not found within a minute: the step is said and left to the player, as before.
+    /// </summary>
+    private void TickCapture(DateTime now)
+    {
+        var pet = _capturePet!;
+        CommandAi(true);
+        if (_world.InCombat)
+        {
+            _captureFought = true;
+            _lastCombatSeen = now;
+            return;   // Daedalus is fighting it
+        }
+        if (_captureFought)
+        {
+            if (now - _lastCombatSeen < CombatClearSettle)
+                return;
+            _world.Log($"{pet} is down — captured as it fell, onto the battlehorn next.");
+            _capturePet = null;
+            Enter(Phase.Interact);
+            return;
+        }
+        if (_world.DaedalusDisabledByUser)
+        {
+            _phaseStart = now;
+            if (!_daedalusOffSaid)
+            {
+                _daedalusOffSaid = true;
+                _world.Log($"Daedalus is switched off — not pulling {pet}. Enable it to carry on.");
+            }
+            return;
+        }
+        if (_world.NearestEnemyNamed(pet, CaptureHuntRadius) is { } baseId)
+        {
+            if (!_captureSeenSaid)
+            {
+                _captureSeenSaid = true;
+                _world.Log($"Hunting {pet} to capture it.");
+            }
+            _world.AttackNearestEnemy([baseId], CaptureHuntRadius);
+            return;
+        }
+        if (now - _phaseStart > CaptureSearchMax)
+        {
+            _capturePet = null;
+            _battlehorn = null;
+            _soloHoldReason = $"{pet} is nowhere in sight to capture — {_step?.Comment}";
+            // Back to the manual step it was, so the quest moving ends it rather than a second interact.
+            _step = _step!.As(StepKind.WaitForManualProgress);
+            Enter(Phase.SoloDutyHold);
+        }
     }
 
     /// <summary>
@@ -4766,6 +4940,7 @@ public sealed class StepExecutor
         var entries = _world.SelectStringEntries();
         if (entries.Count == 0)
             return; // the window is up but has not filled in yet
+        NoteEscort(entries);
 
         if (listChoice is null)
         {
@@ -4960,6 +5135,13 @@ public sealed class StepExecutor
         CommandAi(true);
         var enemies = (System.Collections.Generic.IReadOnlyCollection<uint>?)step.KillEnemyDataIds ?? Array.Empty<uint>();
 
+        // A manual fight is over when the quest says so, and only then.
+        if (_untilQuestMoves && !_world.InCombat && SoloDutyWon())
+        {
+            Enter(Phase.Finish);
+            return;
+        }
+
         if (step.CombatItemUse is { } use && TickCombatItem(use, enemies, now))
             return;
 
@@ -5014,6 +5196,9 @@ public sealed class StepExecutor
             _phase = Phase.Combat;
             return;
         }
+
+        if (_untilQuestMoves)
+            return;   // the quest has not moved: wait for the next of them, the clock is the limit
 
         if (_sawCombat)
         {

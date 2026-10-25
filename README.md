@@ -45,7 +45,8 @@ dotnet build Odysseus.sln -c Release
 | **BossMod Reborn** or **Minerva** | solo instanced duties — whichever Settings names | stops at the entrance and waits for you |
 | **Theseus** | full dungeons inside a quest | stops at the entrance and waits for you |
 | **Artisan** | crafting for custom deliveries | the delivery stops and says what to craft |
-| **GatherBuddy Reborn** | gathering for custom deliveries | the delivery stops and says where to find it |
+| **Demeter** | gathering for quests and custom deliveries (and the gather lists) | hands to GatherBuddy Reborn instead |
+| **GatherBuddy Reborn** | gathering when Demeter is not there, or switched off in Settings | the delivery stops and says where to find it |
 | **Daedalus** | combat, and the fleet dashboard relay | fights are yours; no fleet view |
 
 Every one of them fails open. A missing plugin degrades the feature that needs it and says so in
@@ -238,19 +239,16 @@ an **Unlock** button that queues the whole prerequisite chain.
 
 | Gate | Returns | Meaning |
 |---|---|---|
-| `Odysseus.IsBusy` | `bool` | A run is driving the character — a quest, or gathering asked for through the gates below. |
-| `Odysseus.Gather.CanGather(uint itemId)` | `bool` | This character could gather it unattended right now: a node exists, it is not timed, the class is unlocked and high enough, and it is not a fish. |
-| `Odysseus.Gather.Start(string json)` | `bool` | Gather into the caller's own list — one per caller, named after it, shown beside yours and reused every time, with completed rows removed. Runs only that list. All-or-nothing; true means it began. |
-| `Odysseus.Gather.Stop()` | — | Stops a run that came through the gate. A run you started yourself is left alone. |
-| `Odysseus.Gather.IsRunning` | `bool` | True only for runs that came through the gate. |
-| `Odysseus.Gather.GetStatusJson()` | `string` | What it is doing and what each item came to. |
+| `Odysseus.IsBusy` | `bool` | A run is driving the character — a quest, an allied society day, a delivery. |
 | `Odysseus.Quest.CanRun(uint questId)` | `bool` | Odysseus could run this quest now: not done, a path recorded or workable from the journal data, and nothing it needs first left undone. Busy is not "cannot". Takes the row id (70179) or Odysseus's own (4643). |
 | `Odysseus.Quest.Start(uint questId)` | `bool` | Run that one quest, as Start does, with Stop after armed: it ends at the quest's completion and never rolls on. False when switched off, busy, or `CanRun` would say no — the reason is in the log and the status. |
 | `Odysseus.Quest.Stop()` | — | Stops a quest that came through the gate. A run you started yourself is left alone. |
 | `Odysseus.Quest.IsRunning` | `bool` | True only for a quest that came through the gate. |
 | `Odysseus.Quest.GetStatusJson()` | `string` | `{schema, state, questId, sequence, step, status, reason}` — state is Idle, Refused, Running, Done, Faulted or Stopped. |
 
-Gates are extend-only: a published gate never changes its signature or meaning.
+Gates are extend-only: a published gate never changes its signature or meaning. The one exception
+is the `Odysseus.Gather.*` gates, which moved with the gatherer to **Demeter** as `Demeter.Gather.*`,
+same shapes — see Demeter's README.
 
 ---
 

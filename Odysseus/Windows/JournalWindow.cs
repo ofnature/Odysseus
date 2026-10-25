@@ -45,6 +45,12 @@ public sealed class JournalWindow : OdysseusWindow
     private string _search = string.Empty;
     private bool _hideCompleted = true;
     private bool _onlyWithPaths = true;
+
+    /// <summary>
+    /// A path can be worked out from the game's journal data for this quest — set by the plugin. It
+    /// walks, talks and interacts, and stops at anything else; queued and run like a recorded one.
+    /// </summary>
+    public Func<ushort, bool> HasDerivedPath { get; set; } = _ => false;
     private string _status = string.Empty;
     private readonly Dictionary<ushort, ChainPlan?> _plans = new();
     private DateTime _plansAt;
@@ -436,7 +442,7 @@ public sealed class JournalWindow : OdysseusWindow
         ImGui.SameLine();
         ImGui.TextColored(OdysseusTheme.TextDisabled,
             $"#{quest.QuestId} · Lv {quest.ClassJobLevel}" +
-            (_hasPath(quest.QuestId) ? string.Empty : " · no path") +
+            (_hasPath(quest.QuestId) ? string.Empty : HasDerivedPath(quest.QuestId) ? " · journal path" : " · no path") +
             (plan is { Steps.Count: > 1 } ? $" · {plan.Steps.Count} in chain" : string.Empty));
 
         // Only quests that actually want something get a list; on a line of twenty-one, the ones

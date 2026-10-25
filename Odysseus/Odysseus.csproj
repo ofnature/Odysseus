@@ -34,19 +34,7 @@
     </Content>
   </ItemGroup>
 
-  <!--
-    GatherBuddy's node coordinates, shipped verbatim and gzipped, under Apache 2.0. Verbatim on
-    purpose: an unmodified copy is the simplest thing to attribute honestly, and it keeps their file
-    the authority rather than a transcription of it. The licence travels beside it. See NOTICE.md.
-  -->
   <ItemGroup>
-    <Content Include="Assets\gatherbuddy-world_locations.json.gz" Condition="Exists('Assets\gatherbuddy-world_locations.json.gz')">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="..\licenses\Apache-2.0.txt" Condition="Exists('..\licenses\Apache-2.0.txt')">
-      <Link>licenses\Apache-2.0.txt</Link>
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
     <Content Include="..\NOTICE.md" Condition="Exists('..\NOTICE.md')">
       <Link>NOTICE.md</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>

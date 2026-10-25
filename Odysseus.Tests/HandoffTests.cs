@@ -211,6 +211,63 @@ public class HandoffTests
     }
 
     /// <summary>
+    /// Hearts Aligned (5492), sequence 1: a manual step naming the quest's enemy. Fought with Daedalus,
+    /// pull after pull, and done only when the quest moves — not when the first fight goes quiet.
+    /// </summary>
+    [Fact]
+    public void A_manual_step_with_enemies_is_fought_until_the_quest_moves()
+    {
+        var w = new FakeStepWorld { PlayerPosition = Vector3.Zero };
+        w.QuestStates[KeyToVictory] = Before();
+        var step = Step(StepKind.WaitForManualProgress, dataId: Mistress);
+        step.KindName = "WaitForManualProgress";
+        step.EnemySpawnType = EnemySpawnType.OverworldEnemies;
+        step.KillEnemyDataIds = [19456];
+        step.Comment = "Perform these actions twice";
+        var ex = new StepExecutor(w);
+        ex.Begin(step, questId: KeyToVictory);
+
+        for (var round = 0; round < 3; round++)
+        {
+            w.AttackResults.Enqueue(true);
+            Ticks(ex, w, 2);
+            w.InCombat = true; Ticks(ex, w, 4);
+            w.InCombat = false; Ticks(ex, w, 20);
+            Assert.Equal(StepStatus.Running, ex.Status);   // quiet, but the quest has not moved
+        }
+        w.QuestStates[KeyToVictory] = Won();
+        Ticks(ex, w, 5);
+        Assert.Equal(StepStatus.Done, ex.Status);
+        Assert.True(w.Calls.Count(c => c == "Attack") >= 3);
+    }
+
+    /// <summary>
+    /// Hearts Aligned (5492): a step the path leaves to the player. Said with the path's own note,
+    /// waited on, done when the quest moves — not "not implemented".
+    /// </summary>
+    [Fact]
+    public void A_manual_progress_step_says_what_to_do_and_waits_for_the_quest_to_move()
+    {
+        var w = new FakeStepWorld { PlayerPosition = Vector3.Zero };
+        w.Spawned.Add(Mistress);
+        w.QuestStates[KeyToVictory] = Before();
+        var step = Step(StepKind.WaitForManualProgress, dataId: Mistress);
+        step.KindName = "WaitForManualProgress";
+        step.Comment = "Perform these actions twice:\nUse First Battlehorn\nUse Trick";
+        var ex = new StepExecutor(w);
+        ex.Begin(step, questId: KeyToVictory);
+
+        Ticks(ex, w, 20);
+        Assert.Equal(StepStatus.Running, ex.Status);
+        Assert.Contains(w.Calls, c => c.StartsWith("Notify") && c.Contains("Use First Battlehorn · Use Trick"));
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Interact"));
+
+        w.QuestStates[KeyToVictory] = Won();          // the player did it
+        Ticks(ex, w, 5);
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
+    /// <summary>
     /// The mark is "no bossmod module yet": Spearheading Initiatives (2019) waited at the entrance
     /// with a Minerva port of its battle loaded. A module there means going in.
     /// </summary>

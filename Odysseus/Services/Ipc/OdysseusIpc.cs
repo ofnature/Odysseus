@@ -26,11 +26,6 @@ namespace Odysseus.Services.Ipc;
 public sealed class OdysseusIpc : IDisposable
 {
     public const string IsBusyGate = "Odysseus.IsBusy";
-    public const string CanGatherGate = "Odysseus.Gather.CanGather";
-    public const string GatherStartGate = "Odysseus.Gather.Start";
-    public const string GatherStopGate = "Odysseus.Gather.Stop";
-    public const string GatherIsRunningGate = "Odysseus.Gather.IsRunning";
-    public const string GatherStatusGate = "Odysseus.Gather.GetStatusJson";
     public const string QuestCanRunGate = "Odysseus.Quest.CanRun";
     public const string QuestStartGate = "Odysseus.Quest.Start";
     public const string QuestStopGate = "Odysseus.Quest.Stop";
@@ -38,11 +33,6 @@ public sealed class OdysseusIpc : IDisposable
     public const string QuestStatusGate = "Odysseus.Quest.GetStatusJson";
 
     private readonly ICallGateProvider<bool> _isBusy;
-    private readonly ICallGateProvider<uint, bool>? _canGather;
-    private readonly ICallGateProvider<string, bool>? _gatherStart;
-    private readonly ICallGateProvider<object?>? _gatherStop;
-    private readonly ICallGateProvider<bool>? _gatherIsRunning;
-    private readonly ICallGateProvider<string>? _gatherStatus;
     private readonly ICallGateProvider<uint, bool>? _questCanRun;
     private readonly ICallGateProvider<uint, bool>? _questStart;
     private readonly ICallGateProvider<object?>? _questStop;
@@ -53,17 +43,11 @@ public sealed class OdysseusIpc : IDisposable
     /// Reads the live run state. Must never throw — an exception here surfaces inside another
     /// plugin's poll.
     /// </param>
-    /// <param name="gather">
-    /// The gathering gateway, when there is one. Null publishes only <see cref="IsBusyGate"/>, which
-    /// is what a build without the gatherer should look like from outside: a gate that is not there
-    /// reads as "not available", never as "available and refusing".
-    /// </param>
     /// <param name="quests">
     /// The quest gateway — another plugin asking for one quest to be done (Calypso, for the Island
     /// Sanctuary quests). Takes the quest's row id (70179) or Odysseus's own (4643). Null publishes none.
     /// </param>
-    public OdysseusIpc(IDalamudPluginInterface pluginInterface, Func<bool> isBusy, Gathering.GatherGateway? gather = null,
-        Quest.QuestGateway? quests = null)
+    public OdysseusIpc(IDalamudPluginInterface pluginInterface, Func<bool> isBusy, Quest.QuestGateway? quests = null)
     {
         _isBusy = pluginInterface.GetIpcProvider<bool>(IsBusyGate);
         _isBusy.RegisterFunc(() =>
@@ -90,45 +74,18 @@ public sealed class OdysseusIpc : IDisposable
             _questStop = pluginInterface.GetIpcProvider<object?>(QuestStopGate);
             _questStop.RegisterAction(() => Guard<object?>(() => { quests.Stop(); return null; }, null));
 
-            // The caller's run only, as Gather.IsRunning: a quest the player started meanwhile is not it.
+            // The caller's run only: a quest the player started meanwhile is not it.
             _questIsRunning = pluginInterface.GetIpcProvider<bool>(QuestIsRunningGate);
             _questIsRunning.RegisterFunc(() => Guard(() => quests.IsRunning, false));
 
             _questStatus = pluginInterface.GetIpcProvider<string>(QuestStatusGate);
             _questStatus.RegisterFunc(() => Guard(quests.StatusJson, "{}"));
         }
-
-        if (gather is null)
-            return;
-
-        // The gathering surface. Same rules as above: never throw into a caller's poll, and a
-        // refusal is always a false with a reason in the log rather than a silent partial run.
-        _canGather = pluginInterface.GetIpcProvider<uint, bool>(CanGatherGate);
-        _canGather.RegisterFunc(itemId => Guard(() => gather.CanGather(itemId), false));
-
-        _gatherStart = pluginInterface.GetIpcProvider<string, bool>(GatherStartGate);
-        _gatherStart.RegisterFunc(json => Guard(() => gather.Start(json), false));
-
-        _gatherStop = pluginInterface.GetIpcProvider<object?>(GatherStopGate);
-        _gatherStop.RegisterAction(() => Guard<object?>(() => { gather.Stop(); return null; }, null));
-
-        // Told apart from Odysseus.IsBusy on purpose: a caller needs to know that the run still
-        // going is *its* run, not a quest the player started while it was waiting.
-        _gatherIsRunning = pluginInterface.GetIpcProvider<bool>(GatherIsRunningGate);
-        _gatherIsRunning.RegisterFunc(() => Guard(() => gather.IsRunning, false));
-
-        _gatherStatus = pluginInterface.GetIpcProvider<string>(GatherStatusGate);
-        _gatherStatus.RegisterFunc(() => Guard(gather.StatusJson, "{}"));
     }
 
     public void Dispose()
     {
         _isBusy.UnregisterFunc();
-        _canGather?.UnregisterFunc();
-        _gatherStart?.UnregisterFunc();
-        _gatherStop?.UnregisterAction();
-        _gatherIsRunning?.UnregisterFunc();
-        _gatherStatus?.UnregisterFunc();
         _questCanRun?.UnregisterFunc();
         _questStart?.UnregisterFunc();
         _questStop?.UnregisterAction();

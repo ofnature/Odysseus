@@ -416,16 +416,6 @@ public sealed class ConfigWindow : OdysseusWindow
             "refused and the green would be wasted — and nothing happens at all until \"My Little " +
             "Chocobo\" is done on this character.");
 
-        var repairAt = _config.RepairAtPercent;
-        ImGui.SetNextItemWidth(120f);
-        if (ImGui.SliderInt("Repair gear at %", ref repairAt, 0, 90))
-        {
-            _config.RepairAtPercent = Math.Clamp(repairAt, 0, 90);
-            _save();
-        }
-        if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("During a gather run, once the worst-worn piece is at or under this, gear is self-repaired between items (dark matter and crafter levels permitting). 0 never repairs.");
-
         ImGui.PushTextWrapPos(0f);
         ImGui.TextColored(OdysseusTheme.TextSecondary,
             "Instanced fights inside a quest are handed to the plugin that already does them. " +
@@ -505,13 +495,13 @@ public sealed class ConfigWindow : OdysseusWindow
                 + "with the one that started it. Switching takes effect immediately.");
 
         var ownGathering = _config.OwnGathering;
-        if (ImGui.Checkbox("Gather with Odysseus", ref ownGathering))
+        if (ImGui.Checkbox("Gather with Demeter", ref ownGathering))
         {
             _config.OwnGathering = ownGathering;
             _save();
         }
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip("Quest gathers, gathered deliveries and the gather lists are done by our own gatherer. Off, they hand to GatherBuddy's auto-gather lists as before.");
+            ImGui.SetTooltip("Quest gathers and gathered deliveries are done by Demeter (the gatherer that used to be Odysseus's own; the gather lists are in it too). Off, or Demeter not installed, they hand to GatherBuddy's auto-gather lists as before.");
 
         var sellRewards = _config.SellQuestRewards;
         if (ImGui.Checkbox("Sell crafter and gatherer quest rewards", ref sellRewards))

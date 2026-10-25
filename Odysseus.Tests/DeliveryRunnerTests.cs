@@ -673,16 +673,33 @@ public class DeliveryRunnerTests
         Assert.Equal(0, _game.Committed);
     }
 
-    /// <summary>GatherBuddy does not fish, so the fish route never hands off however present it is.</summary>
+    /// <summary>GatherBuddy does not fish, so the fish route never hands off to it however present it is.</summary>
     [Fact]
-    public void Fishing_is_never_handed_off()
+    public void Fishing_never_goes_to_GatherBuddy()
     {
         _requests.Items.Add(new DeliveryRequest(DeliveryRoute.Fish, 2, 40002, "Coral Trout", 400, 250, false));
         Assert.True(_runner.Start(Zhloe, DeliveryRoute.Fish, limit: 1));
         Run();
 
         Assert.Equal(DeliveryRunState.Blocked, _runner.State);
-        Assert.Contains("does not fish", _runner.StatusLine);
+        Assert.Contains("fish", _runner.StatusLine);
+        Assert.Equal(0, _gatherer.Starts);
+    }
+
+    /// <summary>Demeter fishes: the fish route goes to the own gatherer with the collectability the client asks for.</summary>
+    [Fact]
+    public void Fishing_goes_to_Demeter_at_the_collectability_asked()
+    {
+        _requests.Items.Add(new DeliveryRequest(DeliveryRoute.Fish, 2, 40002, "Coral Trout", 400, 250, false));
+        _own.Knows.Add(40002);
+        _game.Bag[40002] = 0;
+
+        Assert.True(_ownRunner.Start(Zhloe, DeliveryRoute.Fish, limit: 1));
+        Own_RunTo(() => _own.Starts > 0);
+
+        Assert.Equal(1, _own.Starts);
+        Assert.Equal(40002u, _own.LastStart.Item);
+        Assert.Equal(400, _own.LastStart.Collectability);
         Assert.Equal(0, _gatherer.Starts);
     }
 

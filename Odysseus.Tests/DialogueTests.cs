@@ -386,6 +386,42 @@ public class DialogueTests
         Assert.Equal(1, w.Calls.Count(c => c == "Select 1")); // answered once, not every tick
     }
 
+    /// <summary>
+    /// Wit as Weaponry (5495): Loosefrox's menu says "Part ways with Loosefrox." — an escort. The next
+    /// walk goes on foot (no mount, no flight) and ends only once Loosefrox has caught up.
+    /// </summary>
+    [Fact]
+    public void An_escort_menu_makes_the_quests_walks_go_on_foot_and_wait()
+    {
+        var w = new FakeStepWorld { CanFlyHere = true };
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(7), questId: 5495);
+        Ticks(ex, w, 3);
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectString");
+        w.ListEntries.AddRange(["Speak with Loosefrox.", "Part ways with Loosefrox.", "Nothing."]);
+        Ticks(ex, w, 6);
+        Assert.Contains(w.Calls, c => c.StartsWith("Log Loosefrox is an escort"));
+        w.IsOccupied = false;
+        w.VisibleAddons.Remove("SelectString");
+        w.ListEntries.Clear();
+        w.Calls.Clear();
+
+        w.ArriveOnMove = true;
+        w.NamedDistances["Loosefrox"] = 30f;
+        ex.Begin(new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = w.TerritoryId, Position = new Vector3(0, 0, 200), Fly = true }, questId: 5495);
+        Ticks(ex, w, 30);
+        Assert.DoesNotContain("Mount", w.Calls);
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Move") && c.EndsWith("fly=True"));
+        Assert.Equal(StepStatus.Running, ex.Status);          // Loosefrox is still 30y behind
+        Assert.Contains(w.Calls, c => c.StartsWith("Log Waiting for Loosefrox"));
+
+        w.NamedDistances["Loosefrox"] = 3f;                    // caught up
+        Ticks(ex, w, 3);
+        Assert.Equal(StepStatus.Done, ex.Status);
+    }
+
     /// <summary>Ul'dah's lift attendant asks in the icon menu, not the plain one — the List choice answers it.</summary>
     [Fact]
     public void A_list_choice_answers_the_lift_attendants_icon_menu()

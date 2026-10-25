@@ -1,6 +1,10 @@
 namespace Odysseus.Services.Gathering;
 
-/// <summary>Where a finished gather run takes you, as GatherBuddy's "go home" does.</summary>
+/// <summary>
+/// Where a finished gather run takes you. Legacy: the gather lists moved to Demeter, which reads this
+/// once from Odysseus's saved config and keeps its own from then on. Kept only so that saved value
+/// survives until Demeter has read it; drop it with <see cref="Config.OdysseusConfig.GatherHome"/>.
+/// </summary>
 public enum GatherHome
 {
     Stay = 0,
@@ -16,31 +20,4 @@ public enum GatherHome
     Private = 5,
     /// <summary>Lifestream: your apartment.</summary>
     Apartment = 6,
-}
-
-public static class GatherHomeCommands
-{
-    /// <summary>The chat command that goes there, or null for staying put. Lifestream owns every trip but Return.</summary>
-    public static string? For(GatherHome home) => home switch
-    {
-        GatherHome.Return => "/generalaction Return",
-        GatherHome.Inn => "/li inn",
-        GatherHome.Estate => "/li auto",
-        GatherHome.FreeCompany => "/li fc",
-        GatherHome.Private => "/li home",
-        GatherHome.Apartment => "/li apt",
-        _ => null,
-    };
-
-    public static string Label(GatherHome home) => home switch
-    {
-        GatherHome.Stay => "Stay where I am",
-        GatherHome.Return => "Return",
-        GatherHome.Inn => "Inn",
-        GatherHome.Estate => "Estate (Lifestream's preference)",
-        GatherHome.FreeCompany => "Free company estate",
-        GatherHome.Private => "Private estate",
-        GatherHome.Apartment => "Apartment",
-        _ => home.ToString(),
-    };
 }

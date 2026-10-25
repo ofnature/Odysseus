@@ -69,29 +69,14 @@ credited to liza, Theo, Censored and plogon_enjoyer and point at liza's own repo
 authors and the same data as Questionable, and so AGPL-3.0 whatever the republication says.
 **Not used as a shipped source.**
 
-## Data read at runtime from the user's own installed plugins
-
-### AutoHook (`PunishedPineapple/AutoHook`)
-
-Bait, mooch chains and hook timings are read from `Data/FishData/fish_list.json` inside the user's
-own AutoHook installation, at runtime. Nothing is copied into Odysseus and nothing is shipped. If
-AutoHook is not installed, the fishing features say so rather than falling back to a copy.
-
-## Data that may be shipped, with attribution
+## Data no longer shipped here
 
 ### GatherBuddy / GatherBuddy Reborn — Apache License 2.0
 
-- `Ottermandias/GatherBuddy` — Apache 2.0
-- `FFXIV-CombatReborn/GatherBuddyReborn` — Apache 2.0
-
-Node coordinates originate in `GatherBuddy.CustomInfo.world_locations.json`. Apache 2.0 permits
-redistribution, including of the data, provided a copy of the licence travels with it, the original
-notices are retained, and modified files are marked as changed. Any Odysseus release carrying this
-data must ship `licenses/Apache-2.0.txt` and state that the coordinates come from GatherBuddy and
-what was changed (format conversion; selection by delivery item).
-
-Apache 2.0 is one-way compatible with GPL-3, so it can be combined into this project. The reverse is
-not true, and nothing here is contributed back under Apache terms.
+Odysseus shipped GatherBuddy's node coordinates (`world_locations.json`, Apache 2.0) with its own
+gatherer up to v0.2.23. The gatherer moved to **Demeter** (`ofnature/Demeter`) on 2026-10-22, and
+the data, its licence and its attribution went with it. Nothing from GatherBuddy ships with Odysseus
+any more. (The AutoHook fish data that the gatherer's fishing start read at runtime went too.)
 
 ## Code studied, code ported
 
@@ -164,6 +149,6 @@ with Daedalus and Charon on purpose, so all three plugins' tabs stack on one edg
 
 ## Handoffs, not data
 
-Artisan, GatherBuddy Reborn, vnavmesh, Lifestream, TextAdvance, BossMod Reborn, Theseus and
+Artisan, Demeter, GatherBuddy Reborn, vnavmesh, Lifestream, TextAdvance, BossMod Reborn, Theseus and
 Questionable are driven over their published IPC where the user has them installed. Calling a
 plugin's IPC is use, not derivation, and none of their code is included here.

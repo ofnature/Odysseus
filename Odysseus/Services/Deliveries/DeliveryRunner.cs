@@ -423,9 +423,10 @@ public sealed class DeliveryRunner
     }
 
     /// <summary>
-    /// Gathering is handed to GatherBuddy, which can only be switched on — it takes no request. So
-    /// this switches it on and watches our own bag until the count is met, rather than asking it
-    /// for progress it cannot report. Fishing has no handoff at all and always stops.
+    /// Gathering and fishing go to Demeter first, which takes the item and the collectability asked for.
+    /// Without it, gathering is handed to GatherBuddy, which can only be switched on — it takes no
+    /// request — so this switches it on and watches our own bag until the count is met. Fishing has no
+    /// fallback: without Demeter it stops and says so.
     /// </summary>
     private void TickGather()
     {
@@ -456,9 +457,9 @@ public sealed class DeliveryRunner
             return;
         }
 
-        // Ours first where we have a node for it: GatherBuddy's lists cannot express "at this
-        // collectability or better", which is the whole of what a delivery asks for.
-        if (_route == DeliveryRoute.Gather && _own is { } own && own.CanGather(request.ItemId))
+        // Demeter first where it can do it — a node, or a fish: GatherBuddy's lists cannot express "at
+        // this collectability or better", which is the whole of what a delivery asks for.
+        if (_route is DeliveryRoute.Gather or DeliveryRoute.Fish && _own is { } own && own.CanGather(request.ItemId))
         {
             if (TickOwnGather(own, client, request, short_))
                 return;
@@ -466,8 +467,8 @@ public sealed class DeliveryRunner
 
         if (_route == DeliveryRoute.Fish || !_gatherer.Available)
         {
-            BlockNeedingItems(short_, _gatherer.Available
-                ? "GatherBuddy does not fish"
+            BlockNeedingItems(short_, _route == DeliveryRoute.Fish
+                ? _own is { Enabled: true } fisher ? $"Demeter cannot fish it: {fisher.WhyNot(request.ItemId)}" : "fishing needs Demeter"
                 : "GatherBuddy is not installed");
             return;
         }

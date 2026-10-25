@@ -1,6 +1,23 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.24 — unreleased
+
+### Gathering moved to Demeter
+- The gatherer is now a plugin of its own, **Demeter**. Quest gathers and gathered custom deliveries ask it over IPC exactly as they asked the built-in gatherer, and fall back to GatherBuddy when Demeter is not installed or "Gather with Demeter" (Settings) is off
+- The gather lists, their window, "Afterwards" and the repair threshold are Demeter's. Demeter brings your saved lists and those settings over from Odysseus on its first load; Odysseus keeps its copy untouched for now. The main window's Gather button opens Demeter's lists, and is hidden when Demeter is not there
+- The `Odysseus.Gather.*` IPC gates are gone; Hephaestus and anything else that used them asks `Demeter.Gather.*` (same shapes). `Odysseus.IsBusy` no longer covers gathering — `Demeter.IsBusy` does
+- GatherBuddy's node data no longer ships with Odysseus; it ships with Demeter
+- Fish deliveries go to Demeter too: it fishes the item at the collectability the client asks for. Without Demeter the fish route stops and says so, as before
+
+### Quests
+- Steps the path data leaves to the player ("WaitForManualProgress") are done for you where they can be: one that names its enemies is fought with Daedalus, pull after pull, until the quest moves — Hearts Aligned (5492) "use First Battlehorn, attack until both gauges are over 100, Trick, then Avalanche Axe, twice", which Daedalus's Beastmaster rotation does; one that says "capture <beast>" hunts the beast by name and pulls it, Daedalus captures it as it falls, and the battlehorn step after puts it on the named horn ("assign to Second Battlehorn" takes the beast just caught), summons it and talks. Anything else, or a beast not found within a minute, is said in the path's own words and waited on until the quest moves — no more "not implemented" fault
+- Escort quests are walked with the escort: an NPC whose menu offers "Part ways with …" marks the quest as an escort, and from then its walks go on foot — no mount, no flight, off the saddle — and each waits up to 40 seconds at the end for the escort to catch up. Wit as Weaponry (5495) flew every leg ahead of Loosefrox and waited on a replay at each stop
+- Journal: a quest with no recorded path but one Odysseus can work out from the game's journal data is labelled "journal path" and can be queued — Queue had refused it as "without a path" though Start runs such paths (the Beastmaster line from Master of the Lhu on). The path walks, talks and interacts, and stops with a reason at anything else
+- The "TextAdvance not loaded" notice no longer says reward choices will stop for you — Odysseus has picked rewards itself since v0.2.21
+
+<!-- LATEST-END -->
+
 ## v0.2.23 — 2026-10-22
 
 ### Dialogue and rewards
@@ -9,8 +26,6 @@
 
 ### Quests
 - Quest target indicators (Settings → Dialogue and rewards, off by default): a gold marker over every object the game shows a quest icon on (the same 71000–71999 test the run uses), with its name and distance, and a line from you to each, drawn only where it is in front of the camera. Main scenario and side quests are not told apart — those icon ranges are not verified in game. Hidden in cutscenes and loading screens; the overlay takes no input
-
-<!-- LATEST-END -->
 
 ## v0.2.22 — 2026-10-19
 

@@ -432,6 +432,12 @@ public interface IStepWorld
     /// <summary>Targets and engages the nearest attackable object whose data id is in <paramref name="dataIds"/> (any, if empty). False when none within radius.</summary>
     bool AttackNearestEnemy(System.Collections.Generic.IReadOnlyCollection<uint> dataIds, float radius);
 
+    /// <summary>The nearest attackable enemy by this name within the radius — its base id, for <see cref="AttackNearestEnemy"/>.</summary>
+    uint? NearestEnemyNamed(string name, float radius);
+
+    /// <summary>How far the nearest object by this name is from the player; null when none is in view.</summary>
+    float? DistanceToNamed(string name);
+
     // ── Instances and handoffs ──
 
     /// <summary>Inside any instanced duty (solo or otherwise).</summary>
