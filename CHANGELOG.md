@@ -1,7 +1,7 @@
 # Changelog
 
 <!-- LATEST-START -->
-## v0.2.25 — unreleased
+## v0.2.25 — 2026-10-25
 
 ### Quests
 - A quest worked out from the journal data walks into the circle it has to be stood in: an objective that points at a search area with one of the quest's event ranges at its centre now walks to that range (about 5 yalms) instead of stopping up to 15 yalms out in the area. Wit as Weaponry's stops with Loosefrox fell 10+ yalms short of his circle
@@ -10,6 +10,8 @@
 
 ### Notices
 - No more TextAdvance notice: Odysseus does everything TextAdvance was there for — dialogue, quest accept and complete, reward picking, hand-ins — and Charon presses Esc in cutscenes. The only notice left is "Charon not loaded — cutscenes play in full", shown when cutscenes are set to Skip and neither Charon nor TextAdvance is there to press Esc. Settings shows Charon (optional) where TextAdvance was
+
+<!-- LATEST-END -->
 
 ## v0.2.24 — 2026-10-25
 
@@ -27,7 +29,6 @@
 - The "TextAdvance not loaded" notice no longer says reward choices will stop for you — Odysseus has picked rewards itself since v0.2.21
 
 
-<!-- LATEST-END -->
 
 ## v0.2.23 — 2026-10-22
 
