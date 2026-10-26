@@ -32,6 +32,7 @@ public sealed class PluginPresence
 
     /// <summary>Dialogue advance and cutscene skip. It skips text; Odysseus still makes the choices.</summary>
     public const string TextAdvanceInternalName = "TextAdvance";
+    public const string CharonInternalName = "Charon";
 
     // ── Soft ──
 
@@ -71,6 +72,9 @@ public sealed class PluginPresence
 
     public bool TextAdvance => IsLoaded(TextAdvanceInternalName);
 
+    /// <summary>Charon presses Esc in cutscenes (Odysseus leases it for the run); the one skip Odysseus cannot do itself.</summary>
+    public bool Charon => IsLoaded(CharonInternalName);
+
     public bool Daedalus => IsLoaded(DaedalusInternalName);
 
     /// <summary>
@@ -108,20 +112,21 @@ public sealed class PluginPresence
     /// Everything required to walk a quest is present.
     ///
     /// <para>
-    /// TextAdvance used to be on this list and no longer is. Odysseus advances the talk box,
-    /// answers the skip-cutscene prompt, presses Accept and Complete, and fills and hands over the
-    /// request window itself; what TextAdvance still adds is the ESC press during a cutscene and
-    /// picking an optional quest reward. Both cost time rather than correctness, so a missing
-    /// TextAdvance is now advice (<see cref="AdviceSummary"/>) instead of a locked Start button.
+    /// TextAdvance used to be on this list and is no longer needed at all. Odysseus advances the
+    /// talk box, answers the skip-cutscene prompt, presses Accept and Complete, picks optional
+    /// rewards, and fills and hands over the request window itself. The one thing it cannot do is
+    /// press Esc in a cutscene; Charon does that (TextAdvance still would, if it is installed).
+    /// That costs time rather than correctness, so it is advice (<see cref="AdviceSummary"/>).
     /// </para>
     /// </summary>
     public bool CoreReady => Pathing && Lifestream;
 
     /// <summary>What is missing that a run can live without, or empty. Shown as a notice, never a gate.</summary>
-    public string AdviceSummary()
-        => TextAdvance
-            ? string.Empty
-            : "TextAdvance not loaded — cutscenes play in full unless Charon skips them.";
+    /// <param name="skipCutscenes">Cutscenes are set to Skip — only then does a missing Esc matter.</param>
+    public string AdviceSummary(bool skipCutscenes)
+        => skipCutscenes && !Charon && !TextAdvance
+            ? "Charon not loaded — cutscenes play in full. Install Charon to have them skipped."
+            : string.Empty;
 
     /// <summary>
     /// Human-readable reason a run cannot start, or empty when it can. Named so the UI and the run

@@ -130,7 +130,7 @@ public sealed class ConfigWindow : OdysseusWindow
         ImGui.SameLine(0f, 12f);
         OdysseusTheme.DependencyChip("Lifestream", _presence.Lifestream);
         ImGui.SameLine(0f, 12f);
-        OdysseusTheme.DependencyChip("TextAdvance", _presence.TextAdvance);
+        OdysseusTheme.DependencyChip("Charon", _presence.Charon, required: false);
         ImGui.SameLine(0f, 12f);
         OdysseusTheme.DependencyChip("Daedalus", _presence.Daedalus, required: false);
         ImGui.SameLine(0f, 12f);

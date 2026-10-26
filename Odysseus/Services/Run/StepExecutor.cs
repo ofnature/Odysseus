@@ -372,6 +372,10 @@ public sealed class StepExecutor
     /// <summary>The escort a quest's walks wait for — read off its "Part ways with …" menu; kept across the quest's steps.</summary>
     private string? _escortName;
     private ushort _escortQuest;
+    private uint? _escortDataId;
+
+    /// <summary>The escort's own object, for the quest it escorts in — what the controller orders a sequence around.</summary>
+    public uint? EscortOf(ushort questId) => _escortQuest == questId && _escortName is not null ? _escortDataId : null;
     private DateTime _escortWaitSince;
     /// <summary>Close enough that the escort has caught up.</summary>
     private const float EscortNear = 8f;
@@ -392,6 +396,7 @@ public sealed class StepExecutor
                 continue;
             _escortName = entry["Part ways with ".Length..].Trim().TrimEnd('.').Trim();
             _escortQuest = _questId;
+            _escortDataId = _step?.DataId;
             _world.Log($"{_escortName} is an escort: quest {_questId}'s walks now go on foot and wait for them.");
             return;
         }
@@ -692,6 +697,7 @@ public sealed class StepExecutor
         {
             _escortQuest = 0;
             _escortName = null;
+            _escortDataId = null;
         }
         _escortWaitSince = default;
         // An escort follows on foot: no mount, no flight, and off the saddle if already in it.
@@ -704,6 +710,16 @@ public sealed class StepExecutor
             step.Fly = false;
             step.Dismount = true;
             _groundOnly = true;
+            // The escort walks with you, so it is not where the data last saw it: Wit as Weaponry
+            // walked back to Loosefrox's starting spot (179,-9,-26) at every stop to talk to him,
+            // with him standing beside the character. In view, talk to it where it stands.
+            if (step.Kind == StepKind.Interact && step.DataId is { } escortId
+                && _world.PositionOfDataId(escortId) is { } standing
+                && (step.Position is not { } recorded || Vector3.Distance(recorded, standing) > EscortNear))
+            {
+                _world.Log($"{_escortName} is at {Fmt(standing)}, not the recorded {(step.Position is { } r ? Fmt(r) : "spot")} — talking to them there.");
+                step.Position = standing;
+            }
         }
         _step = step;
         _questId = questId;

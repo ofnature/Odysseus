@@ -1,6 +1,16 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.25 — unreleased
+
+### Quests
+- A quest worked out from the journal data walks into the circle it has to be stood in: an objective that points at a search area with one of the quest's event ranges at its centre now walks to that range (about 5 yalms) instead of stopping up to 15 yalms out in the area. Wit as Weaponry's stops with Loosefrox fell 10+ yalms short of his circle
+- An escort's sequence walks to the circle first and talks to the escort there: the journal data lists the escort before the circle, so Wit as Weaponry talked to Loosefrox where he stood, walked off to the circle, and needed a replay at every stop. He follows you, so the walk comes first
+- During an escort, talking to the escort goes to where it actually stands instead of where the quest data first saw it. Wit as Weaponry (5495) walked back to Loosefrox's starting spot at every stop to talk to him, with him standing beside the character
+
+### Notices
+- No more TextAdvance notice: Odysseus does everything TextAdvance was there for — dialogue, quest accept and complete, reward picking, hand-ins — and Charon presses Esc in cutscenes. The only notice left is "Charon not loaded — cutscenes play in full", shown when cutscenes are set to Skip and neither Charon nor TextAdvance is there to press Esc. Settings shows Charon (optional) where TextAdvance was
+
 ## v0.2.24 — 2026-10-25
 
 ### Gathering moved to Demeter

@@ -138,7 +138,7 @@ public class DerivedPathTests
     /// </summary>
     [Theory]
     [InlineData(204f, DerivedPath.MaxArrival)]   // a search area: near the middle is there
-    [InlineData(8f, 8f)]                         // a small area: its own edge
+    [InlineData(8f, 8f * DerivedPath.InsideEdge)] // a small area: well inside its edge, not on it
     [InlineData(1f, DerivedPath.MinArrival)]     // a point: close enough to stand on
     [InlineData(0f, DerivedPath.MinArrival)]     // unknown: as for a point
     public void A_walk_to_an_area_arrives_anywhere_near_its_middle(float radius, float expected)
@@ -197,5 +197,19 @@ public class DerivedPathTests
     private sealed class Sheets(Func<ushort, QuestGeometry?> read) : IQuestGeometry
     {
         public QuestGeometry? Read(ushort questId) => read(questId);
+    }
+
+    /// <summary>
+    /// Wit as Weaponry (5495): the objective is a 101-yalm search area, and the quest's event range
+    /// at its centre is Loosefrox's 5-yalm circle. The walk is to the circle.
+    /// </summary>
+    [Fact]
+    public void A_search_area_with_an_event_range_at_its_centre_is_that_range()
+    {
+        var area = new QuestMark(148, new Vector3(277f, -8.8f, 12.7f), 0, 101f);
+        var circle = new QuestMark(148, new Vector3(277f, -7.8f, 12.7f), 5000000, 4.9f);
+        var elsewhere = new QuestMark(148, new Vector3(400f, 0f, 0f), 5000000, 5f);
+        Assert.Equal(circle, Odysseus.Services.Quest.GameQuestGeometry.Narrowed(area, [elsewhere, circle]));
+        Assert.Equal(area, Odysseus.Services.Quest.GameQuestGeometry.Narrowed(area, [elsewhere]));
     }
 }

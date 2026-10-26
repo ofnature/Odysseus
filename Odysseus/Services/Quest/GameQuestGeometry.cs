@@ -57,6 +57,16 @@ public sealed class GameQuestGeometry : IQuestGeometry
 
             // Objectives are grouped by the sequence they complete; a sequence can name several
             // places, and the sheet's order is the only order there is.
+            // The quest's own event ranges — the small circles a step has to be stood in. A journal
+            // objective often points at the search area round one (Wit as Weaponry: a 101-yalm area
+            // centred on Loosefrox's 5-yalm circle), and the walk stopped up to 15 yalms out, outside it.
+            var ranges = new List<QuestMark>();
+            foreach (var param in quest.QuestParams)
+                if (param.ScriptInstruction.ExtractText().StartsWith("EVENTRANGE", StringComparison.Ordinal)
+                    && _data.GetExcelSheet<Lumina.Excel.Sheets.Level>().GetRowOrDefault(param.ScriptArg) is { } range
+                    && MarkOf(range) is { } rangeMark)
+                    ranges.Add(rangeMark);
+
             var bySequence = new Dictionary<byte, List<QuestMark>>();
             var order = new List<byte>();
             foreach (var todo in quest.TodoParams)
@@ -68,6 +78,7 @@ public sealed class GameQuestGeometry : IQuestGeometry
                 {
                     if (level.ValueNullable is not { } row || MarkOf(row) is not { } mark)
                         continue;
+                    mark = Narrowed(mark, ranges);
                     if (!bySequence.TryGetValue(sequence, out var marks))
                     {
                         bySequence[sequence] = marks = [];
@@ -96,6 +107,26 @@ public sealed class GameQuestGeometry : IQuestGeometry
             return null;
         }
     }
+
+    /// <summary>
+    /// A search area with one of the quest's event ranges at its centre is that range: stand in the
+    /// circle, not somewhere in the area round it.
+    /// </summary>
+    internal static QuestMark Narrowed(QuestMark mark, IReadOnlyList<QuestMark> ranges)
+    {
+        if (mark.Object != 0 || mark.Radius <= RangeRadiusMax)
+            return mark;
+        foreach (var range in ranges)
+            if (range.Territory == mark.Territory && range.Radius <= RangeRadiusMax
+                && Vector2.Distance(new Vector2(range.Position.X, range.Position.Z), new Vector2(mark.Position.X, mark.Position.Z)) <= RangeCentreSlack)
+                return range;
+        return mark;
+    }
+
+    /// <summary>Above this a Level is a search area, not a circle to stand in.</summary>
+    private const float RangeRadiusMax = 15f;
+    /// <summary>How close an event range's centre must be to an area's to be its circle.</summary>
+    private const float RangeCentreSlack = 3f;
 
     private static QuestMark? MarkOf(Level level)
         => level.Territory.RowId == 0

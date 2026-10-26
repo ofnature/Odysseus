@@ -41,7 +41,7 @@ dotnet build Odysseus.sln -c Release
 |---|---|---|
 | **vnavmesh** | walking and flying | movement stops; the step says so |
 | **Lifestream** | teleports and aethernet hops | travel steps fail with the aetheryte named |
-| **TextAdvance** | the ESC press during a cutscene | cutscenes play in full |
+| **Charon** | the Esc press that skips a cutscene (TextAdvance is not needed for anything) | cutscenes play in full |
 | **BossMod Reborn** or **Minerva** | solo instanced duties — whichever Settings names | stops at the entrance and waits for you |
 | **Theseus** | full dungeons inside a quest | stops at the entrance and waits for you |
 | **Artisan** | crafting for custom deliveries | the delivery stops and says what to craft |
@@ -187,7 +187,7 @@ an **Unlock** button that queues the whole prerequisite chain.
 | **Enable Odysseus** | off | the master switch; nothing moves until this is on |
 | **Continue into the next MSQ quest** | on | off = finish the current quest and stop |
 | **Stop at level** | 0 (off) | park before a level cap or a duty sync level |
-| **Cutscenes** | Skip | Skip them, Watch them (the roleplay choice — Esc and Yes skip one yourself), or Leave it to Charon (its own toggle decides). During runs TextAdvance and Charon (`Charon.Cutscene.Set`, a lease renewed every 30 s) follow it |
+| **Cutscenes** | Skip | Skip them, Watch them (the roleplay choice — Esc and Yes skip one yourself), or Leave it to Charon (its own toggle decides). During runs Charon (`Charon.Cutscene.Set`, a lease renewed every 30 s) follows it, and TextAdvance too if it is installed |
 | **Quest windows outside runs too** | off | With no run going: Accept on a quest offer, the reward chosen by the rules, Complete — for questing by hand. The settings line says what it last did |
 | **Quest target indicators** | off | A marker over everything showing a quest icon and a line from you to each; hidden in cutscenes and loading screens, never takes a click |
 | **Pick quest rewards** | on | Odysseus chooses by your rule order (role gear coffer, HQ gear, vendor value, gil, gear for your job — the first that matches, else the first reward) and presses Complete |

@@ -422,6 +422,34 @@ public class DialogueTests
         Assert.Equal(StepStatus.Done, ex.Status);
     }
 
+    /// <summary>During an escort, talking to it goes to where it stands, not where the data first saw it.</summary>
+    [Fact]
+    public void An_escort_is_talked_to_where_it_stands()
+    {
+        var w = new FakeStepWorld { ArriveOnMove = true };
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w);
+        ex.Begin(Interact(7), questId: 5495);
+        Ticks(ex, w, 3);
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("SelectString");
+        w.ListEntries.AddRange(["Speak with Loosefrox.", "Part ways with Loosefrox.", "Nothing."]);
+        Ticks(ex, w, 6);
+        w.IsOccupied = false;
+        w.VisibleAddons.Remove("SelectString");
+        w.ListEntries.Clear();
+        w.Calls.Clear();
+
+        w.Positions[7] = new Vector3(300, 0, 10);              // walked along with us
+        w.PlayerPosition = new Vector3(298, 0, 10);
+        var step = Interact(7);
+        step.Position = new Vector3(179, 0, -26);              // where the data first saw it
+        ex.Begin(step, questId: 5495);
+        Ticks(ex, w, 10);
+        Assert.Contains(w.Calls, c => c.StartsWith("Log Loosefrox is at"));
+        Assert.DoesNotContain(w.Calls, c => c.StartsWith("Move 179"));
+    }
+
     /// <summary>Ul'dah's lift attendant asks in the icon menu, not the plain one — the List choice answers it.</summary>
     [Fact]
     public void A_list_choice_answers_the_lift_attendants_icon_menu()

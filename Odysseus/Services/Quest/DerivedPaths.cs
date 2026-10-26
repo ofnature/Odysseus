@@ -127,8 +127,16 @@ public static class DerivedPath
     /// </summary>
     public const float MaxArrival = 15f;
 
-    /// <summary>A small mark is a point to stand on; a large one is an area, entered near its middle.</summary>
-    private static float ArrivalFor(QuestMark mark) => Math.Clamp(mark.Radius, MinArrival, MaxArrival);
+    /// <summary>
+    /// A small mark is a point to stand on; a small circle is entered well inside its edge (standing
+    /// on the line did not count — Wit as Weaponry's 5-yalm circles with Loosefrox); a large one is an
+    /// area, entered near its middle.
+    /// </summary>
+    private static float ArrivalFor(QuestMark mark)
+        => mark.Radius > MaxArrival ? MaxArrival : Math.Max(MinArrival, mark.Radius * InsideEdge);
+
+    /// <summary>How far into a small circle a walk goes: this much of its radius from the centre.</summary>
+    public const float InsideEdge = 0.6f;
 
     /// <summary>
     /// A mark with a person or a thing on it is interacted with; one with neither is walked to.

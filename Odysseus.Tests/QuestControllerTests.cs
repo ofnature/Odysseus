@@ -105,6 +105,18 @@ public class QuestControllerTests : IDisposable
         Assert.Equal(2, QuestController.SelectResumeIndex(block, new QuestSnapshot(2016, 3, new byte[] { 0, 0, 0, 0, 0, 128 })));
     }
 
+    /// <summary>Wit as Weaponry: "talk to Loosefrox, walk to the circle" becomes walk, then talk — he follows you.</summary>
+    [Fact]
+    public void An_escort_sequence_walks_to_the_circle_before_the_talk()
+    {
+        var walk = new QuestStep { Kind = StepKind.WalkTo, KindName = "WalkTo", TerritoryId = 148, Position = new Vector3(277, -9, 13) };
+        var block = new QuestSequence { Sequence = 3, Steps = [Interact(1059343), walk] };
+        var ordered = QuestController.EscortWalksFirst(block, 1059343);
+        Assert.Equal(StepKind.WalkTo, ordered.Steps[0].Kind);
+        Assert.Equal(1059343u, ordered.Steps[1].DataId);
+        Assert.Same(block, QuestController.EscortWalksFirst(block, 999));   // not the escort: as written
+    }
+
     [Fact]
     public void Resume_picks_the_first_unsatisfied_tagged_step()
     {

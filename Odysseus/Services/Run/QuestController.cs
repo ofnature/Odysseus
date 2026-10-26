@@ -876,12 +876,31 @@ public sealed class QuestController
     /// </summary>
     private IConditionWorld Conditions => GroundOnly ? new GroundedWorld(_conditions) : _conditions;
 
+    /// <summary>
+    /// An escort follows you, and the talk with it counts only once it is in the circle: a sequence
+    /// that says "talk to the escort, walk to the circle" is walked first and talked after. The
+    /// journal data lists the escort before the circle, and Wit as Weaponry (5495) talked to
+    /// Loosefrox where he stood, walked off, and needed a replay at every stop. Public and pure.
+    /// </summary>
+    public static QuestSequence EscortWalksFirst(QuestSequence block, uint escort)
+    {
+        var talk = block.Steps.FindIndex(s => s.Kind == StepKind.Interact && s.DataId == escort);
+        if (talk < 0 || !block.Steps.Skip(talk + 1).Any(s => s.Kind == StepKind.WalkTo))
+            return block;
+        var walks = block.Steps.Skip(talk + 1).Where(s => s.Kind == StepKind.WalkTo).ToList();
+        var steps = block.Steps.Where(s => !walks.Contains(s)).ToList();
+        steps.InsertRange(talk, walks);
+        return new QuestSequence { Sequence = block.Sequence, Steps = steps };
+    }
+
     private void EnterSequence(int sequence, QuestSnapshot snap)
     {
         _executor.Cancel();
         _activeStepIndex = -1;
         _currentSequence = sequence;
         _block = _path!.Block((byte)sequence);
+        if (_block is not null && _executor.EscortOf(_questId) is { } escort)
+            _block = EscortWalksFirst(_block, escort);
         _replays = 0;
         _waitingSince = null;
         _stepIndex = _block is null ? 0 : SelectResumeIndex(_block, snap);
