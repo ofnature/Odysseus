@@ -1,13 +1,15 @@
 # Changelog
 
 <!-- LATEST-START -->
-## v0.2.26 — unreleased
+## v0.2.26 — 2026-11-01
 
 ### For other plugins
 - `Odysseus.Assist.Lease(caller, seconds)` and `Odysseus.Assist.IsActive()`: another plugin can borrow Odysseus's dialogue handling while no run is going — Talk advanced, the Request window filled and handed over when the bags cover it. A lease lasts up to five minutes and lapses unless renewed. Parcae uses it for Collect FATE turn-ins, in place of TextAdvance
 
 ### Getting there
 - A step's object seen on another level than its mark is gone to where it stands: once the object is in view more than 3 yalms above or below the mark and over it, the walk or flight heads for the object itself. Sin of Blood's object stands on a bridge and the journal data puts it under the deck, so the route went for the bank below
+
+<!-- LATEST-END -->
 
 ## v0.2.25 — 2026-10-25
 
@@ -18,8 +20,6 @@
 
 ### Notices
 - No more TextAdvance notice: Odysseus does everything TextAdvance was there for — dialogue, quest accept and complete, reward picking, hand-ins — and Charon presses Esc in cutscenes. The only notice left is "Charon not loaded — cutscenes play in full", shown when cutscenes are set to Skip and neither Charon nor TextAdvance is there to press Esc. Settings shows Charon (optional) where TextAdvance was
-
-<!-- LATEST-END -->
 
 ## v0.2.24 — 2026-10-25
 
