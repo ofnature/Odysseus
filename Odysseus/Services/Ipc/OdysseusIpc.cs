@@ -31,6 +31,8 @@ public sealed class OdysseusIpc : IDisposable
     public const string QuestStopGate = "Odysseus.Quest.Stop";
     public const string QuestIsRunningGate = "Odysseus.Quest.IsRunning";
     public const string QuestStatusGate = "Odysseus.Quest.GetStatusJson";
+    public const string AssistLeaseGate = "Odysseus.Assist.Lease";
+    public const string AssistIsActiveGate = "Odysseus.Assist.IsActive";
 
     private readonly ICallGateProvider<bool> _isBusy;
     private readonly ICallGateProvider<uint, bool>? _questCanRun;
@@ -38,6 +40,8 @@ public sealed class OdysseusIpc : IDisposable
     private readonly ICallGateProvider<object?>? _questStop;
     private readonly ICallGateProvider<bool>? _questIsRunning;
     private readonly ICallGateProvider<string>? _questStatus;
+    private readonly ICallGateProvider<string, int, bool>? _assistLease;
+    private readonly ICallGateProvider<bool>? _assistIsActive;
 
     /// <param name="isBusy">
     /// Reads the live run state. Must never throw — an exception here surfaces inside another
@@ -47,7 +51,13 @@ public sealed class OdysseusIpc : IDisposable
     /// The quest gateway — another plugin asking for one quest to be done (Calypso, for the Island
     /// Sanctuary quests). Takes the quest's row id (70179) or Odysseus's own (4643). Null publishes none.
     /// </param>
-    public OdysseusIpc(IDalamudPluginInterface pluginInterface, Func<bool> isBusy, Quest.QuestGateway? quests = null)
+    /// <param name="assist">
+    /// Dialogue and Request hand-over lent to another plugin (Parcae's Collect FATE turn-ins):
+    /// <c>Odysseus.Assist.Lease(caller, seconds)</c> takes or renews that caller's lease (capped at
+    /// 300 s; 0 releases it), <c>Odysseus.Assist.IsActive()</c> says whether any is live. Null publishes none.
+    /// </param>
+    public OdysseusIpc(IDalamudPluginInterface pluginInterface, Func<bool> isBusy, Quest.QuestGateway? quests = null,
+        Run.AssistLease? assist = null)
     {
         _isBusy = pluginInterface.GetIpcProvider<bool>(IsBusyGate);
         _isBusy.RegisterFunc(() =>
@@ -81,6 +91,15 @@ public sealed class OdysseusIpc : IDisposable
             _questStatus = pluginInterface.GetIpcProvider<string>(QuestStatusGate);
             _questStatus.RegisterFunc(() => Guard(quests.StatusJson, "{}"));
         }
+
+        if (assist is not null)
+        {
+            _assistLease = pluginInterface.GetIpcProvider<string, int, bool>(AssistLeaseGate);
+            _assistLease.RegisterFunc((caller, seconds) => Guard(() => assist.Lease(caller, seconds, DateTime.UtcNow), false));
+
+            _assistIsActive = pluginInterface.GetIpcProvider<bool>(AssistIsActiveGate);
+            _assistIsActive.RegisterFunc(() => Guard(() => assist.IsActive(DateTime.UtcNow), false));
+        }
     }
 
     public void Dispose()
@@ -91,6 +110,8 @@ public sealed class OdysseusIpc : IDisposable
         _questStop?.UnregisterAction();
         _questIsRunning?.UnregisterFunc();
         _questStatus?.UnregisterFunc();
+        _assistLease?.UnregisterFunc();
+        _assistIsActive?.UnregisterFunc();
     }
 
     /// <summary>Anything our side throws must stay our side; the caller gets the fallback.</summary>

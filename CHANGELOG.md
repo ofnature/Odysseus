@@ -1,6 +1,11 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.26 — unreleased
+
+### For other plugins
+- `Odysseus.Assist.Lease(caller, seconds)` and `Odysseus.Assist.IsActive()`: another plugin can borrow Odysseus's dialogue handling while no run is going — Talk advanced, the Request window filled and handed over when the bags cover it. A lease lasts up to five minutes and lapses unless renewed. Parcae uses it for Collect FATE turn-ins, in place of TextAdvance
+
 ## v0.2.25 — 2026-10-25
 
 ### Quests

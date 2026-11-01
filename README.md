@@ -245,6 +245,8 @@ an **Unlock** button that queues the whole prerequisite chain.
 | `Odysseus.Quest.Stop()` | — | Stops a quest that came through the gate. A run you started yourself is left alone. |
 | `Odysseus.Quest.IsRunning` | `bool` | True only for a quest that came through the gate. |
 | `Odysseus.Quest.GetStatusJson()` | `string` | `{schema, state, questId, sequence, step, status, reason}` — state is Idle, Refused, Running, Done, Faulted or Stopped. |
+| `Odysseus.Assist.Lease(string caller, int seconds)` | `bool` | Lend Odysseus's dialogue handling to the caller while no run of ours is going: the Talk box is advanced, and a Request window is filled from the bags and handed over (plus the yes/no Hand Over raises) — only when the bags can cover it, never anything it did not ask for. Seconds are capped at 300; renew before they run out, or the lease lapses on its own. 0 releases that caller's lease. Cutscenes are left alone, and so are Odysseus's own settings: a lease is an explicit ask. False only for an empty caller. |
+| `Odysseus.Assist.IsActive()` | `bool` | Any caller's lease is live. |
 
 Gates are extend-only: a published gate never changes its signature or meaning. The one exception
 is the `Odysseus.Gather.*` gates, which moved with the gatherer to **Demeter** as `Demeter.Gather.*`,

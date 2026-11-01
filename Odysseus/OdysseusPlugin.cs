@@ -97,6 +97,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly LogWindow _logWindow;
     private readonly PathRecorder _recorder = new();
     private readonly Services.Run.DialogueStagehand _stagehand = new();
+    /// <summary>Dialogue and hand-over lent to another plugin over IPC (Parcae), while nothing of ours runs.</summary>
+    private readonly Services.Run.AssistLease _assist = new();
     private Services.Ipc.CharonCutsceneIpc _charonCutscenes = null!;
     private Services.Run.QuestWindowHelper _questWindows = null!;
     private Windows.QuestTargetOverlay _questTargets = null!;
@@ -333,7 +335,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // half-built run. (The Gather.* gates moved to Demeter with the gatherer.)
         _ipc = new OdysseusIpc(PluginInterface,
             () => _config.Enabled && _controller.State.IsDriving(),
-            _questGateway);
+            _questGateway,
+            _assist);
 #if DEBUG
         // After the catalogues and both runners exist — it takes all four, and a debug-only window
         // is exactly the sort of thing that gets built too early and hands itself nulls.
@@ -769,6 +772,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             _config.Cutscenes == CutsceneChoice.Skip, System.DateTime.UtcNow);
         // Quest windows when questing by hand: only while nothing of ours is driving.
         _questWindows.Tick(_config.Enabled && _config.QuestWindowsOutsideRuns, AnythingOfOursRunning(), System.DateTime.UtcNow);
+        // Another plugin's lease (Parcae's turn-ins): asked for explicitly, so not behind our own switches.
+        _assist.Tick(_world, _config.Enabled && AnythingOfOursRunning(), System.DateTime.UtcNow);
 
         // Auto-remove completed priority entries — quests finished by hand count too, so poll.
         var now = System.DateTime.UtcNow;
