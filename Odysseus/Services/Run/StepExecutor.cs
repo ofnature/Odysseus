@@ -369,6 +369,13 @@ public sealed class StepExecutor
     private DateTime _rewardLastTry;
     private bool _rewardNeedsChoiceLogged;
 
+    /// <summary>The object's own spot, once it showed the mark to be on the wrong floor.</summary>
+    private Vector3? _liveTarget;
+    /// <summary>More than this above or below the mark is another floor — a bridge deck over a bank.</summary>
+    private const float WrongFloor = 3f;
+    /// <summary>…while this close across the ground: the same place, a different level.</summary>
+    private const float WrongFloorReach = 15f;
+
     /// <summary>The escort a quest's walks wait for — read off its "Part ways with …" menu; kept across the quest's steps.</summary>
     private string? _escortName;
     private ushort _escortQuest;
@@ -700,6 +707,7 @@ public sealed class StepExecutor
             _escortDataId = null;
         }
         _escortWaitSince = default;
+        _liveTarget = null;
         // An escort follows on foot: no mount, no flight, and off the saddle if already in it.
         // Wit as Weaponry (5495) flew each leg to Loosefrox's next stop, arrived alone, and every
         // sequence waited for a replay to move.
@@ -2532,7 +2540,21 @@ public sealed class StepExecutor
         // A detour — walking to a merchant the craft turned out to need — borrows this phase and
         // lands somewhere other than the step's own destination.
         var detour = _detourTo;
-        var target = detour ?? step.Position!.Value;
+        // The object in view, well above or below the mark but over it: the mark is the wrong floor.
+        // Sin of Blood's object stands on a bridge and the journal data puts it under the deck — the
+        // walk went for the river bank below. Head for the object itself from here on.
+        if (detour is null && _liveTarget is null && IsObjectStep(step.Kind) && step.DataId is { } seen
+            && _world.TerritoryId == step.TerritoryId && step.Position is { } mark
+            && _world.PositionOfDataId(seen) is { } live
+            && MathF.Abs(live.Y - mark.Y) > WrongFloor
+            && Vector2.Distance(new Vector2(live.X, live.Z), new Vector2(mark.X, mark.Z)) <= WrongFloorReach)
+        {
+            _liveTarget = live;
+            _world.Log($"{seen} stands at {Fmt(live)}, {live.Y - mark.Y:+0;-0}y off the mark {Fmt(mark)} — heading for it instead.");
+            _world.StopMoving();
+            _lastMoveIssue = default;
+        }
+        var target = detour ?? _liveTarget ?? step.Position!.Value;
         var tolerance = detour is null ? StopDistanceFor(step) : _detourTolerance;
         var distance = Vector3.Distance(_world.PlayerPosition, target);
 

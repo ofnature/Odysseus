@@ -6,6 +6,9 @@
 ### For other plugins
 - `Odysseus.Assist.Lease(caller, seconds)` and `Odysseus.Assist.IsActive()`: another plugin can borrow Odysseus's dialogue handling while no run is going — Talk advanced, the Request window filled and handed over when the bags cover it. A lease lasts up to five minutes and lapses unless renewed. Parcae uses it for Collect FATE turn-ins, in place of TextAdvance
 
+### Getting there
+- A step's object seen on another level than its mark is gone to where it stands: once the object is in view more than 3 yalms above or below the mark and over it, the walk or flight heads for the object itself. Sin of Blood's object stands on a bridge and the journal data puts it under the deck, so the route went for the bank below
+
 ## v0.2.25 — 2026-10-25
 
 ### Quests

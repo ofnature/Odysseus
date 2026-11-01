@@ -1009,6 +1009,25 @@ public class StepDismountTests
         Assert.True(w.Calls.Count(c => c.StartsWith("Aethernet The Aftcastle")) >= 2, string.Join(" | ", w.Calls));
     }
 
+    /// <summary>
+    /// Sin of Blood (5497): the object stands on a bridge, the journal data puts it under the deck.
+    /// Once it is in view, the walk heads for the object, not the bank below.
+    /// </summary>
+    [Fact]
+    public void An_object_on_another_floor_than_its_mark_is_gone_to_where_it_stands()
+    {
+        var w = new FakeStepWorld { TerritoryId = 148, ArriveOnMove = false, CanMountHere = false };
+        w.PlayerPosition = new Vector3(-26, 10, -120);
+        w.Spawned.Add(2015400);
+        w.Positions[2015400] = new Vector3(-26, 10, -163);      // on the deck
+        var ex = new StepExecutor(w);
+        ex.Begin(new QuestStep { Kind = StepKind.Interact, KindName = "Interact", DataId = 2015400, TerritoryId = 148,
+            Position = new Vector3(-26.1f, 1.7f, -163.3f) });     // under it
+        for (var i = 0; i < 10; i++) { ex.Tick(); w.Advance(0.5); }
+        Assert.Contains(w.Calls, c => c.StartsWith("Log 2015400 stands at"));
+        Assert.Contains(w.Calls, c => c.StartsWith("Move -26,10,-163"));
+    }
+
     /// <summary>A stop mid-trip stops the trip: the path, and an aethernet hop Lifestream has under way.</summary>
     [Fact]
     public void Cancelling_a_step_aborts_the_trip_under_way()
