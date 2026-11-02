@@ -1,6 +1,13 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.27 — 2026-11-01
+
+### Journal
+- A Eureka Quests heading: And We Shall Call It Eureka moves there from Sidequests, and And We Shall Call It Pyros, Hydatos and Pagos from Uncategorised — the game gives those three no journal group at all
+
+<!-- LATEST-END -->
+
 ## v0.2.26 — 2026-11-01
 
 ### For other plugins
@@ -8,8 +15,6 @@
 
 ### Getting there
 - A step's object seen on another level than its mark is gone to where it stands: once the object is in view more than 3 yalms above or below the mark and over it, the walk or flight heads for the object itself. Sin of Blood's object stands on a bridge and the journal data puts it under the deck, so the route went for the bank below
-
-<!-- LATEST-END -->
 
 ## v0.2.25 — 2026-10-25
 
