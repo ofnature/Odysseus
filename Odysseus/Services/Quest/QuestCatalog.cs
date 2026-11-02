@@ -158,6 +158,10 @@ public sealed class QuestCatalog
                             || sectionName.Contains("Main Scenario", StringComparison.OrdinalIgnoreCase);
                 }
 
+                var id = (ushort)(row.RowId - RowIdBase);
+                if (Regroup(id, row.JournalGenre.RowId) is { } group)
+                    (sectionName, categoryName) = group;
+
                 var previous = row.PreviousQuest
                     .Where(p => p.RowId >= RowIdBase)
                     .Select(p => (ushort)(p.RowId - RowIdBase))
@@ -167,7 +171,6 @@ public sealed class QuestCatalog
                     .Select(p => (ushort)(p.RowId - RowIdBase))
                     .ToArray();
 
-                var id = (ushort)(row.RowId - RowIdBase);
                 rows.Add(new QuestListing(id, name, row.ClassJobLevel[0], row.Expansion.RowId, isMsq, previous,
                     row.PreviousQuestJoin, locks, row.QuestLockJoin)
                 {
@@ -184,6 +187,27 @@ public sealed class QuestCatalog
             log($"Quest catalog failed to load: {ex.GetType().Name}: {ex.Message}");
         }
     }
+
+    public const string EurekaSection = "Eureka Quests";
+    public const string EurekaCategory = "The Forbidden Land, Eureka";
+
+    /// <summary>The Forbidden Land, Eureka's journal genre — "And We Shall Call It Eureka" (3078).</summary>
+    private const uint EurekaGenre = 90;
+
+    /// <summary>
+    /// Pyros, Hydatos and Pagos's "And We Shall Call It …" quests: genre 0, so no journal section at
+    /// all, and they listed under Uncategorised.
+    /// </summary>
+    private static readonly ushort[] EurekaStrays = [2612, 2613, 2942];
+
+    /// <summary>
+    /// A heading of our own where the journal's grouping hides a line: the Eureka quests together, the
+    /// one the game files under Sidequests and the three it files nowhere. Null keeps the game's own.
+    /// </summary>
+    internal static (string Section, string Category)? Regroup(ushort questId, uint genreId)
+        => genreId == EurekaGenre || Array.IndexOf(EurekaStrays, questId) >= 0
+            ? (EurekaSection, EurekaCategory)
+            : null;
 
     /// <summary>
     /// Which single class a quest belongs to, or empty when it is not class-specific.

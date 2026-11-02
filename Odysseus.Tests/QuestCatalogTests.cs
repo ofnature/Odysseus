@@ -16,6 +16,17 @@ public class QuestCatalogTests
         new QuestListing(9001, "Some Sidequest", 54, 1, false, [1619], 1),
     ]);
 
+    /// <summary>The Eureka quests under one heading: 3078 from Sidequests, Pyros/Hydatos/Pagos from nowhere.</summary>
+    [Fact]
+    public void Eureka_quests_get_their_own_heading()
+    {
+        Assert.Equal(QuestCatalog.EurekaSection, QuestCatalog.Regroup(3078, 90)?.Section);
+        Assert.Equal(QuestCatalog.EurekaSection, QuestCatalog.Regroup(2612, 0)?.Section);
+        Assert.Equal(QuestCatalog.EurekaSection, QuestCatalog.Regroup(2942, 0)?.Section);
+        Assert.Null(QuestCatalog.Regroup(2943, 0));     // Songs in the Key of Kugane stays where it was
+        Assert.Null(QuestCatalog.Regroup(4663, 105));   // Eureka Orthos is a deep dungeon, left in Sidequests
+    }
+
     [Fact]
     public void Linear_link_goes_to_the_successor()
     {
