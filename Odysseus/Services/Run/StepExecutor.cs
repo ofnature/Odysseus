@@ -614,6 +614,14 @@ public sealed class StepExecutor
     /// </summary>
     public bool TargetMissing { get; private set; }
     public QuestStep? Current => _step;
+
+    /// <summary>
+    /// The step is parked on the player — a note to act on, a duty to run by hand, a lost solo duty to
+    /// win — with nothing of ours in flight. Where a stop another plugin asked for may cut a step short.
+    /// </summary>
+    public bool WaitingForPlayer => Status == StepStatus.Running
+        && _phase is Phase.Instruction or Phase.DutyByHand or Phase.SoloDutyHold;
+
     public string PhaseName => _phase switch
     {
         Phase.Instruction when _step?.Comment is { Length: > 0 } note => $"Instruction — {note} (press Skip when done)",

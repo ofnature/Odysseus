@@ -1,6 +1,12 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.28 — unreleased
+
+### For other plugins
+- `Odysseus.RequestStopAfterRun()`: another plugin about to move the character asks Odysseus to finish the step in hand and stop at the first point between steps where the character is free — out of any duty and out of combat, no dialogue, cutscene or menu up — starting nothing after it and resuming nothing by itself. True when busy and stopping, false (and nothing changed) when idle. Argus uses it before travelling to resend the Free Company's vessels
+- `Odysseus.IsBusy` now covers everything Odysseus drives, not just a quest run: a society's walk to the issuer and its accepting, a delivery, collecting currents, attuning, scrip spending, a chest fetch, and a society queued to start next
+
 ## v0.2.27 — 2026-11-01
 
 ### Journal

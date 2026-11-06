@@ -860,6 +860,85 @@ public class QuestControllerTests : IDisposable
         Assert.Contains("Paused after step 1", _controller.StatusLine);
     }
 
+    // ── another plugin's stop after the run (Odysseus.RequestStopAfterRun) ──
+
+    /// <summary>Two steps; tick until the first one has interacted, then ask for the stop.</summary>
+    private StopRequest StartThenAskForStopDuringStepOne()
+    {
+        _world.Spawned.UnionWith([1u, 2u]);
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1), Interact(2)] });
+        _quests.Set(1622, 1);
+        var stop = new StopRequest();
+        _controller.StopRequest = stop;
+        Assert.True(_controller.Start(1622));
+        for (var i = 0; i < 50 && !_world.Calls.Contains("Interact 1"); i++)
+            Ticks(1);
+        Assert.Contains("Interact 1", _world.Calls);
+        Assert.True(stop.Request(busy: true));
+        return stop;
+    }
+
+    [Fact]
+    public void A_stop_asked_for_finishes_the_step_in_hand_and_begins_no_other()
+    {
+        StartThenAskForStopDuringStepOne();
+        Ticks(40);
+        Assert.DoesNotContain("Interact 2", _world.Calls);
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.Contains("another plugin asked", _controller.StatusLine);
+    }
+
+    [Fact]
+    public void A_stop_asked_for_waits_out_a_fight_before_stopping()
+    {
+        StartThenAskForStopDuringStepOne();
+        _world.InCombat = true;
+        Ticks(120);   // a minute in combat: Daedalus fights while we still read busy
+        Assert.DoesNotContain("Interact 2", _world.Calls);
+        Assert.True(_controller.State.IsDriving());
+        Assert.Contains("the fight first", _controller.StatusLine);
+
+        _world.InCombat = false;
+        Ticks(20);
+        Assert.DoesNotContain("Interact 2", _world.Calls);
+        Assert.Equal(RunState.Idle, _controller.State);
+    }
+
+    [Fact]
+    public void A_stop_asked_for_does_not_roll_on_into_the_next_quest()
+    {
+        _policy.ContinueToNextQuest = true;
+        _chain[1622] = 1700;
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+        _store.Save(new QuestPath { QuestId = 1700, Name = "Next", Sequences = [new QuestSequence { Sequence = 1, Steps = [Interact(2)] }] });
+        _world.Spawned.UnionWith([1u, 2u]);
+        _quests.Set(1622, 1);
+        var stop = new StopRequest();
+        _controller.StopRequest = stop;
+        Assert.True(_controller.Start(1622));
+        Assert.True(stop.Request(busy: true));
+
+        _quests.Accepted.Remove(1622);
+        _quests.Complete.Add(1622);
+        Ticks(10);
+
+        Assert.Equal(RunState.Idle, _controller.State);
+        Assert.NotEqual((ushort)1700, _controller.QuestId);
+        Assert.Contains("another plugin asked", _controller.StatusLine);
+    }
+
+    [Fact]
+    public void A_fresh_start_clears_a_stop_asked_for_earlier()
+    {
+        StorePath(new QuestSequence { Sequence = 1, Steps = [Interact(1)] });
+        _quests.Set(1622, 1);
+        var stop = new StopRequest();
+        stop.Request(busy: true);
+        _controller.StopRequest = stop;
+        Assert.True(_controller.Start(1622));
+        Assert.False(stop.Requested);
+    }
+
     [Fact]
     public void Step_once_runs_one_step_and_returns_to_idle_without_a_quest()
     {

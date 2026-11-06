@@ -73,6 +73,12 @@ public sealed class TribeRunner
     public string StatusLine { get; private set; } = string.Empty;
     public byte TribeId => _tribe?.Id ?? 0;
 
+    /// <summary>
+    /// Another plugin's stop after the run: taken between the walk, the accepting and the dailies, never
+    /// inside one — the quest controller finishes a daily's step and stops on its own. Set by the plugin.
+    /// </summary>
+    public StopRequest? StopRequest { get; set; }
+
     /// <summary>Begin the tribe's dailies. Returns false with a reason when it cannot start.</summary>
     public bool Start(TribeInfo tribe)
     {
@@ -117,6 +123,7 @@ public sealed class TribeRunner
         _log(_needAccept
             ? $"{tribe.Name}: starting — accept up to {slots}, {_toRun.Count} already accepted."
             : $"{tribe.Name}: resuming {_toRun.Count} accepted dailies from here.");
+        StopRequest?.Clear(); // a fresh start supersedes a stop asked for earlier
         return true;
     }
 
@@ -150,6 +157,7 @@ public sealed class TribeRunner
 
     private void TickJob()
     {
+        if (StopsHere()) return;
         if (_world.IsCombatJob) { Enter(_needAccept ? TribeRunState.Travel : TribeRunState.Run); return; }
         var sets = _world.CombatGearsets();
         if (sets.Count == 0) { Fault($"{_tribe!.Name}: no combat gearset to switch to."); return; }
@@ -169,12 +177,14 @@ public sealed class TribeRunner
             && Vector3.Distance(_world.PlayerPosition, issuer.Position) <= StepExecutor.DefaultStopDistance + StepExecutor.ArrivalSlack)
         {
             _travelExecutor.Cancel();
+            if (StopsHere()) return;
             Enter(TribeRunState.Accept);
             return;
         }
         // Reuse the step executor for the walk/teleport to the issuer position.
         if (_travelExecutor.Status != StepStatus.Running)
         {
+            if (StopsHere()) return;
             var aetheryte = _issuerAetheryte();
             _travelExecutor.Begin(new QuestStep
             {
@@ -276,6 +286,9 @@ public sealed class TribeRunner
                 _toTurnIn.Enqueue(finished);
         }
 
+        // Between dailies: a stop asked for is taken here, before the next one or the trip home.
+        if (StopsHere()) return;
+
         // Next daily still not complete.
         while (_toRun.Count > 0)
         {
@@ -317,6 +330,28 @@ public sealed class TribeRunner
               $"faulted and {(_dropped.Count == 1 ? "was" : "were")} left in the journal ({string.Join(", ", _dropped)}) — " +
               "Run again to retry from where they stand.";
         _log(StatusLine);
+    }
+
+    /// <summary>
+    /// With a stop asked for, at a point between phases or dailies: true when this tick goes no further
+    /// — stopped, or holding for the character to come free. Dailies already taken stay in the journal,
+    /// and Run picks them up from where they stand.
+    /// </summary>
+    private bool StopsHere()
+    {
+        if (StopRequest is not { Requested: true } stop)
+            return false;
+        if (stop.At(_world.InDuty, _world.InCombat, _world.IsOccupied, _world.UtcNow) == StopVerdict.Hold)
+        {
+            StatusLine = $"{_tribe!.Name}: stopping once the character is free, as another plugin asked.";
+            return true;
+        }
+        _travelExecutor.Cancel();
+        StatusLine = $"{_tribe!.Name}: stopped — another plugin asked. Run picks up the dailies already taken.";
+        _log(StatusLine);
+        _tribe = null;
+        State = TribeRunState.Idle;
+        return true;
     }
 
     private void Enter(TribeRunState state)

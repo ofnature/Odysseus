@@ -51,7 +51,7 @@ public enum RunState
 public static class RunStateExtensions
 {
     /// <summary>
-    /// Odysseus is driving the character. This is the value published on <c>Odysseus.IsBusy</c>,
+    /// Odysseus is driving the character. The quest run's part of <c>Odysseus.IsBusy</c>,
     /// so it decides when Daedalus fights for us — every state that moves, talks or waits on a
     /// handoff counts, and only the two states where the character is under nobody's control do not.
     /// </summary>

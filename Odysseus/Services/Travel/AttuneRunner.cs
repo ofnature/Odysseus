@@ -38,6 +38,9 @@ public sealed class AttuneRunner
     public int Target { get; private set; }
     public bool IsFinished => !Running;
 
+    /// <summary>Another plugin's stop after the run: taken between attunements, never on the way to one. Set by the plugin.</summary>
+    public StopRequest? StopRequest { get; set; }
+
     /// <summary>How many are left to attune here — for the button.</summary>
     public int MissingHere => _world.UnattunedHere().Count;
 
@@ -56,6 +59,7 @@ public sealed class AttuneRunner
         Done = 0;
         Target = missing.Count;
         Running = true;
+        StopRequest?.Clear(); // a fresh start supersedes a stop asked for earlier
         StatusLine = $"Attuning {Target} here.";
         _log($"Attuning {Target} aetheryte(s) and shard(s) in territory {_territory}: {string.Join(", ", missing.Select(m => m.Name))}.");
         return true;
@@ -100,6 +104,17 @@ public sealed class AttuneRunner
                 Finish(_missed.Count == 0
                     ? $"Attuned {Done}."
                     : $"Attuned {Done}; could not attune {string.Join("; ", _missed)}.");
+                return;
+            }
+
+            if (StopRequest is { Requested: true } stop)
+            {
+                if (stop.At(_world.InDuty, _world.InCombat, _world.IsOccupied, _world.UtcNow) == StopVerdict.Hold)
+                {
+                    StatusLine = "Stopping between attunements once the character is free, as another plugin asked.";
+                    return;
+                }
+                Finish($"Attuned {Done}, then stopped: another plugin asked. Attune picks up the rest.");
                 return;
             }
 

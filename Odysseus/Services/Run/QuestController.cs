@@ -218,6 +218,13 @@ public sealed class QuestController
     /// <summary>Armed: finish the current step, then stop — the "Step" button.</summary>
     public bool PauseAfterStep { get; set; }
 
+    /// <summary>
+    /// Another plugin's stop after the run (<c>Odysseus.RequestStopAfterRun</c>): the step in flight is
+    /// finished, no other is begun, and the run stops at the first point between steps where the
+    /// character is free. Never rolls on into the next quest. Set by the plugin; null asks nothing.
+    /// </summary>
+    public StopRequest? StopRequest { get; set; }
+
     /// <summary>The step the run is on, or null.</summary>
     public QuestStep? CurrentStep => _block is not null && _stepIndex >= 0 && _stepIndex < _block.Steps.Count ? _block.Steps[_stepIndex] : null;
 
@@ -323,7 +330,11 @@ public sealed class QuestController
         HoldTurnIn = false;
         // Started by hand on a listed quest: treat it as the priority run it is.
         _runningPriority = PriorityNext?.Invoke() == questId;
-        return Begin(questId, path);
+        var began = Begin(questId, path);
+        // A fresh start, by hand or over IPC, supersedes a stop another plugin asked for earlier.
+        if (began)
+            StopRequest?.Clear();
+        return began;
     }
 
     private bool Begin(ushort questId, QuestPath path)
@@ -483,7 +494,12 @@ public sealed class QuestController
         try
         {
             if (_awaitingResumeConfirm)
+            {
+                // Parked on the Wake's question with nothing in flight: a stop asked for is taken here.
+                if (StopRequest?.Requested == true)
+                    StopOnRequest("Stopped at the resume question");
                 return; // parked on the Wake's question
+            }
             if (_singleStep is not null)
             {
                 TickSingleStep();
@@ -528,7 +544,7 @@ public sealed class QuestController
     {
         if (_pendingRollOn is { } finished)
         {
-            if (BetweenQuests?.Invoke() == true)
+            if (StopRequest?.Requested != true && BetweenQuests?.Invoke() == true)
             {
                 State = RunState.Advance;
                 StatusLine = "Between quests — picking up this zone's aether currents.";
@@ -596,6 +612,10 @@ public sealed class QuestController
 
         if (sequence != _currentSequence)
             EnterSequence(sequence, snap);
+
+        // Another plugin asked for a stop after the run: once the step in flight is over, nothing new begins.
+        if (StopRequest?.Requested == true && StopBetweenSteps())
+            return;
 
         if (_block is null || _block.Steps.Count == 0)
         {
@@ -805,8 +825,37 @@ public sealed class QuestController
     }
 
     /// <summary>The run carries on past this quest: nothing asked it to stop here.</summary>
-    private bool GoesOn => !StopAfterQuest && _policy.ContinueToNextQuest
+    private bool GoesOn => !StopAfterQuest && _policy.ContinueToNextQuest && StopRequest?.Requested != true
                            && !(_policy.StopAtLevel > 0 && _world.PlayerLevel >= _policy.StopAtLevel);
+
+    /// <summary>
+    /// With a stop asked for: true when this tick goes no further — stopped, or holding between steps
+    /// for the character to come free. A step in flight runs on, unless it is parked on the player and
+    /// the character is free; inside a duty the run's own steps are the way out, so they go on.
+    /// </summary>
+    private bool StopBetweenSteps()
+    {
+        var inFlight = _executor.Status == StepStatus.Running;
+        if (inFlight && !_executor.WaitingForPlayer)
+            return false;
+        var verdict = StopRequest!.At(_world.InDuty, _world.InCombat, _world.IsOccupied, _world.UtcNow);
+        if (verdict == StopVerdict.Stop)
+        {
+            StopOnRequest(inFlight ? $"Stopped at step {_stepIndex + 1}, which was waiting for you" : "Stopped between steps");
+            return true;
+        }
+        if (inFlight || verdict == StopVerdict.Carry)
+            return false; // the parked step ticks on; or one more step, then ask again
+        StatusLine = $"Stopping between steps once the character is free{(_world.InCombat ? " — the fight first" : "")}, as another plugin asked.";
+        return true;
+    }
+
+    private void StopOnRequest(string what)
+    {
+        _log($"{what} — another plugin asked for a stop after the run.");
+        Stop();
+        StatusLine = $"{what}: another plugin asked for a stop. Start picks up from the game's state.";
+    }
 
     private void RollOn(ushort completed)
     {
@@ -816,6 +865,22 @@ public sealed class QuestController
         {
             Stop();
             StatusLine = line;
+        }
+
+        // Another plugin asked for a stop: the next quest is the next run. Held until the character is
+        // free — the hand-in's cutscene still playing — then stopped, whatever else would have followed.
+        if (StopRequest is { Requested: true } stop)
+        {
+            if (stop.At(_world.InDuty, _world.InCombat, _world.IsOccupied, _world.UtcNow) == StopVerdict.Hold)
+            {
+                _pendingRollOn = completed; // asked again next tick
+                State = RunState.Advance;
+                StatusLine = "Quest done — stopping once the character is free, as another plugin asked.";
+                return;
+            }
+            _log("Stopped after the quest — another plugin asked for a stop after the run.");
+            StopWith($"Stopped after the quest: another plugin asked — {count} done in {elapsed:h\\:mm}.");
+            return;
         }
 
         if (StopAfterQuest)

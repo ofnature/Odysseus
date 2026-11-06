@@ -99,6 +99,8 @@ public sealed class OdysseusPlugin : IDalamudPlugin
     private readonly Services.Run.DialogueStagehand _stagehand = new();
     /// <summary>Dialogue and hand-over lent to another plugin over IPC (Parcae), while nothing of ours runs.</summary>
     private readonly Services.Run.AssistLease _assist = new();
+    /// <summary>Another plugin's stop after the run in hand (Argus, before it moves the character), over IPC.</summary>
+    private readonly Services.Run.StopRequest _stopRequest = new();
     private Services.Ipc.CharonCutsceneIpc _charonCutscenes = null!;
     private Services.Run.QuestWindowHelper _questWindows = null!;
     private Windows.QuestTargetOverlay _questTargets = null!;
@@ -221,6 +223,7 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _priorityWorld = new PriorityWorld(_quests, _pathStore, () => _world.PlayerLevel, _derived);
         _controller.PriorityNext = () => _priority.NextReady(_priorityWorld);
         _controller.StoryCurrent = () => _frontier.Current()?.QuestId;
+        _controller.StopRequest = _stopRequest;
 
         // Reward sweep. The ledger measures across the hand-in — counted as the CompleteQuest step
         // begins and again when the quest is confirmed complete — so only what the quest actually
@@ -249,7 +252,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _tribes = new Services.Tribes.TribeCatalog(DataManager, message => Warn(message));
         _tribeState = new Services.Tribes.TribeState(_tribes, message => Warn(message));
         _tribeRunner = new Services.Tribes.TribeRunner(_world, _tribeState, _controller,
-            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
+            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message))
+        {
+            StopRequest = _stopRequest,
+        };
 
         _chocobo = new Services.Run.ChocoboKeeper(_world, () => _config.KeepChocoboOut, ChocoboUnlocked);
 
@@ -283,7 +289,11 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var unlockPlanner = new UnlockPlanner(_catalog, _quests, _priority,
             id => _pathStore.Has(id) || _derived.Has(id), message => Say(message));
         _tribesWindow = new TribesWindow(_config, _tribes, _tribeState, _tribeRunner, unlockPlanner, new GameIcons(TextureProvider),
-            id => { if (!_tribeQueue.Contains(id)) _tribeQueue.Enqueue(id); },
+            id =>
+            {
+                _stopRequest.Clear(); // Run pressed: a fresh start supersedes a stop asked for earlier
+                if (!_tribeQueue.Contains(id)) _tribeQueue.Enqueue(id);
+            },
             () => { _tribeQueue.Clear(); _tribeRunner.Stop(); });
         _deliveries = new Services.Deliveries.DeliveryCatalog(DataManager, message => Warn(message));
         var deliveryState = new Services.Deliveries.DeliveryState(_quests, DataManager, message => Warn(message));
@@ -334,9 +344,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         // Published once the controller and the quest gateway exist, so no gate reports on a
         // half-built run. (The Gather.* gates moved to Demeter with the gatherer.)
         _ipc = new OdysseusIpc(PluginInterface,
-            () => _config.Enabled && _controller.State.IsDriving(),
+            BusyForOthers,
             _questGateway,
-            _assist);
+            _assist,
+            RequestStopAfterRun);
 #if DEBUG
         // After the catalogues and both runners exist — it takes all four, and a debug-only window
         // is exactly the sort of thing that gets built too early and hands itself nulls.
@@ -356,9 +367,15 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         var currents = _currents = new Services.Flight.AetherCurrentCatalog(DataManager, _pathStore, message => Warn(message));
         var flightState = _flight = new Services.Flight.FlightState(message => Warn(message));
         _collector = new Services.Flight.CurrentCollector(_world, flightState,
-            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
+            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message))
+        {
+            StopRequest = _stopRequest,
+        };
         _attuner = new Services.Travel.AttuneRunner(_world,
-            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message));
+            new StepExecutor(_world, dialogue, () => _config.AcceptRewardOvercap), message => Say(message))
+        {
+            StopRequest = _stopRequest,
+        };
         _mapMarkers = new Services.Flight.GameMapMarkers(GameInterop,
             territory => _config.CurrentsOnMap ? PinsFor(territory, _config.CollectedCurrentsOnMap) : [],
             message => WriteOwn("INF", message));
@@ -774,6 +791,10 @@ public sealed class OdysseusPlugin : IDalamudPlugin
         _questWindows.Tick(_config.Enabled && _config.QuestWindowsOutsideRuns, AnythingOfOursRunning(), System.DateTime.UtcNow);
         // Another plugin's lease (Parcae's turn-ins): asked for explicitly, so not behind our own switches.
         _assist.Tick(_world, _config.Enabled && AnythingOfOursRunning(), System.DateTime.UtcNow);
+        // Another plugin's stop after the run is spent once nothing of ours is busy — stopped as asked,
+        // faulted, stopped by hand or switched off. Level-triggered, so nothing is left to stop the next start.
+        if (_stopRequest.Settle(BusyForOthers()))
+            Say("Another plugin's stop after the run is done: nothing of Odysseus's is running now.");
 
         // Auto-remove completed priority entries — quests finished by hand count too, so poll.
         var now = System.DateTime.UtcNow;
@@ -859,8 +880,18 @@ public sealed class OdysseusPlugin : IDalamudPlugin
             _seller.Tick();
 
 #if DEBUG
+        // The work list starts its next job by itself; with a stop asked for, it does not.
+        if (_stopRequest.Requested && _workRunner.State == Services.Work.WorkRunState.Starting)
+            _workRunner.Stop();
         _workRunner.Tick();
 #endif
+
+        // A stop asked for by another plugin: the societies queued behind the run are the next run.
+        if (_tribeQueue.Count > 0 && _stopRequest.Requested)
+        {
+            Say($"Dropped {_tribeQueue.Count} queued society run(s): another plugin asked for a stop after the run.");
+            _tribeQueue.Clear();
+        }
 
         if (_tribeQueue.Count > 0)
         {
@@ -1036,6 +1067,29 @@ public sealed class OdysseusPlugin : IDalamudPlugin
            || !_deliveryRunner.IsFinished
            || _tribeRunner.State is not (Services.Tribes.TribeRunState.Idle or Services.Tribes.TribeRunState.Done
                or Services.Tribes.TribeRunState.Faulted);
+
+    /// <summary>
+    /// What <c>Odysseus.IsBusy</c> publishes: a run or job of ours is driving the character, or will start
+    /// without anyone asking — a society queued behind the one running, the work list between jobs.
+    /// Switched off, nothing runs.
+    /// </summary>
+    private bool BusyForOthers()
+        => _config.Enabled && (AnythingOfOursRunning() || _tribeQueue.Count > 0
+#if DEBUG
+            || _workRunner.State is Services.Work.WorkRunState.Starting or Services.Work.WorkRunState.Running
+#endif
+            );
+
+    /// <summary><c>Odysseus.RequestStopAfterRun</c>: sets the request when busy; idle, nothing changes.</summary>
+    private bool RequestStopAfterRun()
+    {
+        var already = _stopRequest.Requested;
+        if (!_stopRequest.Request(BusyForOthers()))
+            return false;
+        if (!already)
+            Say("Another plugin asked for a stop after the run: finishing the step in hand, then stopping where the character is free.");
+        return true;
+    }
 
     /// <summary>What the outside-runs quest window helper last did, for the settings line.</summary>
     internal string QuestWindowsStatus => _questWindows?.Status ?? "off";

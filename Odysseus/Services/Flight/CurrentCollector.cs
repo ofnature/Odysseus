@@ -65,6 +65,9 @@ public sealed class CurrentCollector
     /// </summary>
     public Func<uint, Vector3, bool>? StoryHasBeen { get; set; }
 
+    /// <summary>Another plugin's stop after the run: taken between currents, never on the way to one. Set by the plugin.</summary>
+    public StopRequest? StopRequest { get; set; }
+
     public CollectState State { get; private set; } = CollectState.Idle;
     public string StatusLine { get; private set; } = string.Empty;
     public int Collected => _collected;
@@ -106,6 +109,7 @@ public sealed class CurrentCollector
         Target = reachable.Count;
         _territory = zone.TerritoryId;
         State = CollectState.Collecting;
+        StopRequest?.Clear(); // a fresh start supersedes a stop asked for earlier
         _log($"{zone.Name}: collecting {Target} aether current(s)"
              + (later.Count > 0 ? $"; {later.Count} more are on ground the story has not opened yet." : "."));
         return true;
@@ -191,6 +195,17 @@ public sealed class CurrentCollector
                 + (_later > 0 ? $" {_later} left for later — the story has not opened that ground." : "")
                 + (_unknown.Count > 0 ? $" {_unknown.Count} more exist but no path recorded where." : "");
             _log(StatusLine);
+            return;
+        }
+
+        if (StopRequest is { Requested: true } stop)
+        {
+            if (stop.At(_world.InDuty, _world.InCombat, _world.IsOccupied, _world.UtcNow) == StopVerdict.Hold)
+            {
+                StatusLine = "Stopping between currents once the character is free, as another plugin asked.";
+                return;
+            }
+            Block($"Another plugin asked for a stop, with {_collected} of {Target} collected — Collect picks up the rest.");
             return;
         }
 

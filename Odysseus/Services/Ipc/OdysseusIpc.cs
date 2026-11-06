@@ -8,12 +8,21 @@ namespace Odysseus.Services.Ipc;
 /// What Odysseus publishes for other plugins.
 ///
 /// <para>
-/// <b><c>Odysseus.IsBusy</c></b> — true while a run is driving the character. Daedalus polls this
+/// <b><c>Odysseus.IsBusy</c></b> — true while a run or job of ours is driving the character, or will
+/// start without anyone asking (a society queued behind the one running). Daedalus polls this
 /// through its <c>AutomationBusyBridge</c> and holds its external-combat override for as long as
 /// it reads true, which is how quest mobs get killed: Odysseus owns movement and the quest,
 /// Daedalus owns the rotation, and this one boolean is the entire handshake. Same shape as the
 /// bridge's existing sources (<c>Theseus.IsBusy</c>, <c>Henchman.IsBusy</c>), so nothing new is
 /// involved on either side — Daedalus just needs the one bridge entry added.
+/// </para>
+///
+/// <para>
+/// <b><c>Odysseus.RequestStopAfterRun</c></b> — another plugin about to move the character (Argus,
+/// resending the FC's vessels) asks us to finish the step in hand and stop at the first point between
+/// steps where the character is free, starting nothing after it; then it waits for <c>IsBusy</c> to
+/// read false. True when busy and stopping; false, with nothing changed, when idle. See
+/// <see cref="Run.StopRequest"/>.
 /// </para>
 ///
 /// <para>
@@ -33,8 +42,10 @@ public sealed class OdysseusIpc : IDisposable
     public const string QuestStatusGate = "Odysseus.Quest.GetStatusJson";
     public const string AssistLeaseGate = "Odysseus.Assist.Lease";
     public const string AssistIsActiveGate = "Odysseus.Assist.IsActive";
+    public const string RequestStopAfterRunGate = "Odysseus.RequestStopAfterRun";
 
     private readonly ICallGateProvider<bool> _isBusy;
+    private readonly ICallGateProvider<bool>? _requestStopAfterRun;
     private readonly ICallGateProvider<uint, bool>? _questCanRun;
     private readonly ICallGateProvider<uint, bool>? _questStart;
     private readonly ICallGateProvider<object?>? _questStop;
@@ -56,8 +67,11 @@ public sealed class OdysseusIpc : IDisposable
     /// <c>Odysseus.Assist.Lease(caller, seconds)</c> takes or renews that caller's lease (capped at
     /// 300 s; 0 releases it), <c>Odysseus.Assist.IsActive()</c> says whether any is live. Null publishes none.
     /// </param>
+    /// <param name="requestStopAfterRun">
+    /// <c>Odysseus.RequestStopAfterRun()</c>: only sets state, on the framework thread. Null publishes none.
+    /// </param>
     public OdysseusIpc(IDalamudPluginInterface pluginInterface, Func<bool> isBusy, Quest.QuestGateway? quests = null,
-        Run.AssistLease? assist = null)
+        Run.AssistLease? assist = null, Func<bool>? requestStopAfterRun = null)
     {
         _isBusy = pluginInterface.GetIpcProvider<bool>(IsBusyGate);
         _isBusy.RegisterFunc(() =>
@@ -100,11 +114,18 @@ public sealed class OdysseusIpc : IDisposable
             _assistIsActive = pluginInterface.GetIpcProvider<bool>(AssistIsActiveGate);
             _assistIsActive.RegisterFunc(() => Guard(() => assist.IsActive(DateTime.UtcNow), false));
         }
+
+        if (requestStopAfterRun is not null)
+        {
+            _requestStopAfterRun = pluginInterface.GetIpcProvider<bool>(RequestStopAfterRunGate);
+            _requestStopAfterRun.RegisterFunc(() => Guard(requestStopAfterRun, false));
+        }
     }
 
     public void Dispose()
     {
         _isBusy.UnregisterFunc();
+        _requestStopAfterRun?.UnregisterFunc();
         _questCanRun?.UnregisterFunc();
         _questStart?.UnregisterFunc();
         _questStop?.UnregisterAction();
