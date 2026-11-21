@@ -635,6 +635,30 @@ public class DialogueTests
         Assert.Equal(1, w.Calls.Count(c => c.StartsWith("Log") && c.Contains("optional reward"))); // said once
     }
 
+    /// <summary>
+    /// A Winter's Dream: Complete pressable while a choice is outstanding. The pick comes first, or the
+    /// press only raises "Select a reward." and nothing is ever chosen.
+    /// </summary>
+    [Fact]
+    public void An_optional_reward_is_picked_before_complete_even_when_complete_is_pressable()
+    {
+        var w = new FakeStepWorld { RewardPick = "Gil × 500 — gil" };
+        w.Spawned.Add(7);
+        var ex = new StepExecutor(w);
+        var step = Interact(7);
+        step.Kind = StepKind.CompleteQuest;
+        ex.Begin(step, questId: 1);
+        Ticks(ex, w, 3);
+        w.IsOccupied = true;
+        w.VisibleAddons.Add("JournalResult");
+        Ticks(ex, w, 30);
+
+        var picked = w.Calls.IndexOf("PickReward");
+        var completed = w.Calls.IndexOf("CompleteReward");
+        Assert.True(picked >= 0 && completed > picked, string.Join(" | ", w.Calls));
+        Assert.Equal(StepStatus.Done, Run(ex, w));
+    }
+
     /// <summary>Complete greyed for a choice: the picker chooses, Complete goes through, the step is done.</summary>
     [Fact]
     public void Reward_window_needing_a_choice_is_picked_then_completed()

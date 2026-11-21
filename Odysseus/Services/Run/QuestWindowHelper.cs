@@ -15,6 +15,8 @@ public sealed class QuestWindowHelper
 
     private readonly IStepWorld _world;
     private DateTime _last;
+    /// <summary>A reward has been picked in the reward window now up; cleared once it closes.</summary>
+    private bool _picked;
 
     public QuestWindowHelper(IStepWorld world) => _world = world;
 
@@ -49,16 +51,21 @@ public sealed class QuestWindowHelper
 
         if (_world.IsAddonVisible("JournalResult"))
         {
-            // Complete first: greyed means an optional reward still needs choosing.
-            if (_world.CompleteQuestRewardWindow())
-                Status = $"completed a quest at {now.ToLocalTime():HH:mm:ss}";
-            else if (_world.PickBestReward() is { } picked)
+            // The choice first, once: Complete is not always greyed while one is outstanding, and
+            // pressing it then only raises "Select a reward." (A Winter's Dream).
+            if (!_picked && _world.PickBestReward() is { } picked)
+            {
+                _picked = true;
                 Status = $"picked {picked}";
+            }
+            else if (_world.CompleteQuestRewardWindow())
+                Status = $"completed a quest at {now.ToLocalTime():HH:mm:ss}";
             else
                 Status = "the reward window needs a choice — reward picking is off, or the window did not read as expected";
             return;
         }
 
+        _picked = false;
         if (!Status.StartsWith("accepted", StringComparison.Ordinal) && !Status.StartsWith("completed", StringComparison.Ordinal)
             && !Status.StartsWith("picked", StringComparison.Ordinal))
             Status = "waiting for a quest window";

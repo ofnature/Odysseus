@@ -4717,17 +4717,19 @@ public sealed class StepExecutor
             return;
 
         _rewardLastTry = now;
-        if (_world.CompleteQuestRewardWindow())
-        {
-            _rewardNeedsChoiceLogged = false;
-            return;
-        }
-        // Complete is greyed until an optional reward is chosen: choose one by the player's rules,
-        // and Complete goes through on the next try.
+        // An optional reward is chosen first, by the player's rules, and Complete pressed on the next
+        // try. Not the other way round: Complete is not always greyed while a choice is outstanding —
+        // A Winter's Dream (5475) left it pressable, the press only raised the game's "Select a reward."
+        // prompt, and every retry pressed it again with nothing ever picked.
         if (!_rewardPicked && _world.PickBestReward() is { } picked)
         {
             _rewardPicked = true;
             _world.Log($"Optional reward: {picked}.");
+            return;
+        }
+        if (_world.CompleteQuestRewardWindow())
+        {
+            _rewardNeedsChoiceLogged = false;
             return;
         }
         if (!_rewardNeedsChoiceLogged)
