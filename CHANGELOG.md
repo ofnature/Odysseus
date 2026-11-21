@@ -1,18 +1,21 @@
 # Changelog
 
 <!-- LATEST-START -->
-## v0.2.28 — unreleased
+## v0.2.28 — 2026-11-21
 
 ### For other plugins
 - `Odysseus.RequestStopAfterRun()`: another plugin about to move the character asks Odysseus to finish the step in hand and stop at the first point between steps where the character is free — out of any duty and out of combat, no dialogue, cutscene or menu up — starting nothing after it and resuming nothing by itself. True when busy and stopping, false (and nothing changed) when idle. Argus uses it before travelling to resend the Free Company's vessels
 - `Odysseus.IsBusy` now covers everything Odysseus drives, not just a quest run: a society's walk to the issuer and its accepting, a delivery, collecting currents, attuning, scrip spending, a chest fetch, and a society queued to start next
 
+### Journal
+- A category that mixes several quest lines splits into them, by the game's own line names: Records of Unusual Endeavors now shows Variant Dungeons, Island Sanctuary Quests, The Occult Crescent and the rest each together instead of interleaved. The same goes for Weapon Enhancement, Hildibrand, Seasonal Events, the regional sidequests and each allied society's main and daily quests. Crafter, gatherer and job categories still split by class
+
+<!-- LATEST-END -->
+
 ## v0.2.27 — 2026-11-01
 
 ### Journal
 - A Eureka Quests heading: And We Shall Call It Eureka moves there from Sidequests, and And We Shall Call It Pyros, Hydatos and Pagos from Uncategorised — the game gives those three no journal group at all
-
-<!-- LATEST-END -->
 
 ## v0.2.26 — 2026-11-01
 
