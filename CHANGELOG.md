@@ -1,6 +1,13 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.29 — 2026-11-21
+
+### Quests
+- A quest's optional reward is picked before Complete is pressed, not only when Complete is greyed: A Winter's Dream leaves Complete pressable with a choice outstanding, so the press only raised the game's "Select a reward." prompt, again and again, and the step faulted with nothing picked
+
+<!-- LATEST-END -->
+
 ## v0.2.28 — 2026-11-21
 
 ### For other plugins
@@ -9,8 +16,6 @@
 
 ### Journal
 - A category that mixes several quest lines splits into them, by the game's own line names: Records of Unusual Endeavors now shows Variant Dungeons, Island Sanctuary Quests, The Occult Crescent and the rest each together instead of interleaved. The same goes for Weapon Enhancement, Hildibrand, Seasonal Events, the regional sidequests and each allied society's main and daily quests. Crafter, gatherer and job categories still split by class
-
-<!-- LATEST-END -->
 
 ## v0.2.27 — 2026-11-01
 
