@@ -57,6 +57,13 @@ public sealed record QuestListing(ushort QuestId, string Name, ushort ClassJobLe
     public string Category { get; init; } = string.Empty;
 
     /// <summary>
+    /// The line within the category (the journal genre) — "Variant Dungeons", "Island Sanctuary
+    /// Quests". Records of Unusual Endeavors is one category of a dozen interleaved lines; this is what
+    /// splits it back apart.
+    /// </summary>
+    public string Genre { get; init; } = string.Empty;
+
+    /// <summary>
     /// The class the quest belongs to, when it belongs to exactly one — "Carpenter", "Miner".
     /// The journal lumps every crafter into one category of 126 quests, which is unreadable; this
     /// is what splits it back apart.
@@ -148,12 +155,14 @@ public sealed class QuestCatalog
                 var isMsq = false;
                 var sectionName = string.Empty;
                 var categoryName = string.Empty;
+                var genreName = string.Empty;
                 if (row.JournalGenre.ValueNullable is { } genre
                     && genre.JournalCategory.ValueNullable is { } category
                     && category.JournalSection.ValueNullable is { } section)
                 {
                     sectionName = section.Name.ExtractText();
                     categoryName = category.Name.ExtractText();
+                    genreName = genre.Name.ExtractText();
                     isMsq = section.RowId <= LastMainScenarioSection
                             || sectionName.Contains("Main Scenario", StringComparison.OrdinalIgnoreCase);
                 }
@@ -176,6 +185,7 @@ public sealed class QuestCatalog
                 {
                     Section = sectionName,
                     Category = categoryName,
+                    Genre = genreName,
                     JobName = JobOf(row, jobNames),
                     ClassCategoryId = row.ClassJobCategory0.RowId,
                 });

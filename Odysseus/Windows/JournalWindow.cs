@@ -180,17 +180,22 @@ public sealed class JournalWindow : OdysseusWindow
             // says nothing. Known before the header is drawn, because the bill belongs on whichever
             // row is the line: the job's when there is one, the category's when there is not.
             var jobs = rows.Select(q => q.JobName).Where(j => j.Length > 0).Distinct().ToList();
+            // Failing a class split, the journal's own lines: Records of Unusual Endeavors holds Variant
+            // Dungeons, Island Sanctuary, the Occult Crescent and more, interleaved. Same rule — split
+            // only when the category holds more than one.
+            Func<QuestListing, string> lineOf = jobs.Count > 1 ? q => q.JobName : q => q.Genre;
+            var lines = rows.Select(lineOf).Where(l => l.Length > 0).Distinct().Count();
 
             ImGui.SetNextItemOpen(_search.Length > 0, ImGuiCond.FirstUseEver);
             var categoryOpen = ImGui.TreeNode($"{category.Key}  ({rows.Count})##c{name}{category.Key}");
             QueueAllButton($"cat{name}{category.Key}", category.Key, rows);
-            if (jobs.Count <= 1)
+            if (lines <= 1)
                 MaterialsButton($"cat{name}{category.Key}", category.Key, rows);
             if (!categoryOpen) continue;
 
-            if (jobs.Count > 1)
+            if (lines > 1)
             {
-                foreach (var job in rows.GroupBy(q => q.JobName).OrderBy(g => g.Key.Length == 0).ThenBy(g => g.Key))
+                foreach (var job in rows.GroupBy(lineOf).OrderBy(g => g.Key.Length == 0).ThenBy(g => g.Key))
                 {
                     var label = job.Key.Length > 0 ? job.Key : "Other";
                     var line = job.ToList();
