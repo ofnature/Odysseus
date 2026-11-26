@@ -105,7 +105,11 @@ public sealed unsafe class GameDeliveryWorld : IDeliveryWorld
             var agent = FFXIVClientStructs.FFXIV.Client.UI.Agent.AgentSatisfactionSupply.Instance();
             if (agent == null || !agent->IsAgentActive()) return false;
             var info = agent->NpcInfo;
-            return info.Valid && info.Initialized && info.Id == client.Index;
+            if (!info.Valid || !info.Initialized || info.Id != client.Index) return false;
+            // The agent wakes before its window is built; a route picked then reaches the client's
+            // script while it is still opening the window.
+            var addon = FFXIVClientStructs.FFXIV.Client.UI.RaptureAtkUnitManager.Instance()->GetAddonByName("SatisfactionSupply");
+            return addon != null && addon->IsVisible && addon->IsReady;
         }
         catch
         {

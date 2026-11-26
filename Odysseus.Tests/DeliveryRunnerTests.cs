@@ -781,7 +781,9 @@ public class DeliveryRunnerTests
         for (var i = 0; i < 10 && _runner.State != DeliveryRunState.TurnIn; i++) _runner.Tick();
         Assert.Equal(DeliveryRunState.TurnIn, _runner.State);
 
-        _runner.Tick();                          // opens the route
+        _runner.Tick();                          // the window settles...
+        _world.UtcNow = _world.UtcNow.AddSeconds(1);
+        _runner.Tick();                          // ...then the route is opened
         _game.SupplyOpen = false;                // ...and the supply window goes away
         _world.UtcNow = _world.UtcNow.AddSeconds(2);
         _runner.Tick();
@@ -789,6 +791,37 @@ public class DeliveryRunnerTests
         Assert.NotEqual(DeliveryRunState.Faulted, _runner.State);
         Assert.Equal(1, _game.Committed);
         Assert.Equal(DeliveryRunState.Done, _runner.State);
+    }
+
+    /// <summary>
+    /// Kai-Shirr crashed the game while his window was opening: his menu answered on every frame it
+    /// stayed visible, and the route picked the frame the window registered.
+    /// </summary>
+    [Fact]
+    public void The_menu_is_answered_once_and_the_route_waits_for_the_window_to_settle()
+    {
+        _game.Bag[ItemId] = 6;
+        _game.SupplyOpen = false;
+        Assert.True(_runner.Start(Zhloe, limit: 1));
+        for (var i = 0; i < 10 && _runner.State != DeliveryRunState.Interact; i++) _runner.Tick();
+        Assert.Equal(DeliveryRunState.Interact, _runner.State);
+
+        _world.VisibleAddons.Add("SelectString");
+        for (var i = 0; i < 5; i++) { _runner.Tick(); _world.UtcNow = _world.UtcNow.AddSeconds(0.1); }
+        Assert.Single(_world.Calls, c => c == "Select 0");
+
+        _world.VisibleAddons.Remove("SelectString");
+        _game.SupplyOpen = true;
+        _runner.Tick();                          // into the turn-in
+        Assert.Equal(DeliveryRunState.TurnIn, _runner.State);
+        _runner.Tick();                          // the window has only just come up
+        Assert.False(_game.TradeOpen);
+        _world.UtcNow = _world.UtcNow.AddSeconds(0.2);
+        _runner.Tick();
+        Assert.False(_game.TradeOpen);
+        _world.UtcNow = _world.UtcNow.AddSeconds(0.5);
+        _runner.Tick();
+        Assert.True(_game.TradeOpen);
     }
 
     [Fact]

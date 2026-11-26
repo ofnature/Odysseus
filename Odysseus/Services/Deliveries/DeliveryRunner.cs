@@ -96,6 +96,17 @@ public sealed class DeliveryRunner
     private static readonly TimeSpan CraftStall = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan ReinteractGap = TimeSpan.FromSeconds(3);
     private static readonly TimeSpan TurnInGap = TimeSpan.FromSeconds(1);
+    /// <summary>
+    /// The client's menu is answered once, then left alone while it closes. Answering it every frame
+    /// it stayed visible handed the client's script the same choice two or three times, and an extra
+    /// resume landing after the script had moved on crashed the game (Kai-Shirr, 2026-11-26).
+    /// </summary>
+    private static readonly TimeSpan MenuGap = TimeSpan.FromSeconds(1);
+    /// <summary>
+    /// The supply window must have been up this long before a route is picked. Picking on the first
+    /// frame the agent woke reached the client's script while it was still opening the window.
+    /// </summary>
+    private static readonly TimeSpan SupplySettle = TimeSpan.FromSeconds(0.5);
     private static readonly TimeSpan ShopGap = TimeSpan.FromSeconds(1);
     private static readonly TimeSpan ShopStall = TimeSpan.FromSeconds(30);
     /// <summary>How long GatherBuddy may sit idle before we take it as stuck. Timed nodes are slow.</summary>
@@ -123,6 +134,7 @@ public sealed class DeliveryRunner
     private DeliveryRequest? _request;
     private DateTime _phaseStart;
     private DateTime _lastAction;
+    private DateTime _supplySince;
     private int _delivered;
     private bool _rankCapped;
     private int _target;
@@ -607,7 +619,11 @@ public sealed class DeliveryRunner
         }
 
         StatusLine = $"{client.Name}: opening the delivery window";
-        if (_world.IsAddonVisible("SelectString")) { _world.SelectStringIndex(0); Bump(); return; }
+        if (_world.IsAddonVisible("SelectString"))
+        {
+            if (_world.UtcNow - _lastAction >= MenuGap) { _world.SelectStringIndex(0); Bump(); }
+            return;
+        }
         if (_world.IsOccupied) return; // mid-conversation
 
         if (_world.UtcNow - _lastAction > ReinteractGap)
@@ -671,10 +687,14 @@ public sealed class DeliveryRunner
 
         if (_game.IsSupplyOpen(client))
         {
+            if (_supplySince == default) _supplySince = _world.UtcNow;
+            if (_world.UtcNow - _supplySince < SupplySettle) return;
             _game.OpenRoute(_route);
             _lastAction = _world.UtcNow;
+            _supplySince = default;
             return;
         }
+        _supplySince = default;
 
         // Neither window is up. That is normal for a beat — mid-transition, or the client closed
         // both after a hand-over — so go back and talk again rather than calling it a failure, and
@@ -712,6 +732,7 @@ public sealed class DeliveryRunner
         State = state;
         _phaseStart = _world.UtcNow;
         _lastAction = default;
+        _supplySince = default;
     }
 
     /// <summary>A deliberate stop — not an error. The reason is meant to be shown to the player.</summary>
