@@ -1,12 +1,17 @@
 # Changelog
 
 <!-- LATEST-START -->
+## v0.2.30 — 2026-11-26
+
+### Deliveries
+- A game crash while a client's delivery window was opening (seen at Kai-Shirr) is addressed: the client's menu is answered once instead of on every frame it stays up, and the route is picked only once the delivery window is drawn and has settled, not the moment the game starts opening it
+
+<!-- LATEST-END -->
+
 ## v0.2.29 — 2026-11-21
 
 ### Quests
 - A quest's optional reward is picked before Complete is pressed, not only when Complete is greyed: A Winter's Dream leaves Complete pressable with a choice outstanding, so the press only raised the game's "Select a reward." prompt, again and again, and the step faulted with nothing picked
-
-<!-- LATEST-END -->
 
 ## v0.2.28 — 2026-11-21
 
